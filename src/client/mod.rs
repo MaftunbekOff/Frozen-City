@@ -10,28 +10,21 @@ use frozen_city::game::types::{
 };
 use frozen_city::net::client::ClientConn;
 use frozen_city::net::protocol::ClientMsg;
+#[cfg(not(target_arch = "wasm32"))]
 use frozen_city::net::server::ServerHandle;
 
 pub mod input;
+#[cfg(target_arch = "wasm32")]
+pub mod local_server;
 pub mod menu;
 pub mod net_sync;
 pub mod render;
 pub mod ui;
 
-pub const TILE: f32 = 32.0;
+/// One grid tile = one 3D world unit. The map lies on the XZ plane
+/// (sim grid y -> world Z), +Y is up, the furnace center is the origin.
+pub const TILE: f32 = 1.0;
 pub const DEFAULT_PORT: u16 = 4595;
-
-// Z layers.
-pub const Z_TERRAIN: f32 = 0.0;
-pub const Z_HEAT: f32 = 1.0;
-pub const Z_RING: f32 = 1.8;
-pub const Z_BUILDING: f32 = 2.0;
-pub const Z_SURVIVOR: f32 = 3.0;
-pub const Z_FIRE: f32 = 3.5;
-pub const Z_NIGHT: f32 = 8.0;
-pub const Z_SNOW: f32 = 8.4;
-pub const Z_GHOST: f32 = 8.6;
-pub const Z_CURSOR: f32 = 8.8;
 
 #[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Screen {
@@ -44,6 +37,8 @@ pub enum Screen {
 pub struct Settings {
     pub name: String,
     pub join_addr: String,
+    /// Unused in the browser: pages cannot listen for connections.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub host_port: u16,
     pub seed: Option<u64>,
     pub win_days: u32,
@@ -76,8 +71,15 @@ impl NetConn {
     }
 }
 
+/// The locally owned authoritative world, when this client is also the host:
+/// a handle to the server threads on native, the inline sim on wasm.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Resource, Default)]
 pub struct ServerRes(pub Option<ServerHandle>);
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Resource, Default)]
+pub struct ServerRes(pub Option<local_server::LocalServer>);
 
 /// Client-side mirror of the latest authoritative snapshot.
 #[derive(Resource, Default)]
@@ -111,24 +113,27 @@ pub struct Selection(pub Option<u32>);
 #[derive(Resource, Default)]
 pub struct UiHover(pub bool);
 
-pub fn tile_center_world(x: u8, y: u8) -> Vec2 {
-    Vec2::new(
+/// Center of a tile on the ground plane.
+pub fn tile_center_world(x: u8, y: u8) -> Vec3 {
+    Vec3::new(
         (x as f32 + 0.5 - MAP_W as f32 / 2.0) * TILE,
+        0.0,
         (y as f32 + 0.5 - MAP_H as f32 / 2.0) * TILE,
     )
 }
 
-pub fn building_center_world(b: &Building) -> Vec2 {
+pub fn building_center_world(b: &Building) -> Vec3 {
     let (w, h) = b.kind.size();
-    Vec2::new(
+    Vec3::new(
         (b.x as f32 + w as f32 / 2.0 - MAP_W as f32 / 2.0) * TILE,
+        0.0,
         (b.y as f32 + h as f32 / 2.0 - MAP_H as f32 / 2.0) * TILE,
     )
 }
 
-pub fn world_to_tile(p: Vec2) -> Option<(u8, u8)> {
+pub fn world_to_tile(p: Vec3) -> Option<(u8, u8)> {
     let tx = (p.x / TILE + MAP_W as f32 / 2.0).floor();
-    let ty = (p.y / TILE + MAP_H as f32 / 2.0).floor();
+    let ty = (p.z / TILE + MAP_H as f32 / 2.0).floor();
     if tx >= 0.0 && ty >= 0.0 && tx < MAP_W as f32 && ty < MAP_H as f32 {
         Some((tx as u8, ty as u8))
     } else {
@@ -136,14 +141,16 @@ pub fn world_to_tile(p: Vec2) -> Option<(u8, u8)> {
     }
 }
 
-/// World position -> fractional tile coordinates (for cursor sharing).
-pub fn world_to_tilef(p: Vec2) -> (f32, f32) {
-    (p.x / TILE + MAP_W as f32 / 2.0, p.y / TILE + MAP_H as f32 / 2.0)
+/// Ground position -> fractional tile coordinates (for cursor sharing —
+/// the wire format is unchanged from the 2D renderer).
+pub fn world_to_tilef(p: Vec3) -> (f32, f32) {
+    (p.x / TILE + MAP_W as f32 / 2.0, p.z / TILE + MAP_H as f32 / 2.0)
 }
 
-pub fn tilef_to_world(t: (f32, f32)) -> Vec2 {
-    Vec2::new(
+pub fn tilef_to_world(t: (f32, f32)) -> Vec3 {
+    Vec3::new(
         (t.0 - MAP_W as f32 / 2.0) * TILE,
+        0.0,
         (t.1 - MAP_H as f32 / 2.0) * TILE,
     )
 }
@@ -199,6 +206,7 @@ pub struct ClientPlugin;
 impl Plugin for ClientPlugin {
     fn build(&self, app: &mut App) {
         app.init_state::<Screen>()
+            .init_resource::<input::CamRig>()
             .init_resource::<NetConn>()
             .init_resource::<ServerRes>()
             .init_resource::<GameView>()
@@ -240,9 +248,11 @@ impl Plugin for ClientPlugin {
             .add_systems(
                 Update,
                 (
+                    render::animate_environment,
                     render::animate_effects,
                     render::animate_survivors,
                     render::sync_player_cursors,
+                    render::update_cursor_labels,
                     render::snow_fall,
                 )
                     .run_if(in_state(Screen::Game)),
@@ -275,6 +285,8 @@ impl Plugin for ClientPlugin {
                     .run_if(in_state(Screen::Game)),
             )
             .add_systems(Update, smoke_exit);
+        #[cfg(target_arch = "wasm32")]
+        app.add_plugins(local_server::plugin);
     }
 }
 
@@ -292,8 +304,13 @@ fn teardown_game(
     mut cursors: ResMut<render::CursorViz>,
 ) {
     net.0 = None;
+    #[cfg(not(target_arch = "wasm32"))]
     if let Some(h) = server.0.take() {
         h.stop();
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        server.0 = None;
     }
     // Keep the version counters monotonic across sessions so per-system
     // `Local` caches from a previous game can never collide with fresh values.
