@@ -11,6 +11,11 @@ use crate::game::types::{GameState, PlayerCommand};
 /// Hard cap on a single frame; a full snapshot is ~40 KB, so this is generous.
 pub const MAX_FRAME: u32 = 8 * 1024 * 1024;
 
+/// How often full tile data rides along with the snapshot (every Nth tick).
+/// Part of the protocol contract: every server implementation (threaded native
+/// server, in-browser local sim) follows the same cadence.
+pub const TILES_EVERY_N_TICKS: u64 = 5;
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum ClientMsg {
     /// Must be the first message on every connection.

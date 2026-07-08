@@ -9,14 +9,11 @@
 
 mod client;
 
-use std::sync::atomic::Ordering;
-
 use bevy::prelude::*;
 use bevy::window::{PresentMode, Window, WindowPlugin};
 
 use client::{AutoAction, AutoStart, ClientPlugin, Settings, DEFAULT_PORT};
 use frozen_city::game::types::DEFAULT_WIN_DAYS;
-use frozen_city::net::server::{self, ServerConfig};
 
 struct Cli {
     mode: Mode,
@@ -129,8 +126,12 @@ fn whoami_default() -> String {
 }
 
 fn main() {
-    let cli = parse_cli();
+    #[allow(unused_mut)]
+    let mut cli = parse_cli();
+    #[cfg(target_arch = "wasm32")]
+    apply_web_overrides(&mut cli);
 
+    #[cfg(not(target_arch = "wasm32"))]
     if cli.mode == Mode::Dedicated {
         run_dedicated(&cli);
         return;
@@ -150,6 +151,8 @@ fn main() {
                 title: "Frozen City".to_string(),
                 resolution: (1280, 720).into(),
                 present_mode: PresentMode::AutoVsync,
+                // On the web, fill the browser window (no-op on native).
+                fit_canvas_to_parent: true,
                 ..default()
             }),
             ..default()
@@ -167,7 +170,10 @@ fn main() {
         .run();
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn run_dedicated(cli: &Cli) {
+    use frozen_city::net::server::{self, ServerConfig};
+
     let seed = cli.seed.unwrap_or_else(|| {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -191,7 +197,51 @@ fn run_dedicated(cli: &Cli) {
         "Frozen City dedicated server listening on port {} (Ctrl+C to stop)",
         cli.host_port
     );
-    while !handle.shutdown.load(Ordering::SeqCst) {
+    println!("Browsers can play at http://<this-host>:{}/", cli.host_port);
+    while !handle.shutdown.load(std::sync::atomic::Ordering::SeqCst) {
         std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+}
+
+/// In the browser, read settings from the page URL instead of a CLI:
+/// `?name=Aziz&server=ws://host:4595&seed=7&days=12&join` (bare `join`
+/// connects immediately). The default server is the page's own host.
+#[cfg(target_arch = "wasm32")]
+fn apply_web_overrides(cli: &mut Cli) {
+    let Some(win) = web_sys::window() else { return };
+    let location = win.location();
+    if let Ok(host) = location.host() {
+        if !host.is_empty() {
+            let scheme = match location.protocol().ok().as_deref() {
+                Some("https:") => "wss",
+                _ => "ws",
+            };
+            // The /ws path lets a reverse proxy route game traffic to the
+            // server while serving the static files itself; the game server
+            // accepts an upgrade on any path.
+            cli.join_addr = format!("{scheme}://{host}/ws");
+        }
+    }
+    let Ok(search) = location.search() else { return };
+    for pair in search.trim_start_matches('?').split('&') {
+        let mut it = pair.splitn(2, '=');
+        let key = it.next().unwrap_or("");
+        let val = it.next().unwrap_or("").replace('+', " ");
+        match key {
+            "server" if !val.is_empty() => cli.join_addr = val,
+            "name" if !val.is_empty() => cli.name = val,
+            "seed" => {
+                if let Ok(s) = val.parse() {
+                    cli.seed = Some(s);
+                }
+            }
+            "days" => {
+                if let Ok(d) = val.parse::<u32>() {
+                    cli.win_days = d.max(1);
+                }
+            }
+            "join" => cli.mode = Mode::Join,
+            _ => {}
+        }
     }
 }

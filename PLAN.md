@@ -124,6 +124,10 @@ to'q bo'lsa tiklanadi. Har 1–2 kunda yangi omon qolganlar keladi (sig'im bo'ls
 5. **M4 — UI:** HUD, panellar, menyu, game-over. ✅
 6. **M5 — Sayqal:** qor, kecha-kunduz, issiqlik glow, kursorlar. ✅
 7. **M6 — Sifat:** unit + e2e testlar, multi-agent kod-tekshiruv, README. ✅
+8. **M7 — Web (F1):** WebSocket transport (bitta portda TCP+WS+HTTP), wasm build,
+   brauzerda inline-sim singleplayer, URL parametrlari, build-web.sh. ✅
+   Keyingisi: F2 akkauntlar+persistensiya, F3 ko'p region — bitta olam
+   (gateway, delta-snapshot, interest management), F4 mobil (touch).
 
 ## 8. Sinov strategiyasi
 

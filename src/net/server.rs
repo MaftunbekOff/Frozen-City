@@ -1,23 +1,34 @@
 //! Authoritative game server. Runs the simulation on its own thread at a fixed
-//! 5 Hz tick, accepts TCP clients, and hands the local (in-process) player a
-//! plain channel pair — one unified code path for singleplayer, host and join.
+//! 5 Hz tick and hands the local (in-process) player a plain channel pair —
+//! one unified code path for singleplayer, host and join.
+//!
+//! A single TCP port speaks three protocols, told apart by the first bytes of
+//! each connection: the native length-prefixed frame protocol, browser
+//! WebSockets ("GET " + `Upgrade: websocket`), and plain HTTP GET for the
+//! static web build (index.html + wasm) so a dedicated server is also the web
+//! host.
 
 use std::collections::HashMap;
-use std::io;
+use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::game::types::{PlayerCommand, TICK_MS};
-use crate::game::sim;
-use crate::net::client::ClientConn;
-use crate::net::protocol::{read_frame, write_frame, ClientMsg, ServerMsg};
+use tungstenite::Message;
 
-/// How often full tile data rides along with the snapshot (every Nth tick).
-const TILES_EVERY_N_TICKS: u64 = 5;
+use crate::game::sim;
+use crate::game::types::{GamePhase, PlayerCommand, TICK_MS};
+use crate::net::client::ClientConn;
+use crate::net::protocol::{
+    read_frame, write_frame, ClientMsg, ServerMsg, TILES_EVERY_N_TICKS,
+};
+
+/// Directory the built-in HTTP server serves the web build from.
+const WEB_ROOT: &str = "web";
 
 pub struct ServerConfig {
     /// Bind a TCP listener on this port; `None` = local-only (singleplayer).
@@ -29,6 +40,10 @@ pub struct ServerConfig {
     /// Print events and day changes to stdout (dedicated server mode).
     pub verbose: bool,
 }
+
+/// On a persistent server, a finished world (won or lost) restarts with a
+/// fresh map after this long, keeping the connected players.
+const WORLD_RESET_AFTER: Duration = Duration::from_secs(45);
 
 pub enum ToServer {
     Join {
@@ -118,7 +133,7 @@ pub fn connect_local(handle: &ServerHandle, name: String) -> ClientConn {
             let _ = to_server.send(ToServer::Leave { client: id });
         })
         .expect("spawn local pump");
-    ClientConn {
+    ClientConn::Channels {
         tx: in_tx,
         rx: out_rx,
     }
@@ -145,34 +160,54 @@ fn accept_loop(listener: TcpListener, to_server: Sender<ToServer>, shutdown: Arc
     }
 }
 
-fn handle_socket(mut stream: TcpStream, to_server: Sender<ToServer>) {
+fn handle_socket(stream: TcpStream, to_server: Sender<ToServer>) {
     // Sockets accepted from a non-blocking listener inherit non-blocking mode
-    // on Windows; all reads below expect a blocking socket.
+    // on Windows; everything below expects a blocking socket.
     if stream.set_nonblocking(false).is_err() {
         return;
     }
     let _ = stream.set_nodelay(true);
-    // The very first frame must be Hello; give the client 10 s for it.
+    // Give the client 10 s to reveal which protocol it speaks.
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+    let Some(probe) = peek4(&stream) else { return };
+    if &probe == b"GET " {
+        handle_http(stream, to_server);
+    } else {
+        handle_native(stream, to_server);
+    }
+}
+
+/// Peek the first 4 bytes without consuming them.
+fn peek4(stream: &TcpStream) -> Option<[u8; 4]> {
+    let mut buf = [0u8; 4];
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match stream.peek(&mut buf) {
+            Ok(n) if n >= 4 => return Some(buf),
+            Ok(0) => return None,
+            Ok(_) => {
+                if Instant::now() > deadline {
+                    return None;
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err(_) => return None,
+        }
+    }
+}
+
+/// The native desktop protocol: length-prefixed bincode frames.
+fn handle_native(mut stream: TcpStream, to_server: Sender<ToServer>) {
+    // The very first frame must be Hello (the 10 s timeout is already set).
     let name = match read_frame::<_, ClientMsg>(&mut stream) {
         Ok(ClientMsg::Hello { name }) => sanitize_name(&name),
         _ => return,
     };
     let _ = stream.set_read_timeout(None);
 
-    let (out_tx, out_rx) = channel::<ServerMsg>();
-    let (id_tx, id_rx) = channel::<u64>();
-    if to_server
-        .send(ToServer::Join {
-            name,
-            out: out_tx,
-            id_back: id_tx,
-        })
-        .is_err()
-    {
+    let Some((id, out_rx)) = join(&to_server, name) else {
         return;
-    }
-    let Ok(id) = id_rx.recv() else { return };
+    };
 
     // Writer thread: serialize server messages onto the socket. When the
     // server drops this client's sender, shut the socket down so the blocking
@@ -209,6 +244,197 @@ fn handle_socket(mut stream: TcpStream, to_server: Sender<ToServer>) {
     let _ = to_server.send(ToServer::Leave { client: id });
 }
 
+/// Register with the sim thread; returns the client id and snapshot receiver.
+fn join(to_server: &Sender<ToServer>, name: String) -> Option<(u64, Receiver<ServerMsg>)> {
+    let (out_tx, out_rx) = channel::<ServerMsg>();
+    let (id_tx, id_rx) = channel::<u64>();
+    to_server
+        .send(ToServer::Join {
+            name,
+            out: out_tx,
+            id_back: id_tx,
+        })
+        .ok()?;
+    let id = id_rx.recv().ok()?;
+    Some((id, out_rx))
+}
+
+/// A browser said "GET ": read the request head, then either upgrade to a
+/// WebSocket or serve the static web build.
+fn handle_http(mut stream: TcpStream, to_server: Sender<ToServer>) {
+    // Read byte-by-byte so nothing past the head is consumed (the bytes that
+    // follow the upgrade response are WebSocket frames).
+    let mut head = Vec::with_capacity(512);
+    let mut byte = [0u8; 1];
+    while !head.ends_with(b"\r\n\r\n") && head.len() < 8192 {
+        match stream.read(&mut byte) {
+            Ok(1) => head.push(byte[0]),
+            _ => return,
+        }
+    }
+    let text = String::from_utf8_lossy(&head).to_string();
+    let path = text
+        .lines()
+        .next()
+        .and_then(|l| l.split_whitespace().nth(1))
+        .unwrap_or("/")
+        .to_string();
+    let is_upgrade = text.to_ascii_lowercase().contains("upgrade: websocket");
+    if is_upgrade {
+        serve_websocket(stream, head, to_server);
+    } else {
+        serve_static(stream, &path);
+    }
+}
+
+/// Feeds the already-consumed request head back to tungstenite, then the live
+/// socket. Lets the sniffing above coexist with tungstenite's handshake.
+struct PrefixedStream {
+    prefix: Vec<u8>,
+    pos: usize,
+    inner: TcpStream,
+}
+
+impl Read for PrefixedStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.pos < self.prefix.len() {
+            let n = (self.prefix.len() - self.pos).min(buf.len());
+            buf[..n].copy_from_slice(&self.prefix[self.pos..self.pos + n]);
+            self.pos += n;
+            return Ok(n);
+        }
+        self.inner.read(buf)
+    }
+}
+
+impl Write for PrefixedStream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.inner.write(buf)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+/// WebSocket clients get a single service thread (this one): reads use a
+/// short timeout so queued snapshots can be written between frames.
+fn serve_websocket(stream: TcpStream, head: Vec<u8>, to_server: Sender<ToServer>) {
+    let prefixed = PrefixedStream {
+        prefix: head,
+        pos: 0,
+        inner: stream,
+    };
+    let Ok(mut ws) = tungstenite::accept(prefixed) else {
+        return;
+    };
+
+    // First frame must be Hello (still under the 10 s read timeout).
+    let name = loop {
+        match ws.read() {
+            Ok(Message::Binary(b)) => match bincode::deserialize::<ClientMsg>(&b) {
+                Ok(ClientMsg::Hello { name }) => break sanitize_name(&name),
+                _ => return,
+            },
+            Ok(Message::Ping(_) | Message::Pong(_)) => continue,
+            _ => return,
+        }
+    };
+
+    let Some((id, out_rx)) = join(&to_server, name) else {
+        return;
+    };
+    let _ = ws
+        .get_mut()
+        .inner
+        .set_read_timeout(Some(Duration::from_millis(20)));
+
+    'session: loop {
+        match ws.read() {
+            Ok(Message::Binary(b)) => {
+                if let Ok(msg) = bincode::deserialize::<ClientMsg>(&b) {
+                    if to_server.send(ToServer::Msg { client: id, msg }).is_err() {
+                        break 'session;
+                    }
+                }
+            }
+            Ok(Message::Close(_)) => break 'session,
+            Ok(_) => {}
+            Err(tungstenite::Error::Io(e))
+                if e.kind() == io::ErrorKind::WouldBlock
+                    || e.kind() == io::ErrorKind::TimedOut => {}
+            Err(_) => break 'session,
+        }
+        loop {
+            match out_rx.try_recv() {
+                Ok(msg) => {
+                    let Ok(bytes) = bincode::serialize(&msg) else {
+                        break 'session;
+                    };
+                    if ws.send(Message::Binary(bytes.into())).is_err() {
+                        break 'session;
+                    }
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => break 'session,
+            }
+        }
+    }
+    let _ = ws.close(None);
+    let _ = to_server.send(ToServer::Leave { client: id });
+}
+
+/// Minimal static file server for the web build (`web/` next to the binary).
+fn serve_static(mut stream: TcpStream, path: &str) {
+    let rel = path.split('?').next().unwrap_or("/");
+    let rel = if rel == "/" { "/index.html" } else { rel };
+    let candidate = PathBuf::from(WEB_ROOT).join(rel.trim_start_matches('/'));
+    // No path traversal: every component must be a plain name (no "..", no
+    // roots), which keeps the resolved path inside WEB_ROOT.
+    let safe = candidate
+        .components()
+        .all(|c| matches!(c, Component::Normal(_)));
+    let body = if safe {
+        std::fs::read(&candidate).ok()
+    } else {
+        None
+    };
+    let response = match body {
+        Some(body) => {
+            let mime = content_type(&candidate);
+            let mut r = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            )
+            .into_bytes();
+            r.extend_from_slice(&body);
+            r
+        }
+        None => {
+            let msg = "Frozen City server. Web build not found — run build-web.sh first.";
+            format!(
+                "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{msg}",
+                msg.len()
+            )
+            .into_bytes()
+        }
+    };
+    let _ = stream.write_all(&response);
+    let _ = stream.flush();
+    let _ = stream.shutdown(Shutdown::Both);
+}
+
+fn content_type(path: &Path) -> &'static str {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("html") => "text/html; charset=utf-8",
+        Some("js") => "application/javascript",
+        Some("wasm") => "application/wasm",
+        Some("css") => "text/css",
+        Some("png") => "image/png",
+        Some("ico") => "image/x-icon",
+        _ => "application/octet-stream",
+    }
+}
+
 fn sanitize_name(name: &str) -> String {
     let cleaned: String = name.chars().filter(|c| !c.is_control()).take(24).collect();
     if cleaned.trim().is_empty() {
@@ -225,6 +451,7 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
     let mut pending: Vec<(u64, PlayerCommand)> = Vec::new();
     let mut ever_joined = false;
     let mut printed_events: u64 = 0;
+    let mut game_over_since: Option<Instant> = None;
 
     let tick_dur = Duration::from_millis(TICK_MS);
     let mut next_tick = Instant::now() + tick_dur;
@@ -270,8 +497,8 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
                         }
                     }
                 }
-                Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => break 'outer,
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => break 'outer,
             }
         }
 
@@ -289,6 +516,31 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
                 sim::apply_command(&mut state, pid, &cmd);
             }
             sim::tick(&mut state);
+
+            // A dead (or victorious) persistent world starts over, so the
+            // public server never sits in a game-over screen for hours.
+            if config.persistent {
+                if state.phase == GamePhase::Running {
+                    game_over_since = None;
+                } else {
+                    let since = *game_over_since.get_or_insert(now);
+                    if now.duration_since(since) >= WORLD_RESET_AFTER {
+                        game_over_since = None;
+                        let seed = state.rng ^ 0xA5A5_5A5A_D00D_FEED ^ state.tick;
+                        let players = state.players.clone();
+                        state = sim::new_game(seed, config.win_days);
+                        state.players = players;
+                        printed_events = 0;
+                        sim::push_event(
+                            &mut state,
+                            "A new expedition arrives - the city rises again.",
+                        );
+                        if config.verbose {
+                            println!("[server] world reset (seed {seed})");
+                        }
+                    }
+                }
+            }
 
             if config.verbose {
                 if state.day() != day_before {

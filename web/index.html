@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Frozen City</title>
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #090e18; }
+  #loading {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px;
+    color: #b8d0e8; font-family: system-ui, sans-serif; z-index: 0;
+  }
+  #loading h1 { font-size: 42px; letter-spacing: 6px; margin: 0; color: #b8dcff; }
+  #loading p { color: #6d7f95; margin: 0; }
+  canvas { position: relative; z-index: 1; display: block; width: 100%; height: 100%; outline: none; }
+</style>
+</head>
+<body>
+<div id="loading">
+  <h1>FROZEN CITY</h1>
+  <p id="status">Loading the frozen world…</p>
+</div>
+<script type="module" src="./boot.js"></script>
+</body>
+</html>

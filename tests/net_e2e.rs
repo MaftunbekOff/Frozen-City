@@ -1,5 +1,5 @@
-//! End-to-end networking test: a real server on a real TCP socket, two real
-//! clients, shared authoritative state.
+//! End-to-end networking tests: a real server on a real TCP socket, real
+//! clients over both the native protocol and WebSocket, shared state.
 
 use std::time::{Duration, Instant};
 
@@ -11,7 +11,7 @@ use frozen_city::net::server::{self, ServerConfig};
 fn recv_welcome(conn: &ClientConn) -> (u64, GameState) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
-        match conn.rx.recv_timeout(Duration::from_millis(500)) {
+        match conn.recv_timeout(Duration::from_millis(500)) {
             Ok(ServerMsg::Welcome { player_id, state }) => return (player_id, state),
             Ok(_) => continue,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
@@ -24,7 +24,7 @@ fn recv_welcome(conn: &ClientConn) -> (u64, GameState) {
 fn wait_state(conn: &ClientConn, mut pred: impl FnMut(&GameState) -> bool) -> GameState {
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
-        match conn.rx.recv_timeout(Duration::from_millis(500)) {
+        match conn.recv_timeout(Duration::from_millis(500)) {
             Ok(ServerMsg::State { state, .. }) => {
                 if pred(&state) {
                     return state;
@@ -115,7 +115,7 @@ fn tiles_are_omitted_but_periodically_included() {
     let deadline = Instant::now() + Duration::from_secs(8);
     while Instant::now() < deadline && (with_tiles == 0 || without_tiles == 0) {
         if let Ok(ServerMsg::State { state, tiles_included }) =
-            conn.rx.recv_timeout(Duration::from_millis(500))
+            conn.recv_timeout(Duration::from_millis(500))
         {
             if tiles_included {
                 assert!(!state.tiles.is_empty());
@@ -128,6 +128,115 @@ fn tiles_are_omitted_but_periodically_included() {
     }
     assert!(with_tiles > 0, "periodic full-tile snapshots expected");
     assert!(without_tiles > 0, "lightweight snapshots expected");
+
+    handle.stop();
+}
+
+/// The port also speaks WebSocket (for the browser build) — and both kinds of
+/// client share the same authoritative world.
+#[test]
+fn websocket_and_tcp_clients_share_one_city() {
+    use tungstenite::Message;
+
+    let handle = server::start(ServerConfig {
+        port: Some(0),
+        seed: 99,
+        win_days: 12,
+        persistent: false,
+        verbose: false,
+    })
+    .expect("server starts");
+    let port = handle.addr.expect("addr").port();
+
+    let (mut ws, _resp) =
+        tungstenite::connect(format!("ws://127.0.0.1:{port}/")).expect("ws handshake");
+    ws.send(Message::Binary(
+        bincode::serialize(&ClientMsg::Hello {
+            name: "WebPlayer".into(),
+        })
+        .unwrap()
+        .into(),
+    ))
+    .expect("send hello");
+
+    // The first binary frame is the Welcome snapshot.
+    let state = loop {
+        match ws.read().expect("ws read") {
+            Message::Binary(b) => match bincode::deserialize::<ServerMsg>(&b).expect("decode") {
+                ServerMsg::Welcome { state, .. } => break state,
+                _ => continue,
+            },
+            _ => continue,
+        }
+    };
+    assert!(state.players.iter().any(|p| p.name == "WebPlayer"));
+
+    // A native TCP client joins the same world and sees the web player.
+    let tcp = client::connect_tcp(&format!("127.0.0.1:{port}"), "Native").expect("tcp connects");
+    let _ = recv_welcome(&tcp);
+    wait_state(&tcp, |s| s.players.len() == 2);
+
+    // The web player builds a tent; the TCP client must see it appear.
+    let spot = (0..64u8)
+        .flat_map(|y| (0..64u8).map(move |x| (x, y)))
+        .find(|&(x, y)| state.can_place(BuildingKind::Tent, x, y).is_ok())
+        .expect("some valid tent spot");
+    ws.send(Message::Binary(
+        bincode::serialize(&ClientMsg::Cmd(PlayerCommand::Place {
+            kind: BuildingKind::Tent,
+            x: spot.0,
+            y: spot.1,
+        }))
+        .unwrap()
+        .into(),
+    ))
+    .expect("send place");
+    wait_state(&tcp, |s| {
+        s.buildings.iter().any(|b| b.kind == BuildingKind::Tent)
+    });
+
+    // And the websocket keeps receiving authoritative snapshots.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut ws_saw_tent = false;
+    while Instant::now() < deadline && !ws_saw_tent {
+        if let Message::Binary(b) = ws.read().expect("ws read") {
+            if let Ok(ServerMsg::State { state, .. }) = bincode::deserialize::<ServerMsg>(&b) {
+                ws_saw_tent = state.buildings.iter().any(|b| b.kind == BuildingKind::Tent);
+            }
+        }
+    }
+    assert!(ws_saw_tent, "tent visible in websocket snapshots");
+
+    handle.stop();
+}
+
+/// Plain HTTP GET on the same port serves the web build.
+#[test]
+fn http_get_serves_the_web_page() {
+    use std::io::{Read, Write};
+
+    let handle = server::start(ServerConfig {
+        port: Some(0),
+        seed: 1,
+        win_days: 12,
+        persistent: false,
+        verbose: false,
+    })
+    .expect("server starts");
+    let port = handle.addr.expect("addr").port();
+
+    let mut sock = std::net::TcpStream::connect(("127.0.0.1", port)).expect("connect");
+    sock.write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .expect("send request");
+    let mut response = String::new();
+    sock.read_to_string(&mut response).expect("read response");
+    // Tests run from the crate root, where web/index.html exists.
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK"),
+        "expected 200, got: {}",
+        response.lines().next().unwrap_or("")
+    );
+    assert!(response.contains("FROZEN CITY"), "index.html served");
 
     handle.stop();
 }

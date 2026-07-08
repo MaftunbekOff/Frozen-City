@@ -1,12 +1,11 @@
 //! Main menu: singleplayer, host co-op, join, quit.
 
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use bevy::prelude::*;
 
-use frozen_city::net::{client, server};
-use frozen_city::net::server::ServerConfig;
+#[cfg(not(target_arch = "wasm32"))]
+use frozen_city::net::server::{self, ServerConfig};
 
 use super::ui::BaseColor;
 use super::*;
@@ -18,8 +17,11 @@ const TEXT_DIM: Color = Color::srgb(0.58, 0.65, 0.76);
 #[derive(Component, Clone, Copy, PartialEq)]
 pub enum MenuAction {
     Single,
+    // Host and Quit exist on desktop only, but the enum stays uniform.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     Host,
     Join,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     Quit,
 }
 
@@ -64,18 +66,18 @@ pub fn spawn_menu(mut commands: Commands, settings: Res<Settings>, view: Res<Gam
                 MenuErrorText,
             ));
 
-            let buttons: [(MenuAction, String); 4] = [
-                (MenuAction::Single, "Singleplayer".to_string()),
-                (
-                    MenuAction::Host,
-                    format!("Host Co-op (port {})", settings.host_port),
-                ),
-                (
-                    MenuAction::Join,
-                    format!("Join {}", settings.join_addr),
-                ),
-                (MenuAction::Quit, "Quit".to_string()),
-            ];
+            // The browser cannot listen for connections or quit the page, so
+            // it only offers Singleplayer and Join.
+            let mut buttons: Vec<(MenuAction, String)> =
+                vec![(MenuAction::Single, "Singleplayer".to_string())];
+            #[cfg(not(target_arch = "wasm32"))]
+            buttons.push((
+                MenuAction::Host,
+                format!("Host Co-op (port {})", settings.host_port),
+            ));
+            buttons.push((MenuAction::Join, format!("Join {}", settings.join_addr)));
+            #[cfg(not(target_arch = "wasm32"))]
+            buttons.push((MenuAction::Quit, "Quit".to_string()));
             for (action, label) in buttons {
                 p.spawn((
                     Button,
@@ -109,7 +111,7 @@ pub fn spawn_menu(mut commands: Commands, settings: Res<Settings>, view: Res<Gam
             ));
             p.spawn((
                 Text::new(
-                    "In game: LMB place/select   RMB cancel   1-4 quick build   WASD pan   wheel zoom",
+                    "In game: LMB place/select   RMB cancel   1-4 quick build   WASD pan   Q/E rotate   MMB tilt   wheel zoom",
                 ),
                 TextFont::from_font_size(13.0),
                 TextColor(TEXT_DIM),
@@ -184,30 +186,71 @@ fn start_game(
     let conn = match action {
         AutoAction::Single | AutoAction::Host => {
             let seed = settings.seed.unwrap_or_else(random_seed);
-            let config = ServerConfig {
-                port: (action == AutoAction::Host).then_some(settings.host_port),
-                seed,
-                win_days: settings.win_days,
-                persistent: false,
-                verbose: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            let conn = {
+                let config = ServerConfig {
+                    port: (action == AutoAction::Host).then_some(settings.host_port),
+                    seed,
+                    win_days: settings.win_days,
+                    persistent: false,
+                    verbose: false,
+                };
+                let handle = server::start(config)
+                    .map_err(|e| format!("Could not start the server: {e}"))?;
+                let conn = server::connect_local(&handle, settings.name.clone());
+                server_res.0 = Some(handle);
+                conn
             };
-            let handle = server::start(config)
-                .map_err(|e| format!("Could not start the server: {e}"))?;
-            let conn = server::connect_local(&handle, settings.name.clone());
-            server_res.0 = Some(handle);
+            #[cfg(target_arch = "wasm32")]
+            let conn = {
+                if action == AutoAction::Host {
+                    return Err(
+                        "Hosting runs on desktop or a dedicated server; the browser can only join."
+                            .to_string(),
+                    );
+                }
+                let (local, conn) =
+                    super::local_server::start(seed, settings.win_days, &settings.name);
+                server_res.0 = Some(local);
+                conn
+            };
             conn
         }
-        AutoAction::Join => client::connect_tcp(&settings.join_addr, &settings.name)
-            .map_err(|e| format!("Could not join {}: {e}", settings.join_addr))?,
+        AutoAction::Join => {
+            #[cfg(not(target_arch = "wasm32"))]
+            let conn = frozen_city::net::client::connect_tcp(&settings.join_addr, &settings.name)
+                .map_err(|e| format!("Could not join {}: {e}", settings.join_addr))?;
+            #[cfg(target_arch = "wasm32")]
+            let conn = frozen_city::net::ws::connect(&ws_url(&settings.join_addr), &settings.name)
+                .map_err(|e| format!("Could not join {}: {e}", settings.join_addr))?;
+            conn
+        }
     };
     *view = GameView::default();
     net.0 = Some(Mutex::new(conn));
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn random_seed() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64 ^ 0x9E37_79B9_7F4A_7C15)
         .unwrap_or(0xC0FFEE)
+}
+
+/// `SystemTime` panics on wasm32-unknown-unknown; use the JS clock instead.
+#[cfg(target_arch = "wasm32")]
+fn random_seed() -> u64 {
+    (js_sys::Date::now() as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+}
+
+/// Accept both bare `host:port` and full `ws(s)://` URLs in the join field.
+#[cfg(target_arch = "wasm32")]
+fn ws_url(addr: &str) -> String {
+    if addr.starts_with("ws://") || addr.starts_with("wss://") {
+        addr.to_string()
+    } else {
+        format!("ws://{addr}")
+    }
 }
