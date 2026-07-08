@@ -241,6 +241,19 @@ pub fn spawn_hud(mut commands: Commands) {
         DespawnOnExit(Screen::Game),
     ));
 
+    // --- FPS readout (below the top bar) ---
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(14.0),
+            top: Val::Px(54.0),
+            ..default()
+        },
+        text("", 13.0, TEXT_DIM),
+        FpsText,
+        DespawnOnExit(Screen::Game),
+    ));
+
     // --- Event feed (right side) ---
     commands
         .spawn((
@@ -344,6 +357,24 @@ pub fn spawn_hud(mut commands: Commands) {
 
 pub fn track_ui_hover(mut hover: ResMut<UiHover>, q: Query<&Interaction>) {
     hover.0 = q.iter().any(|i| *i != Interaction::None);
+}
+
+#[derive(Component)]
+pub struct FpsText;
+
+pub fn fps_update(
+    diagnostics: Res<bevy::diagnostic::DiagnosticsStore>,
+    mut q: Query<&mut Text, With<FpsText>>,
+) {
+    let Ok(mut t) = q.single_mut() else { return };
+    let s = diagnostics
+        .get(&bevy::diagnostic::FrameTimeDiagnosticsPlugin::FPS)
+        .and_then(|d| d.smoothed())
+        .map(|v| format!("FPS {v:.0}"))
+        .unwrap_or_default();
+    if t.0 != s {
+        t.0 = s;
+    }
 }
 
 pub fn hud_update(

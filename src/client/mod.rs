@@ -19,6 +19,7 @@ pub mod local_server;
 pub mod menu;
 pub mod net_sync;
 pub mod render;
+pub mod touch;
 pub mod ui;
 
 /// One grid tile = one 3D world unit. The map lies on the XZ plane
@@ -31,6 +32,20 @@ pub enum Screen {
     #[default]
     Menu,
     Game,
+}
+
+/// Graphics quality tier, decided once at startup for the platform.
+/// The scene content is identical — tiers only trade post-processing,
+/// shadows and pixel density so every device hits a high frame rate.
+#[derive(Resource, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Quality {
+    /// Phones: no shadows/bloom, capped pixel ratio.
+    Low,
+    /// Desktop browsers: HDR bloom, shadows, FXAA. (Only constructed on wasm.)
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    Medium,
+    /// Native desktop: HDR bloom, high-res shadows, MSAA 4x.
+    High,
 }
 
 #[derive(Resource, Clone)]
@@ -207,6 +222,7 @@ impl Plugin for ClientPlugin {
     fn build(&self, app: &mut App) {
         app.init_state::<Screen>()
             .init_resource::<input::CamRig>()
+            .init_resource::<touch::TouchCtl>()
             .init_resource::<NetConn>()
             .init_resource::<ServerRes>()
             .init_resource::<GameView>()
@@ -250,6 +266,7 @@ impl Plugin for ClientPlugin {
                 (
                     render::animate_environment,
                     render::animate_effects,
+                    render::animate_smoke,
                     render::animate_survivors,
                     render::sync_player_cursors,
                     render::update_cursor_labels,
@@ -262,6 +279,7 @@ impl Plugin for ClientPlugin {
                 Update,
                 (
                     ui::track_ui_hover,
+                    touch::touch_control,
                     input::camera_control,
                     input::build_input,
                     input::send_cursor,
@@ -269,11 +287,14 @@ impl Plugin for ClientPlugin {
                     .chain()
                     .run_if(in_state(Screen::Game)),
             )
+            // Phone-sized windows get a smaller UI scale.
+            .add_systems(Update, touch::fit_ui_scale)
             // HUD & panels.
             .add_systems(
                 Update,
                 (
                     ui::hud_update,
+                    ui::fps_update,
                     ui::build_buttons,
                     ui::furnace_buttons,
                     ui::selection_panel_update,

@@ -10,10 +10,10 @@ use frozen_city::net::protocol::ClientMsg;
 use super::render::GhostMarker;
 use super::*;
 
-const MIN_DIST: f32 = 7.0;
-const MAX_DIST: f32 = 60.0;
-const MIN_PITCH: f32 = 0.35;
-const MAX_PITCH: f32 = 1.35;
+pub const MIN_DIST: f32 = 7.0;
+pub const MAX_DIST: f32 = 60.0;
+pub const MIN_PITCH: f32 = 0.35;
+pub const MAX_PITCH: f32 = 1.35;
 
 /// Orbit camera: looks at `focus` on the ground from `dist` away, tilted by
 /// `pitch`. The default is a classic 2.5D three-quarter view; the player can
@@ -110,14 +110,13 @@ pub fn camera_control(
     }
 }
 
-/// Cursor position projected onto the ground plane (y = 0).
-pub fn cursor_ground(
-    window: &Window,
+/// A screen-space position projected onto the ground plane (y = 0).
+pub fn ground_from_screen(
     camera: &Camera,
     cam_transform: &GlobalTransform,
+    screen: Vec2,
 ) -> Option<Vec3> {
-    let cursor = window.cursor_position()?;
-    let ray = camera.viewport_to_world(cam_transform, cursor).ok()?;
+    let ray = camera.viewport_to_world(cam_transform, screen).ok()?;
     let dir_y = ray.direction.y;
     if dir_y.abs() < 1e-5 {
         return None;
@@ -127,6 +126,15 @@ pub fn cursor_ground(
         return None;
     }
     Some(ray.origin + *ray.direction * t)
+}
+
+/// Cursor position projected onto the ground plane (y = 0).
+pub fn cursor_ground(
+    window: &Window,
+    camera: &Camera,
+    cam_transform: &GlobalTransform,
+) -> Option<Vec3> {
+    ground_from_screen(camera, cam_transform, window.cursor_position()?)
 }
 
 pub fn build_input(

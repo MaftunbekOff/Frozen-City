@@ -7,8 +7,12 @@
 
 use std::collections::HashMap;
 
+use bevy::anti_alias::fxaa::Fxaa;
 use bevy::asset::RenderAssetUsages;
+use bevy::camera::Hdr;
+use bevy::light::{CascadeShadowConfigBuilder, DirectionalLightShadowMap};
 use bevy::pbr::{DistanceFog, FogFalloff};
+use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::render::mesh::PrimitiveTopology;
 
@@ -30,6 +34,12 @@ pub struct GameAssets {
     /// Shared vertex-color material for the merged terrain meshes.
     pub terrain_mat: Handle<StandardMaterial>,
     pub snow_mat: Handle<StandardMaterial>,
+    /// Health tiers (healthy -> critical); shared so survivors batch.
+    pub survivor_mats: [Handle<StandardMaterial>; 4],
+    /// One shared material for every building window; its emissive is
+    /// animated with the time of day (warm at night, dead by day).
+    pub window_mat: Handle<StandardMaterial>,
+    pub smoke_mat: Handle<StandardMaterial>,
 }
 
 #[derive(Resource, Default)]
@@ -78,7 +88,6 @@ pub struct FurnaceLight;
 #[derive(Component)]
 pub struct SurvivorDot {
     pub id: u32,
-    pub mat: Handle<StandardMaterial>,
 }
 
 #[derive(Component)]
@@ -119,35 +128,73 @@ pub struct Snowflake {
     pub phase: f32,
 }
 
+/// A looping puff rising from the furnace chimney while it burns.
+#[derive(Component)]
+pub struct Smoke {
+    pub phase: f32,
+}
+
 // ------------------------------------------------------------------- setup
 
 pub fn setup_camera_and_assets(
     mut commands: Commands,
+    quality: Res<Quality>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    commands.spawn((
-        Camera3d::default(),
-        Transform::from_xyz(14.0, 20.0, 14.0).looking_at(Vec3::ZERO, Vec3::Y),
-        DistanceFog {
-            color: Color::srgb(0.30, 0.38, 0.50),
-            falloff: FogFalloff::Linear {
-                start: 60.0,
-                end: 140.0,
+    let camera = commands
+        .spawn((
+            Camera3d::default(),
+            Transform::from_xyz(14.0, 20.0, 14.0).looking_at(Vec3::ZERO, Vec3::Y),
+            DistanceFog {
+                color: Color::srgb(0.30, 0.38, 0.50),
+                falloff: FogFalloff::Linear {
+                    start: 60.0,
+                    end: 140.0,
+                },
+                ..default()
             },
-            ..default()
-        },
-        AmbientLight {
-            color: Color::srgb(0.7, 0.8, 1.0),
-            brightness: 220.0,
-            ..default()
-        },
-    ));
+            AmbientLight {
+                color: Color::srgb(0.7, 0.8, 1.0),
+                brightness: 220.0,
+                ..default()
+            },
+        ))
+        .id();
+    // Post-processing per quality tier: the furnace and windows glow
+    // through HDR bloom on Medium/High; phones skip it for fill rate.
+    match *quality {
+        Quality::High => {
+            commands
+                .entity(camera)
+                .insert((Msaa::Sample4, Hdr, Bloom::NATURAL));
+        }
+        Quality::Medium => {
+            commands
+                .entity(camera)
+                .insert((Msaa::Off, Hdr, Bloom::NATURAL, Fxaa::default()));
+        }
+        Quality::Low => {
+            commands.entity(camera).insert(Msaa::Off);
+        }
+    }
+
+    commands.insert_resource(DirectionalLightShadowMap {
+        size: if *quality == Quality::High { 2048 } else { 1024 },
+    });
     commands.spawn((
         DirectionalLight {
             illuminance: 9_000.0,
+            shadow_maps_enabled: *quality != Quality::Low,
             ..default()
         },
+        CascadeShadowConfigBuilder {
+            num_cascades: 2,
+            first_cascade_far_bound: 20.0,
+            maximum_distance: 70.0,
+            ..default()
+        }
+        .build(),
         Transform::default().looking_to(Vec3::new(-0.4, -0.8, -0.35), Vec3::Y),
         SunLight,
     ));
@@ -167,10 +214,31 @@ pub fn setup_camera_and_assets(
             perceptual_roughness: 0.96,
             ..default()
         }),
+        // Opaque so all flakes batch into a handful of instanced draws.
         snow_mat: materials.add(StandardMaterial {
-            base_color: Color::srgba(1.0, 1.0, 1.0, 0.85),
+            base_color: Color::srgb(0.96, 0.97, 1.0),
             unlit: true,
-            alpha_mode: AlphaMode::Blend,
+            ..default()
+        }),
+        survivor_mats: std::array::from_fn(|i| {
+            let sick = i as f32 / 3.0;
+            materials.add(StandardMaterial {
+                base_color: Color::srgb(
+                    0.30 + 0.60 * sick,
+                    0.38 - 0.20 * sick,
+                    0.55 - 0.43 * sick,
+                ),
+                ..default()
+            })
+        }),
+        window_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.35, 0.28, 0.16),
+            emissive: LinearRgba::rgb(0.02, 0.015, 0.005),
+            ..default()
+        }),
+        smoke_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.52, 0.54, 0.58),
+            unlit: true,
             ..default()
         }),
     };
@@ -303,6 +371,15 @@ impl MeshBuf {
         self.tri(a, c, d, color);
     }
 
+    /// Quad with explicit per-vertex normals (smooth-shaded terrain).
+    fn quad_smooth(&mut self, v: [(Vec3, [f32; 3]); 4], color: [f32; 4]) {
+        for i in [0, 1, 2, 0, 2, 3] {
+            self.pos.push(v[i].0.to_array());
+            self.nor.push(v[i].1);
+            self.col.push(color);
+        }
+    }
+
     /// Axis-aligned box between `min` and `max` (top, sides — no bottom).
     fn boxx(&mut self, min: Vec3, max: Vec3, color: [f32; 4]) {
         let (a, b) = (min, max);
@@ -362,6 +439,19 @@ fn corner_height(gx: u32, gz: u32) -> f32 {
     (hash2(gx, gz) % 100) as f32 * 0.0011 * k
 }
 
+/// Smooth terrain normal from the height field (central differences).
+fn corner_normal(gx: u32, gz: u32) -> [f32; 3] {
+    let h = |x: i64, z: i64| {
+        corner_height(
+            x.clamp(0, MAP_W as i64) as u32,
+            z.clamp(0, MAP_H as i64) as u32,
+        )
+    };
+    let dx = h(gx as i64 + 1, gz as i64) - h(gx as i64 - 1, gz as i64);
+    let dz = h(gx as i64, gz as i64 + 1) - h(gx as i64, gz as i64 - 1);
+    Vec3::new(-dx, 2.0, -dz).normalize().to_array()
+}
+
 fn ground_mesh(tiles: &[Tile]) -> Mesh {
     let mut buf = MeshBuf::default();
     let half_w = MAP_W as f32 / 2.0;
@@ -370,18 +460,20 @@ fn ground_mesh(tiles: &[Tile]) -> Mesh {
         for tx in 0..MAP_W as u32 {
             let tile = &tiles[tile_index(tx as u8, ty as u8)];
             let color = linear(terrain_color(tile, tx as u8, ty as u8));
-            let x0 = tx as f32 - half_w;
-            let z0 = ty as f32 - half_h;
             let p = |gx: u32, gz: u32| {
-                Vec3::new(
-                    gx as f32 - half_w,
-                    corner_height(gx, gz),
-                    gz as f32 - half_h,
+                (
+                    Vec3::new(
+                        gx as f32 - half_w,
+                        corner_height(gx, gz),
+                        gz as f32 - half_h,
+                    ),
+                    corner_normal(gx, gz),
                 )
             };
-            let (a, b, c, d) = (p(tx, ty), p(tx, ty + 1), p(tx + 1, ty + 1), p(tx + 1, ty));
-            let _ = (x0, z0);
-            buf.quad(a, b, c, d, color);
+            buf.quad_smooth(
+                [p(tx, ty), p(tx, ty + 1), p(tx + 1, ty + 1), p(tx + 1, ty)],
+                color,
+            );
         }
     }
     buf.into_mesh()
@@ -608,6 +700,18 @@ fn spawn_building(
                     Transform::from_xyz(0.0, 2.6, 0.0),
                     FurnaceLight,
                 ));
+                // Chimney smoke: looping puffs, hidden when the fire is out.
+                for i in 0..10u32 {
+                    p.spawn((
+                        Mesh3d(assets.cube.clone()),
+                        MeshMaterial3d(assets.smoke_mat.clone()),
+                        Transform::from_xyz(0.0, 2.2, 0.0).with_scale(Vec3::splat(0.1)),
+                        Visibility::Hidden,
+                        Smoke {
+                            phase: i as f32 / 10.0,
+                        },
+                    ));
+                }
             }
             BuildingKind::Tent => {
                 p.spawn((
@@ -681,6 +785,15 @@ fn spawn_building(
             }
         }
 
+        // A small window that glows warm at night (shared animated material).
+        if b.kind != BuildingKind::Furnace {
+            p.spawn((
+                Mesh3d(assets.cube.clone()),
+                MeshMaterial3d(assets.window_mat.clone()),
+                Transform::from_xyz(0.0, 0.22, 0.40).with_scale(Vec3::new(0.22, 0.16, 0.05)),
+            ));
+        }
+
         // Worker cubes above the roof.
         let max = b.kind.max_workers();
         if max > 0 {
@@ -717,9 +830,12 @@ pub fn sync_survivors(
     mut commands: Commands,
     view: Res<GameView>,
     assets: Res<GameAssets>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
     mut viz: ResMut<SurvivorViz>,
-    mut dots: Query<(&SurvivorDot, &mut Wander)>,
+    mut dots: Query<(
+        &SurvivorDot,
+        &mut Wander,
+        &mut MeshMaterial3d<StandardMaterial>,
+    )>,
     mut seen: Local<u64>,
 ) {
     let Some(state) = view.ready() else { return };
@@ -750,16 +866,12 @@ pub fn sync_survivors(
             continue;
         }
         let home = wanted[&s.id];
-        let mat = materials.add(StandardMaterial {
-            base_color: Color::srgb(0.30, 0.38, 0.55),
-            ..default()
-        });
         let e = commands
             .spawn((
                 Mesh3d(assets.capsule.clone()),
-                MeshMaterial3d(mat.clone()),
+                MeshMaterial3d(assets.survivor_mats[0].clone()),
                 Transform::from_translation(home + Vec3::Y * 0.24),
-                SurvivorDot { id: s.id, mat },
+                SurvivorDot { id: s.id },
                 Wander {
                     home,
                     target: home,
@@ -783,8 +895,8 @@ pub fn sync_survivors(
         }
     }
 
-    // Update homes and health tint.
-    for (dot, mut wander) in &mut dots {
+    // Update homes and health tint (a shared material per health tier).
+    for (dot, mut wander, mut mat) in &mut dots {
         if let Some(home) = wanted.get(&dot.id) {
             if wander.home.distance(*home) > 0.05 {
                 wander.home = *home;
@@ -793,12 +905,9 @@ pub fn sync_survivors(
         }
         if let Some(s) = state.survivors.iter().find(|s| s.id == dot.id) {
             let sick = 1.0 - (s.hp / 100.0).clamp(0.0, 1.0);
-            if let Some(mut m) = materials.get_mut(&dot.mat) {
-                m.base_color = Color::srgb(
-                    0.30 + 0.60 * sick,
-                    0.38 - 0.20 * sick,
-                    0.55 - 0.43 * sick,
-                );
+            let tier = ((sick * 3.99) as usize).min(3);
+            if mat.0 != assets.survivor_mats[tier] {
+                mat.0 = assets.survivor_mats[tier].clone();
             }
         }
     }
@@ -837,6 +946,8 @@ pub fn animate_survivors(
 /// Sun, ambient light, fog and sky color track the in-game time of day.
 pub fn animate_environment(
     view: Res<GameView>,
+    assets: Res<GameAssets>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     mut clear: ResMut<ClearColor>,
     mut sun: Query<(&mut DirectionalLight, &mut Transform), With<SunLight>>,
     mut cam_fx: Query<(&mut DistanceFog, &mut AmbientLight)>,
@@ -845,6 +956,12 @@ pub fn animate_environment(
     let t = state.time_of_day();
     let daylight = (1.0 - (std::f32::consts::TAU * t).cos()) / 2.0;
     let cold = state.cold_snap && state.is_night();
+
+    // Windows glow as the light fades.
+    let glow = (1.0 - daylight).powf(2.0);
+    if let Some(mut m) = materials.get_mut(&assets.window_mat) {
+        m.emissive = LinearRgba::rgb(3.2 * glow + 0.02, 1.9 * glow + 0.015, 0.55 * glow);
+    }
 
     let sky_night = Vec3::new(0.012, 0.022, 0.052);
     let sky_day = if cold {
@@ -959,6 +1076,36 @@ pub fn animate_effects(
         } else {
             *vis = Visibility::Hidden;
         }
+    }
+}
+
+/// Chimney smoke rises, drifts and grows while the furnace burns.
+pub fn animate_smoke(
+    time: Res<Time>,
+    view: Res<GameView>,
+    mut q: Query<(&Smoke, &mut Transform, &mut Visibility)>,
+) {
+    let lit = view
+        .state
+        .as_ref()
+        .map(|s| s.furnace_lit)
+        .unwrap_or(false);
+    let elapsed = time.elapsed_secs();
+    for (smoke, mut tr, mut vis) in &mut q {
+        if !lit {
+            *vis = Visibility::Hidden;
+            continue;
+        }
+        *vis = Visibility::Inherited;
+        let t = (elapsed * 0.22 + smoke.phase).fract();
+        let sway = (smoke.phase * 37.0 + elapsed * 0.6).sin();
+        tr.translation = Vec3::new(
+            sway * 0.35 * t,
+            2.15 + t * 3.4,
+            (smoke.phase * 53.0 + elapsed * 0.45).cos() * 0.3 * t,
+        );
+        // Puffs grow as they rise, then pop back to the chimney.
+        tr.scale = Vec3::splat(0.08 + t * 0.42);
     }
 }
 

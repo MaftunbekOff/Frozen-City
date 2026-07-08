@@ -10,7 +10,7 @@
 mod client;
 
 use bevy::prelude::*;
-use bevy::window::{PresentMode, Window, WindowPlugin};
+use bevy::window::{PresentMode, Window, WindowPlugin, WindowResolution};
 
 use client::{AutoAction, AutoStart, ClientPlugin, Settings, DEFAULT_PORT};
 use frozen_city::game::types::DEFAULT_WIN_DAYS;
@@ -144,12 +144,31 @@ fn main() {
         _ => None,
     };
 
+    #[cfg(not(target_arch = "wasm32"))]
+    let quality = client::Quality::High;
+    #[cfg(target_arch = "wasm32")]
+    let quality = web_quality();
+
+    #[allow(unused_mut)]
+    let mut resolution: WindowResolution = (1280, 720).into();
+    // High-DPI phones would otherwise render 3x3 physical pixels per CSS
+    // pixel — far too much fill rate for mobile GPUs on WebGL2. Desktop
+    // browsers keep more density for crispness.
+    #[cfg(target_arch = "wasm32")]
+    {
+        let dpr = web_sys::window()
+            .map(|w| w.device_pixel_ratio())
+            .unwrap_or(1.0) as f32;
+        let cap = if quality == client::Quality::Low { 1.5 } else { 2.0 };
+        resolution = resolution.with_scale_factor_override(dpr.min(cap));
+    }
+
     App::new()
         .insert_resource(ClearColor(Color::srgb(0.035, 0.055, 0.095)))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Frozen City".to_string(),
-                resolution: (1280, 720).into(),
+                resolution,
                 present_mode: PresentMode::AutoVsync,
                 // On the web, fill the browser window (no-op on native).
                 fit_canvas_to_parent: true,
@@ -166,6 +185,8 @@ fn main() {
             smoke: cli.smoke,
         })
         .insert_resource(AutoStart(auto))
+        .insert_resource(quality)
+        .add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
         .add_plugins(ClientPlugin)
         .run();
 }
@@ -200,6 +221,32 @@ fn run_dedicated(cli: &Cli) {
     println!("Browsers can play at http://<this-host>:{}/", cli.host_port);
     while !handle.shutdown.load(std::sync::atomic::Ordering::SeqCst) {
         std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+}
+
+/// Phones get the Low tier; anything else in a browser gets Medium.
+/// (Touch-screen laptops stay Medium: touch alone only counts as a phone
+/// when the window is narrow too.)
+#[cfg(target_arch = "wasm32")]
+fn web_quality() -> client::Quality {
+    let Some(win) = web_sys::window() else {
+        return client::Quality::Medium;
+    };
+    let nav = win.navigator();
+    let ua_mobile = nav
+        .user_agent()
+        .map(|ua| ua.contains("Mobi") || ua.contains("Android"))
+        .unwrap_or(false);
+    let narrow = win
+        .inner_width()
+        .ok()
+        .and_then(|v| v.as_f64())
+        .map(|w| w < 900.0)
+        .unwrap_or(false);
+    if ua_mobile || (nav.max_touch_points() > 0 && narrow) {
+        client::Quality::Low
+    } else {
+        client::Quality::Medium
     }
 }
 
