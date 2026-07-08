@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::game::types::{GameState, PlayerCommand, TICK_MS};
+use crate::game::types::{PlayerCommand, TICK_MS};
 use crate::game::sim;
 use crate::net::client::ClientConn;
 use crate::net::protocol::{read_frame, write_frame, ClientMsg, ServerMsg};
@@ -146,6 +146,11 @@ fn accept_loop(listener: TcpListener, to_server: Sender<ToServer>, shutdown: Arc
 }
 
 fn handle_socket(mut stream: TcpStream, to_server: Sender<ToServer>) {
+    // Sockets accepted from a non-blocking listener inherit non-blocking mode
+    // on Windows; all reads below expect a blocking socket.
+    if stream.set_nonblocking(false).is_err() {
+        return;
+    }
     let _ = stream.set_nodelay(true);
     // The very first frame must be Hello; give the client 10 s for it.
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));

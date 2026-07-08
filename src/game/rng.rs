@@ -4,6 +4,12 @@
 #[derive(Clone, Copy, Debug)]
 pub struct Rng(pub u64);
 
+impl Default for Rng {
+    fn default() -> Self {
+        Rng::new(0xF0_2E_57)
+    }
+}
+
 impl Rng {
     pub fn new(seed: u64) -> Self {
         Rng(seed ^ 0x9E37_79B9_7F4A_7C15)
