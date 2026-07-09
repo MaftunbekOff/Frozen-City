@@ -195,7 +195,10 @@ pub fn fit_ui_scale(
     mut scale: ResMut<UiScale>,
 ) {
     let Ok(w) = window.single() else { return };
-    let target = (w.resolution.width() / 760.0).clamp(0.55, 1.0);
+    // Pivot chosen so the widest fixed row (the 7-building + furnace build bar,
+    // ~1000 px) fits: windows at/above it stay crisp at 1.0, narrower ones
+    // shrink the whole HUD to fit rather than overflow.
+    let target = (w.resolution.width() / 1000.0).clamp(0.5, 1.0);
     if (scale.0 - target).abs() > 0.01 {
         scale.0 = target;
     }

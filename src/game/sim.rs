@@ -97,6 +97,7 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
             Mission { kind: MissionKind::SurviveDays(4),    reward_wood: 0,  reward_coal: 0, reward_food: 30, done: false },
         ],
         tunnel: TunnelState::default(),
+        techs: Vec::new(),
         guest_perm: GuestPermission::Build,
         owner_id: None,
         next_id,
@@ -472,6 +473,17 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                 }
             }
         }
+        PlayerCommand::Research { tech } => {
+            if !state.has_tech(*tech)
+                && state.stock.wood >= tech.cost_wood() as f32
+                && state.stock.coal >= tech.cost_coal() as f32
+            {
+                state.stock.wood -= tech.cost_wood() as f32;
+                state.stock.coal -= tech.cost_coal() as f32;
+                state.techs.push(*tech);
+                push_event(state, format!("Researched: {}.", tech.name()));
+            }
+        }
     }
 }
 
@@ -510,8 +522,14 @@ pub fn tick(state: &mut GameState) {
 
     // --- Furnace fuel ---
     if state.furnace_level > 0 {
-        let need_coal =
-            state.furnace_level as f32 * FURNACE_COAL_PER_DAY_PER_LEVEL / TICKS_PER_DAY as f32;
+        let furnace_factor = if state.has_tech(Tech::EfficientFurnace) {
+            TECH_FURNACE_EFFICIENCY
+        } else {
+            1.0
+        };
+        let need_coal = state.furnace_level as f32 * FURNACE_COAL_PER_DAY_PER_LEVEL
+            / TICKS_PER_DAY as f32
+            * furnace_factor;
         let lit = if state.stock.coal >= need_coal {
             state.stock.coal -= need_coal;
             true
@@ -533,6 +551,11 @@ pub fn tick(state: &mut GameState) {
     }
 
     // --- Production ---
+    let tools_factor = if state.has_tech(Tech::Tools) {
+        TECH_TOOLS_PRODUCTION
+    } else {
+        1.0
+    };
     for i in 0..state.buildings.len() {
         let (kind, bx, by, workers) = {
             let b = &state.buildings[i];
@@ -545,7 +568,7 @@ pub fn tick(state: &mut GameState) {
         if per_day == 0.0 {
             continue;
         }
-        let amount = workers as f32 * per_day / TICKS_PER_DAY as f32;
+        let amount = workers as f32 * per_day / TICKS_PER_DAY as f32 * tools_factor;
         match kind {
             BuildingKind::HunterHut => state.stock.food += amount,
             BuildingKind::Greenhouse => state.stock.food += amount,
@@ -602,9 +625,27 @@ pub fn tick(state: &mut GameState) {
         .filter(|b| b.kind == BuildingKind::Hospital).map(|b| b.workers as u32).sum();
     let kitchen_staffed = state.buildings.iter()
         .any(|b| b.kind == BuildingKind::Kitchen && b.workers > 0);
-    let care_per_tick = hospital_workers as f32 * HOSPITAL_CARE_PER_WORKER_DAY / TICKS_PER_DAY as f32;
+    let medicine_factor = if state.has_tech(Tech::Medicine) {
+        TECH_MEDICINE_CARE
+    } else {
+        1.0
+    };
+    let care_per_tick = hospital_workers as f32 * HOSPITAL_CARE_PER_WORKER_DAY
+        / TICKS_PER_DAY as f32
+        * medicine_factor;
+    let rationing_factor = if state.has_tech(Tech::Rationing) {
+        TECH_RATIONING_FOOD
+    } else {
+        1.0
+    };
     let portion = FOOD_PER_SURVIVOR_DAY / TICKS_PER_DAY as f32
-        * if kitchen_staffed { KITCHEN_FOOD_EFFICIENCY } else { 1.0 };
+        * if kitchen_staffed { KITCHEN_FOOD_EFFICIENCY } else { 1.0 }
+        * rationing_factor;
+    let insulation_bonus = if state.has_tech(Tech::Insulation) {
+        TECH_INSULATION_WARMTH
+    } else {
+        0.0
+    };
     let mut deaths: Vec<(String, bool)> = Vec::new();
 
     for (i, s) in state.survivors.iter_mut().enumerate() {
@@ -622,7 +663,7 @@ pub fn tick(state: &mut GameState) {
             3.0 // huddling near the open furnace
         } else {
             0.0
-        };
+        } + insulation_bonus;
         let eff = temp + bonus;
         if eff < 0.0 {
             s.hp -= (-eff).min(40.0) * 0.35 / tph;

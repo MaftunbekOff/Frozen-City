@@ -13,9 +13,10 @@ M0–M7 bosqichlar yakunlangan:
 - ✅ HUD, qurish/bino/pech panellari, menyu, voqealar lentasi, game-over
 - ✅ Brauzer (WASM), URL parametrlari, inline singleplayer
 - ✅ Mobil touch boshqaruv va grafika sifat darajalari
-- ✅ 65 test: sim invariantlari + attributsiya/chat/ping/reconnect/rollar/missiya e2e + fuzz
+- ✅ 78 test: sim invariantlari + attributsiya/chat/ping/reconnect/rollar/missiya/bino/texnologiya + fuzz
 - ✅ Mini-xarita (minimap): butun xaritaning burchakdagi ko'rinishi + bosib borish + pinglar
-- ✅ V0.3 boshlandi: **missiyalar** (deterministik quest+mukofot) va **Tunnel** (graduatsiya)
+- ✅ V0.3: **missiyalar** (quest+mukofot), **Tunnel** (graduatsiya),
+  3 yangi **bino** (Issiqxona/Kasalxona/Oshxona), **texnologiya daraxti** (5 tech)
 
 **V0.2 (jarayonda):** chat, attributsiya, reconnect, rate-limit va **rollar/egalik**
 yakunlandi; qoldi: **delta-snapshot** va **interpolatsiya**.
@@ -125,9 +126,13 @@ Tunnelgacha yetaklasin.
       `InvestTunnel` buyrug'i bilan bosqichma-bosqich qaziladi (3 bosqich), bitgach
       graduatsiya g'alabasi (Global Olamga chiqish signali). Client'da Tunnel paneli.
       Keyingisi: haqiqiy hub'ga o'tish (V0.5).
-- [ ] **Yangi binolar** (4 → 8+) va **texnologiya daraxti** va **voqealar tizimi**
-      (kasallik, karvon, bo'ron) — V0.3 ning qolgan kontenti.
-- [~] **Balans regression testlari**: 7 missiya/tunnel sim-testi qo'shildi.
+- [~] **Yangi binolar** (4 → 7): ✅ Issiqxona (Greenhouse — yuqori-output oziq),
+      Kasalxona (Hospital — HP tiklash), Oshxona (Kitchen — oziq tejash). Qoldi: Ombor.
+- [x] **Texnologiya daraxti**: 5 texnologiya (Izolyatsiya, Samarali pech, Asboblar,
+      Ratsion, Tibbiyot) — resurs evaziga ochiladi (`Research` buyrug'i), effektlar
+      simda qo'llanadi. Client'da modal panel (R bilan ochiladi).
+- [ ] **Voqealar tizimi** (kasallik, qochoqlar karvoni — tanlov, qor bo'roni).
+- [~] **Balans regression testlari**: 20 missiya/tunnel/bino/texnologiya sim-testi qo'shildi.
 
 ### Natija mezonlari
 

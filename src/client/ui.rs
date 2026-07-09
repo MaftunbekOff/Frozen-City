@@ -22,7 +22,7 @@ const COL_COAL: Color = Color::srgb(0.62, 0.66, 0.75);
 const COL_FOOD: Color = Color::srgb(0.55, 0.82, 0.48);
 
 const DEFAULT_HINT: &str =
-    "LMB place/select   RMB cancel   1-7 quick build   WASD pan   Q/E rotate   wheel zoom   Enter chat   Alt+click ping";
+    "LMB place/select   RMB cancel   1-7 build   WASD pan   Q/E rotate   wheel zoom   R research   Enter chat   Alt+click ping";
 
 #[derive(Component, Clone, Copy, PartialEq)]
 pub enum HudField {
@@ -164,9 +164,9 @@ pub fn spawn_hud(mut commands: Commands) {
                 right: Val::Px(0.0),
                 bottom: Val::Px(0.0),
                 height: Val::Px(88.0),
-                padding: UiRect::axes(Val::Px(14.0), Val::Px(10.0)),
+                padding: UiRect::axes(Val::Px(12.0), Val::Px(10.0)),
                 align_items: AlignItems::Center,
-                column_gap: Val::Px(10.0),
+                column_gap: Val::Px(8.0),
                 ..default()
             },
             BackgroundColor(PANEL_BG),
@@ -179,7 +179,7 @@ pub fn spawn_hud(mut commands: Commands) {
                 p.spawn((
                     Button,
                     Node {
-                        width: Val::Px(112.0),
+                        width: Val::Px(92.0),
                         height: Val::Px(62.0),
                         flex_direction: FlexDirection::Column,
                         justify_content: JustifyContent::Center,
@@ -191,7 +191,7 @@ pub fn spawn_hud(mut commands: Commands) {
                     BuildBtn(kind),
                 ))
                 .with_children(|b| {
-                    b.spawn(text(kind.name(), 12.0, TEXT_MAIN));
+                    b.spawn(text(kind.name(), 11.5, TEXT_MAIN));
                     b.spawn(text(
                         format!("{}w  [{}]", kind.cost_wood(), i + 1),
                         10.5,
@@ -208,7 +208,7 @@ pub fn spawn_hud(mut commands: Commands) {
                 p.spawn((
                     Button,
                     Node {
-                        width: Val::Px(46.0),
+                        width: Val::Px(42.0),
                         height: Val::Px(40.0),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
@@ -618,7 +618,7 @@ pub fn selection_panel_update(
             b.kind.production_per_worker_day() * b.kind.max_workers() as f32,
         ),
         BuildingKind::Greenhouse => format!(
-            "+{:.0} food/day at full crew.\nGrows indoors, whatever the weather.",
+            "+{:.0} food/day at full crew.\nHigh-output indoor farming.",
             b.kind.production_per_worker_day() * b.kind.max_workers() as f32,
         ),
         BuildingKind::Hospital => format!(
@@ -627,10 +627,14 @@ pub fn selection_panel_update(
             b.workers,
             b.workers as f32 * frozen_city::game::types::HOSPITAL_CARE_PER_WORKER_DAY,
         ),
-        BuildingKind::Kitchen => format!(
-            "Staffed: the city eats {:.0}% less food.",
-            (1.0 - frozen_city::game::types::KITCHEN_FOOD_EFFICIENCY) * 100.0,
-        ),
+        BuildingKind::Kitchen => {
+            let cut = (1.0 - frozen_city::game::types::KITCHEN_FOOD_EFFICIENCY) * 100.0;
+            if b.workers > 0 {
+                format!("Staffed: the city eats {cut:.0}% less food.")
+            } else {
+                format!("Unstaffed. Staff it to cut food use by {cut:.0}%.")
+            }
+        }
     };
 
     for (mut text, kind) in &mut texts {

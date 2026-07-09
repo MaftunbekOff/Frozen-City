@@ -57,11 +57,12 @@ pub fn camera_control(
     scroll: Res<AccumulatedMouseScroll>,
     ui_hover: Res<UiHover>,
     chat: Res<ChatState>,
+    research: Res<super::research::ResearchOpen>,
     mut rig: ResMut<CamRig>,
     mut cam: Query<&mut Transform, With<Camera3d>>,
 ) {
-    // While typing in chat, keyboard belongs to the chat box.
-    if chat.active {
+    // While typing in chat or browsing the research modal, the world ignores input.
+    if chat.active || research.0 {
         return;
     }
     // Zoom (mouse wheel), unless the cursor is parked on the UI.
@@ -156,9 +157,10 @@ pub fn build_input(
     camera: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     mut ghost: Query<(&mut Transform, &GhostMarker, &mut Visibility)>,
     chat: Res<ChatState>,
+    research: Res<super::research::ResearchOpen>,
 ) {
-    // While typing in chat, digit/Escape keys edit the message, not the world.
-    if chat.active {
+    // While typing in chat or in the research modal, keys don't build/cancel.
+    if chat.active || research.0 {
         hide_ghost(&mut ghost);
         return;
     }

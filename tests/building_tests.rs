@@ -136,7 +136,7 @@ fn staffed_kitchen_reduces_food_consumption() {
 #[test]
 fn new_buildings_cost_wood_and_need_clear_ground() {
     let cases = [
-        (BuildingKind::Greenhouse, 30u32),
+        (BuildingKind::Greenhouse, 35u32),
         (BuildingKind::Hospital, 35u32),
         (BuildingKind::Kitchen, 25u32),
     ];

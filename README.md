@@ -68,8 +68,11 @@ ulanish orqali.
 | Arra zavodi (Sawmill) | 25 yog'och | 2 | 12 yog'och/kun/ishchi (yaqin o'rmondan) |
 | Ko'mir koni (Coal Mine) | 30 yog'och | 3 | 15 ko'mir/kun/ishchi (kon ustiga quriladi) |
 | Ovchi kulbasi (Hunter's Hut) | 25 yog'och | 2 | 10 oziq/kun/ishchi |
+| Issiqxona (Greenhouse) | 35 yog'och | 2 | 13 oziq/kun/ishchi (yuqori-output ferma) |
+| Kasalxona (Hospital) | 35 yog'och | 2 | ishlab tursa aholi HP'sini tiklaydi |
+| Oshxona (Kitchen) | 25 yog'och | 1 | ishlab tursa shahar oziqni 25% tejaydi |
 
-**Boshqaruv:** LMB — qurish/tanlash · RMB — bekor · 1–4 — tez qurish · WASD/strelkalar — kamera · Q/E — aylantirish · MMB — aylantirish/qiyalik · g'ildirak — zoom · Esc — bekor · **Enter — chat** · **Alt+klik — xaritaga ping**
+**Boshqaruv:** LMB — qurish/tanlash · RMB — bekor · 1–7 — tez qurish · WASD/strelkalar — kamera · Q/E — aylantirish · MMB — aylantirish/qiyalik · g'ildirak — zoom · Esc — bekor · **Enter — chat** · **Alt+klik — xaritaga ping**
 
 O'yin **3D** (low-poly, protsedural): qiya 2.5D ko'rinish standart, lekin kamerani erkin aylantirish/egish mumkin. Kecha-kunduz haqiqiy yorug'lik bilan, pech esa atrofni yoritadi.
 
@@ -82,8 +85,8 @@ src/net/    TCP + WebSocket + in-memory kanallar; server thread 5 Hz tick, snaps
 src/client/ Bevy 0.19: protsedural render (assetlarsiz), UI, input, chat, minimap
             minimap.rs — butun xaritaning burchakdagi ko'rinishi (teren+binolar+kamera)
             local_server.rs — brauzerda yakka o'yin (sim Bevy tizimi sifatida, threadsiz)
-tests/      53 sim-invariant testi + 12 e2e test (TCP, WebSocket, HTTP, chat,
-            attributsiya, reconnect, rollar, missiya/tunnel) — protokol fuzz testi ham
+tests/      66 sim-invariant testi + 12 e2e test (TCP, WebSocket, HTTP, chat,
+            attributsiya, reconnect, rollar, missiya/tunnel, binolar, texnologiya) — protokol fuzz ham
 ```
 
 - **Server-avtoritativ:** mijozlar faqat buyruq yuboradi (`Place`, `Demolish`,
@@ -111,7 +114,7 @@ Binar: `target/release/frozen_city(.exe)`. Multiplayer uchun hostning 4595/TCP p
 ## Testlar
 
 ```bash
-cargo test          # 65 test: determinizm, invariantlar, protokol+fuzz, e2e, chat/attributsiya/reconnect/rollar/missiya
+cargo test          # 78 test: determinizm, invariantlar, protokol+fuzz, e2e, chat/rollar/missiya/binolar/texnologiya
 cargo run -- --smoke  # render smoke-test (avtomatik yopiladi)
 ```
 
@@ -119,4 +122,4 @@ cargo run -- --smoke  # render smoke-test (avtomatik yopiladi)
 
 **Vizyon:** shaxsiy olam (missiyalar) → **Tunnel** → Global Olam (butun dunyo bitta doimiy olamda) → do'stlarni o'z olamingga taklif qilish.
 
-V0.2 tarmoq poydevori — ✅ chat · ✅ attributsiya · ✅ reconnect · ✅ rate-limit · ✅ rollar/egalik · ✅ minimap · V0.3 — ✅ missiyalar · ✅ Tunnel (graduatsiya); qoldi: yangi binolar, texnologiya, voqealar · V0.4 akkauntlar + doimiy shaxsiy olamlar · V0.5 Global Olam (hub) · V0.6 taklif va mehmon co-op · V1.0 sayqal + tarqatish. Batafsil: [ROADMAP.md](ROADMAP.md).
+V0.2 tarmoq poydevori — ✅ chat · ✅ attributsiya · ✅ reconnect · ✅ rate-limit · ✅ rollar/egalik · ✅ minimap · V0.3 — ✅ missiyalar · ✅ Tunnel · ✅ 3 yangi bino · ✅ texnologiya daraxti; qoldi: voqealar tizimi · V0.4 akkauntlar + doimiy shaxsiy olamlar · V0.5 Global Olam (hub) · V0.6 taklif va mehmon co-op · V1.0 sayqal + tarqatish. Batafsil: [ROADMAP.md](ROADMAP.md).

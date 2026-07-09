@@ -115,7 +115,7 @@ impl BuildingKind {
             BuildingKind::Sawmill => 25,
             BuildingKind::CoalMine => 30,
             BuildingKind::HunterHut => 25,
-            BuildingKind::Greenhouse => 30,
+            BuildingKind::Greenhouse => 35,
             BuildingKind::Hospital => 35,
             BuildingKind::Kitchen => 25,
         }
@@ -140,7 +140,9 @@ impl BuildingKind {
             BuildingKind::Sawmill => 12.0,
             BuildingKind::CoalMine => 15.0,
             BuildingKind::HunterHut => 10.0,
-            BuildingKind::Greenhouse => 9.0,
+            // Pricier than the Hunter's Hut but higher output per worker — a
+            // sustained late-game food source rather than a strict upgrade.
+            BuildingKind::Greenhouse => 13.0,
             _ => 0.0,
         }
     }
@@ -163,7 +165,7 @@ impl BuildingKind {
             BuildingKind::Sawmill => "Workers harvest nearby forest for wood.",
             BuildingKind::CoalMine => "Must be placed on a coal deposit.",
             BuildingKind::HunterHut => "Workers hunt for food.",
-            BuildingKind::Greenhouse => "Grows food indoors, whatever the weather.",
+            BuildingKind::Greenhouse => "A high-output indoor farm (more food/worker).",
             BuildingKind::Hospital => "Staffed: heals survivors faster.",
             BuildingKind::Kitchen => "Staffed: the city eats more efficiently.",
         }
@@ -339,6 +341,80 @@ pub const TUNNEL_INVESTS_PER_STAGE: u32 = 5;
 pub const TUNNEL_INVEST_WOOD: f32 = 15.0;
 pub const TUNNEL_INVEST_COAL: f32 = 12.0;
 
+// --- V0.3: technology tree (permanent cooperative upgrades) ---
+
+/// One researchable, permanent upgrade. Effects are applied in `sim::tick`;
+/// with no tech researched every effect is identity, so determinism holds.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tech {
+    Insulation,
+    EfficientFurnace,
+    Tools,
+    Rationing,
+    Medicine,
+}
+
+impl Tech {
+    pub const ALL: [Tech; 5] = [
+        Tech::Insulation,
+        Tech::EfficientFurnace,
+        Tech::Tools,
+        Tech::Rationing,
+        Tech::Medicine,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Tech::Insulation => "Insulation",
+            Tech::EfficientFurnace => "Efficient Furnace",
+            Tech::Tools => "Better Tools",
+            Tech::Rationing => "Rationing",
+            Tech::Medicine => "Medicine",
+        }
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            Tech::Insulation => "Everyone shrugs off the cold a little better.",
+            Tech::EfficientFurnace => "The furnace burns 25% less fuel.",
+            Tech::Tools => "Workers produce 25% more.",
+            Tech::Rationing => "The city eats 15% less food.",
+            Tech::Medicine => "Hospitals heal 50% faster.",
+        }
+    }
+
+    pub fn cost_wood(self) -> u32 {
+        match self {
+            Tech::Insulation => 40,
+            Tech::EfficientFurnace => 30,
+            Tech::Tools => 50,
+            Tech::Rationing => 35,
+            Tech::Medicine => 40,
+        }
+    }
+
+    pub fn cost_coal(self) -> u32 {
+        match self {
+            Tech::Insulation => 0,
+            Tech::EfficientFurnace => 20,
+            Tech::Tools => 10,
+            Tech::Rationing => 0,
+            Tech::Medicine => 20,
+        }
+    }
+}
+
+/// Flat extra warmth for every survivor once Insulation is researched.
+pub const TECH_INSULATION_WARMTH: f32 = 4.0;
+/// Furnace fuel-need multiplier with Efficient Furnace.
+pub const TECH_FURNACE_EFFICIENCY: f32 = 0.75;
+/// Production multiplier with Better Tools.
+pub const TECH_TOOLS_PRODUCTION: f32 = 1.25;
+/// Food-consumption multiplier with Rationing.
+pub const TECH_RATIONING_FOOD: f32 = 0.85;
+/// Hospital-care multiplier with Medicine.
+pub const TECH_MEDICINE_CARE: f32 = 1.5;
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct GameEvent {
     pub day: u32,
@@ -357,6 +433,8 @@ pub enum PlayerCommand {
     SetFurnaceLevel { level: u8 },
     /// Contribute resources toward excavating the Tunnel (once unlocked).
     InvestTunnel,
+    /// Spend resources to permanently unlock a technology.
+    Research { tech: Tech },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -389,6 +467,8 @@ pub struct GameState {
     pub missions: Vec<Mission>,
     /// The Tunnel megaproject (graduation to the Global World).
     pub tunnel: TunnelState,
+    /// Permanently unlocked technologies.
+    pub techs: Vec<Tech>,
     /// What guests may do in this world, set by the owner.
     pub guest_perm: GuestPermission,
     /// The player id that owns this world. Set once when the very first player
@@ -494,6 +574,10 @@ impl GameState {
         !self.missions.is_empty() && self.missions.iter().all(|m| m.done)
     }
 
+    pub fn has_tech(&self, t: Tech) -> bool {
+        self.techs.contains(&t)
+    }
+
     /// Whether any connected player currently owns the world.
     pub fn owner_present(&self) -> bool {
         self.players.iter().any(|p| p.role == Role::Owner)
@@ -514,11 +598,12 @@ impl GameState {
             GuestPermission::Full => true,
             GuestPermission::ViewOnly => false,
             GuestPermission::Build => match cmd {
-                // Building, worker assignment and the shared Tunnel goal are the
-                // cooperative core, so guests may all pitch in under Build.
+                // Building, worker assignment and the shared Tunnel/research
+                // goals are the cooperative core, so guests may all pitch in.
                 PlayerCommand::Place { .. }
                 | PlayerCommand::AdjustWorkers { .. }
-                | PlayerCommand::InvestTunnel => true,
+                | PlayerCommand::InvestTunnel
+                | PlayerCommand::Research { .. } => true,
                 // Guests may only tear down their own buildings, never touch the
                 // furnace, under the Build policy.
                 PlayerCommand::Demolish { building } => self

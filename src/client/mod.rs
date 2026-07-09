@@ -22,6 +22,7 @@ pub mod minimap;
 pub mod missions;
 pub mod net_sync;
 pub mod render;
+pub mod research;
 pub mod roles;
 pub mod touch;
 pub mod ui;
@@ -338,6 +339,7 @@ impl Plugin for ClientPlugin {
         app.add_plugins(minimap::plugin);
         app.add_plugins(roles::plugin);
         app.add_plugins(missions::plugin);
+        app.add_plugins(research::plugin);
         #[cfg(target_arch = "wasm32")]
         app.add_plugins(local_server::plugin);
     }
@@ -359,6 +361,7 @@ fn teardown_game(
     mut pings: ResMut<render::PingViz>,
     mut chat: ResMut<chat::ChatState>,
     mut reconnecting: ResMut<net_sync::Reconnecting>,
+    mut research: ResMut<research::ResearchOpen>,
 ) {
     net.0 = None;
     #[cfg(not(target_arch = "wasm32"))]
@@ -391,6 +394,9 @@ fn teardown_game(
     // Cancel any in-flight reconnect dial so its (stale) result can never be
     // installed into the next game.
     *reconnecting = Default::default();
+    // Close the research modal so a new game doesn't start with it stuck open
+    // (which would silently swallow world/camera input, same as chat).
+    *research = Default::default();
 }
 
 /// In `--smoke` mode, exit automatically after a few seconds of rendering.
