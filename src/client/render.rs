@@ -803,6 +803,66 @@ fn spawn_building(
                 ));
                 roof_y = 1.05;
             }
+            BuildingKind::Greenhouse => {
+                p.spawn((
+                    Mesh3d(assets.cube.clone()),
+                    MeshMaterial3d(body.clone()),
+                    Transform::from_xyz(0.0, 0.20, 0.0).with_scale(Vec3::new(0.8, 0.40, 0.8)),
+                ));
+                // Bright glass roof.
+                let glass = materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.62, 0.88, 0.72),
+                    ..default()
+                });
+                p.spawn((
+                    Mesh3d(assets.tent.clone()),
+                    MeshMaterial3d(glass),
+                    Transform::from_xyz(0.0, 0.40, 0.0).with_scale(Vec3::new(0.92, 0.38, 0.92)),
+                ));
+                roof_y = 0.85;
+            }
+            BuildingKind::Hospital => {
+                p.spawn((
+                    Mesh3d(assets.cube.clone()),
+                    MeshMaterial3d(body.clone()),
+                    Transform::from_xyz(0.0, 0.28, 0.0).with_scale(Vec3::new(0.8, 0.56, 0.8)),
+                ));
+                // Red cross on the roof (two crossbars).
+                let cross = materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.85, 0.20, 0.20),
+                    emissive: LinearRgba::rgb(0.35, 0.04, 0.04),
+                    ..default()
+                });
+                p.spawn((
+                    Mesh3d(assets.cube.clone()),
+                    MeshMaterial3d(cross.clone()),
+                    Transform::from_xyz(0.0, 0.62, 0.0).with_scale(Vec3::new(0.30, 0.08, 0.10)),
+                ));
+                p.spawn((
+                    Mesh3d(assets.cube.clone()),
+                    MeshMaterial3d(cross),
+                    Transform::from_xyz(0.0, 0.62, 0.0).with_scale(Vec3::new(0.10, 0.08, 0.30)),
+                ));
+                roof_y = 0.92;
+            }
+            BuildingKind::Kitchen => {
+                p.spawn((
+                    Mesh3d(assets.cube.clone()),
+                    MeshMaterial3d(body.clone()),
+                    Transform::from_xyz(0.0, 0.24, 0.0).with_scale(Vec3::new(0.78, 0.48, 0.78)),
+                ));
+                // A little chimney.
+                let stone = materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.40, 0.36, 0.34),
+                    ..default()
+                });
+                p.spawn((
+                    Mesh3d(assets.cylinder.clone()),
+                    MeshMaterial3d(stone),
+                    Transform::from_xyz(0.22, 0.58, 0.0).with_scale(Vec3::new(0.16, 0.5, 0.16)),
+                ));
+                roof_y = 0.9;
+            }
         }
 
         // A small window that glows warm at night (shared animated material).

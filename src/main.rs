@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use bevy::window::{PresentMode, Window, WindowPlugin, WindowResolution};
 
 use client::{AutoAction, AutoStart, ClientPlugin, Settings, DEFAULT_PORT};
-use frozen_city::game::types::DEFAULT_WIN_DAYS;
+use frozen_city::game::types::{DEFAULT_WIN_DAYS, MIN_WIN_DAYS};
 
 struct Cli {
     mode: Mode,
@@ -92,7 +92,7 @@ fn parse_cli() -> Cli {
             }
             "--days" => {
                 if let Some(d) = next.and_then(|s| s.parse::<u32>().ok()) {
-                    cli.win_days = d.max(1);
+                    cli.win_days = d.max(MIN_WIN_DAYS);
                     i += 1;
                 }
             }
@@ -284,7 +284,7 @@ fn apply_web_overrides(cli: &mut Cli) {
             }
             "days" => {
                 if let Ok(d) = val.parse::<u32>() {
-                    cli.win_days = d.max(1);
+                    cli.win_days = d.max(MIN_WIN_DAYS);
                 }
             }
             "join" => cli.mode = Mode::Join,

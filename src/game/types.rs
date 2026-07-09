@@ -17,10 +17,17 @@ pub const FURNACE_X: u8 = 31;
 pub const FURNACE_Y: u8 = 31;
 
 pub const DEFAULT_WIN_DAYS: u32 = 12;
+/// Day-based victory must never fire before the longest `SurviveDays` mission
+/// can complete, or the Tunnel could be permanently unreachable on that world.
+pub const MIN_WIN_DAYS: u32 = 4;
 pub const MAX_POPULATION: i32 = 60;
 
 pub const FOOD_PER_SURVIVOR_DAY: f32 = 1.2;
 pub const FURNACE_COAL_PER_DAY_PER_LEVEL: f32 = 12.0;
+/// Extra HP per in-game day each staffed hospital worker restores to survivors.
+pub const HOSPITAL_CARE_PER_WORKER_DAY: f32 = 2.0;
+/// Food-consumption multiplier while any kitchen is staffed (lower = thriftier).
+pub const KITCHEN_FOOD_EFFICIENCY: f32 = 0.75;
 /// Wood burns less efficiently than coal.
 pub const WOOD_FUEL_PENALTY: f32 = 1.5;
 pub const DEMOLISH_REFUND: f32 = 0.4;
@@ -59,14 +66,20 @@ pub enum BuildingKind {
     Sawmill,
     CoalMine,
     HunterHut,
+    Greenhouse,
+    Hospital,
+    Kitchen,
 }
 
 impl BuildingKind {
-    pub const BUILDABLE: [BuildingKind; 4] = [
+    pub const BUILDABLE: [BuildingKind; 7] = [
         BuildingKind::Tent,
         BuildingKind::Sawmill,
         BuildingKind::CoalMine,
         BuildingKind::HunterHut,
+        BuildingKind::Greenhouse,
+        BuildingKind::Hospital,
+        BuildingKind::Kitchen,
     ];
 
     pub fn name(self) -> &'static str {
@@ -76,6 +89,9 @@ impl BuildingKind {
             BuildingKind::Sawmill => "Sawmill",
             BuildingKind::CoalMine => "Coal Mine",
             BuildingKind::HunterHut => "Hunter's Hut",
+            BuildingKind::Greenhouse => "Greenhouse",
+            BuildingKind::Hospital => "Hospital",
+            BuildingKind::Kitchen => "Kitchen",
         }
     }
 
@@ -86,6 +102,9 @@ impl BuildingKind {
             BuildingKind::Sawmill => "S",
             BuildingKind::CoalMine => "C",
             BuildingKind::HunterHut => "H",
+            BuildingKind::Greenhouse => "G",
+            BuildingKind::Hospital => "+",
+            BuildingKind::Kitchen => "K",
         }
     }
 
@@ -96,6 +115,9 @@ impl BuildingKind {
             BuildingKind::Sawmill => 25,
             BuildingKind::CoalMine => 30,
             BuildingKind::HunterHut => 25,
+            BuildingKind::Greenhouse => 30,
+            BuildingKind::Hospital => 35,
+            BuildingKind::Kitchen => 25,
         }
     }
 
@@ -105,15 +127,20 @@ impl BuildingKind {
             BuildingKind::Sawmill => 2,
             BuildingKind::CoalMine => 3,
             BuildingKind::HunterHut => 2,
+            BuildingKind::Greenhouse => 2,
+            BuildingKind::Hospital => 2,
+            BuildingKind::Kitchen => 1,
         }
     }
 
-    /// Units produced per worker per in-game day.
+    /// Units produced per worker per in-game day (resource producers only;
+    /// Hospital/Kitchen provide effects handled in the tick, not raw output).
     pub fn production_per_worker_day(self) -> f32 {
         match self {
             BuildingKind::Sawmill => 12.0,
             BuildingKind::CoalMine => 15.0,
             BuildingKind::HunterHut => 10.0,
+            BuildingKind::Greenhouse => 9.0,
             _ => 0.0,
         }
     }
@@ -136,6 +163,9 @@ impl BuildingKind {
             BuildingKind::Sawmill => "Workers harvest nearby forest for wood.",
             BuildingKind::CoalMine => "Must be placed on a coal deposit.",
             BuildingKind::HunterHut => "Workers hunt for food.",
+            BuildingKind::Greenhouse => "Grows food indoors, whatever the weather.",
+            BuildingKind::Hospital => "Staffed: heals survivors faster.",
+            BuildingKind::Kitchen => "Staffed: the city eats more efficiently.",
         }
     }
 }
@@ -236,6 +266,79 @@ pub enum GuestPermission {
     Full,
 }
 
+// --- V0.3: missions & the Tunnel (personal-world progression) ---
+
+/// Each variant carries its completion target. Progress is derived from the
+/// live [`GameState`] (see [`GameState::mission_current`]), so missions never
+/// need per-tick counters and stay deterministic.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MissionKind {
+    BuildTents(u32),
+    Population(u32),
+    Sawmills(u32),
+    StockpileCoal(u32),
+    SurviveDays(u32),
+}
+
+impl MissionKind {
+    pub fn target(self) -> u32 {
+        match self {
+            MissionKind::BuildTents(n)
+            | MissionKind::Population(n)
+            | MissionKind::Sawmills(n)
+            | MissionKind::StockpileCoal(n)
+            | MissionKind::SurviveDays(n) => n,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            MissionKind::BuildTents(_) => "Build tents",
+            MissionKind::Population(_) => "Reach population",
+            MissionKind::Sawmills(_) => "Build sawmills",
+            MissionKind::StockpileCoal(_) => "Stockpile coal",
+            MissionKind::SurviveDays(_) => "Survive days",
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Mission {
+    pub kind: MissionKind,
+    pub reward_wood: u32,
+    pub reward_coal: u32,
+    pub reward_food: u32,
+    pub done: bool,
+}
+
+/// The Tunnel: the multi-stage megaproject that graduates a personal world to
+/// the Global World. Unlocked once every mission is complete, then advanced by
+/// `InvestTunnel` commands until `stage` reaches [`TUNNEL_STAGES`].
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct TunnelState {
+    pub unlocked: bool,
+    /// 0..=TUNNEL_STAGES; equal to TUNNEL_STAGES means complete.
+    pub stage: u8,
+    /// Progress within the current stage, 0.0..1.0.
+    pub progress: f32,
+}
+
+impl Default for TunnelState {
+    fn default() -> Self {
+        TunnelState {
+            unlocked: false,
+            stage: 0,
+            progress: 0.0,
+        }
+    }
+}
+
+pub const TUNNEL_STAGES: u8 = 3;
+/// How many `InvestTunnel` contributions complete one stage.
+pub const TUNNEL_INVESTS_PER_STAGE: u32 = 5;
+pub const TUNNEL_INVEST_WOOD: f32 = 15.0;
+pub const TUNNEL_INVEST_COAL: f32 = 12.0;
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct GameEvent {
     pub day: u32,
@@ -252,6 +355,8 @@ pub enum PlayerCommand {
     Demolish { building: u32 },
     AdjustWorkers { building: u32, delta: i8 },
     SetFurnaceLevel { level: u8 },
+    /// Contribute resources toward excavating the Tunnel (once unlocked).
+    InvestTunnel,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -280,6 +385,10 @@ pub struct GameState {
     pub total_chat: u64,
     /// Active map pings; expired each tick after [`PING_TTL_TICKS`].
     pub pings: Vec<Ping>,
+    /// Ordered personal-world missions; completing all unlocks the Tunnel.
+    pub missions: Vec<Mission>,
+    /// The Tunnel megaproject (graduation to the Global World).
+    pub tunnel: TunnelState,
     /// What guests may do in this world, set by the owner.
     pub guest_perm: GuestPermission,
     /// The player id that owns this world. Set once when the very first player
@@ -362,6 +471,29 @@ impl GameState {
         self.player(id).map(|p| p.role == Role::Owner).unwrap_or(false)
     }
 
+    /// Live progress value for a mission, compared against `kind.target()`.
+    pub fn mission_current(&self, kind: MissionKind) -> u32 {
+        match kind {
+            MissionKind::BuildTents(_) => self
+                .buildings
+                .iter()
+                .filter(|b| b.kind == BuildingKind::Tent)
+                .count() as u32,
+            MissionKind::Population(_) => self.survivors.len() as u32,
+            MissionKind::Sawmills(_) => self
+                .buildings
+                .iter()
+                .filter(|b| b.kind == BuildingKind::Sawmill)
+                .count() as u32,
+            MissionKind::StockpileCoal(_) => self.stock.coal.max(0.0) as u32,
+            MissionKind::SurviveDays(_) => self.day(),
+        }
+    }
+
+    pub fn all_missions_done(&self) -> bool {
+        !self.missions.is_empty() && self.missions.iter().all(|m| m.done)
+    }
+
     /// Whether any connected player currently owns the world.
     pub fn owner_present(&self) -> bool {
         self.players.iter().any(|p| p.role == Role::Owner)
@@ -382,7 +514,11 @@ impl GameState {
             GuestPermission::Full => true,
             GuestPermission::ViewOnly => false,
             GuestPermission::Build => match cmd {
-                PlayerCommand::Place { .. } | PlayerCommand::AdjustWorkers { .. } => true,
+                // Building, worker assignment and the shared Tunnel goal are the
+                // cooperative core, so guests may all pitch in under Build.
+                PlayerCommand::Place { .. }
+                | PlayerCommand::AdjustWorkers { .. }
+                | PlayerCommand::InvestTunnel => true,
                 // Guests may only tear down their own buildings, never touch the
                 // furnace, under the Build policy.
                 PlayerCommand::Demolish { building } => self

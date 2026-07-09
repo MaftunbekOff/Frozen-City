@@ -19,6 +19,7 @@ pub mod input;
 pub mod local_server;
 pub mod menu;
 pub mod minimap;
+pub mod missions;
 pub mod net_sync;
 pub mod render;
 pub mod roles;
@@ -197,6 +198,9 @@ pub fn kind_color(k: BuildingKind) -> Color {
         BuildingKind::Sawmill => Color::srgb(0.55, 0.38, 0.20),
         BuildingKind::CoalMine => Color::srgb(0.36, 0.37, 0.44),
         BuildingKind::HunterHut => Color::srgb(0.34, 0.51, 0.30),
+        BuildingKind::Greenhouse => Color::srgb(0.40, 0.68, 0.45),
+        BuildingKind::Hospital => Color::srgb(0.86, 0.88, 0.92),
+        BuildingKind::Kitchen => Color::srgb(0.78, 0.52, 0.30),
     }
 }
 
@@ -333,6 +337,7 @@ impl Plugin for ClientPlugin {
         app.add_plugins(chat::plugin);
         app.add_plugins(minimap::plugin);
         app.add_plugins(roles::plugin);
+        app.add_plugins(missions::plugin);
         #[cfg(target_arch = "wasm32")]
         app.add_plugins(local_server::plugin);
     }

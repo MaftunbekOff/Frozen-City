@@ -89,6 +89,14 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
         chat: Vec::new(),
         total_chat: 0,
         pings: Vec::new(),
+        missions: vec![
+            Mission { kind: MissionKind::BuildTents(2),     reward_wood: 20, reward_coal: 0, reward_food: 0,  done: false },
+            Mission { kind: MissionKind::Population(10),    reward_wood: 0,  reward_coal: 0, reward_food: 20, done: false },
+            Mission { kind: MissionKind::Sawmills(1),       reward_wood: 20, reward_coal: 0, reward_food: 0,  done: false },
+            Mission { kind: MissionKind::StockpileCoal(60), reward_wood: 20, reward_coal: 0, reward_food: 0,  done: false },
+            Mission { kind: MissionKind::SurviveDays(4),    reward_wood: 0,  reward_coal: 0, reward_food: 30, done: false },
+        ],
+        tunnel: TunnelState::default(),
         guest_perm: GuestPermission::Build,
         owner_id: None,
         next_id,
@@ -442,6 +450,28 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
         PlayerCommand::SetFurnaceLevel { level } => {
             state.furnace_level = (*level).min(3);
         }
+        PlayerCommand::InvestTunnel => {
+            if state.tunnel.unlocked
+                && state.tunnel.stage < TUNNEL_STAGES
+                && state.stock.wood >= TUNNEL_INVEST_WOOD
+                && state.stock.coal >= TUNNEL_INVEST_COAL
+            {
+                state.stock.wood -= TUNNEL_INVEST_WOOD;
+                state.stock.coal -= TUNNEL_INVEST_COAL;
+                state.tunnel.progress += 1.0 / TUNNEL_INVESTS_PER_STAGE as f32;
+                if state.tunnel.progress >= 1.0 - 1e-4 {
+                    state.tunnel.progress = 0.0;
+                    state.tunnel.stage += 1;
+                    if state.tunnel.stage >= TUNNEL_STAGES {
+                        state.tunnel.stage = TUNNEL_STAGES;
+                        state.phase = GamePhase::Won;
+                        push_event(state, "The Tunnel breaks through - the Global World awaits. Victory!");
+                    } else {
+                        push_event(state, format!("Tunnel stage {}/{} excavated.", state.tunnel.stage, TUNNEL_STAGES));
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -518,6 +548,7 @@ pub fn tick(state: &mut GameState) {
         let amount = workers as f32 * per_day / TICKS_PER_DAY as f32;
         match kind {
             BuildingKind::HunterHut => state.stock.food += amount,
+            BuildingKind::Greenhouse => state.stock.food += amount,
             BuildingKind::Sawmill => {
                 state.buildings[i].progress += amount;
                 while state.buildings[i].progress >= 1.0 {
@@ -567,7 +598,13 @@ pub fn tick(state: &mut GameState) {
     }
     let tph = TICKS_PER_DAY as f32 / 24.0; // ticks per in-game hour
     let hunger_per_tick = 100.0 / TICKS_PER_DAY as f32;
-    let portion = FOOD_PER_SURVIVOR_DAY / TICKS_PER_DAY as f32;
+    let hospital_workers: u32 = state.buildings.iter()
+        .filter(|b| b.kind == BuildingKind::Hospital).map(|b| b.workers as u32).sum();
+    let kitchen_staffed = state.buildings.iter()
+        .any(|b| b.kind == BuildingKind::Kitchen && b.workers > 0);
+    let care_per_tick = hospital_workers as f32 * HOSPITAL_CARE_PER_WORKER_DAY / TICKS_PER_DAY as f32;
+    let portion = FOOD_PER_SURVIVOR_DAY / TICKS_PER_DAY as f32
+        * if kitchen_staffed { KITCHEN_FOOD_EFFICIENCY } else { 1.0 };
     let mut deaths: Vec<(String, bool)> = Vec::new();
 
     for (i, s) in state.survivors.iter_mut().enumerate() {
@@ -594,6 +631,9 @@ pub fn tick(state: &mut GameState) {
         }
         if s.hunger >= 80.0 {
             s.hp -= 4.0 * ((s.hunger - 80.0) / 20.0) / tph;
+        }
+        if care_per_tick > 0.0 {
+            s.hp = (s.hp + care_per_tick).min(100.0);
         }
         if s.hp <= 0.0 {
             deaths.push((s.name.clone(), s.hunger >= 80.0));
@@ -622,6 +662,30 @@ pub fn tick(state: &mut GameState) {
             let plural = if n == 1 { "" } else { "s" };
             push_event(state, format!("{} newcomer{} arrived seeking shelter.", n, plural));
         }
+    }
+
+    // --- Missions & Tunnel ---
+    for i in 0..state.missions.len() {
+        if state.missions[i].done {
+            continue;
+        }
+        let kind = state.missions[i].kind;
+        if state.mission_current(kind) >= kind.target() {
+            state.missions[i].done = true;
+            let (rw, rc, rf) = (
+                state.missions[i].reward_wood,
+                state.missions[i].reward_coal,
+                state.missions[i].reward_food,
+            );
+            state.stock.wood += rw as f32;
+            state.stock.coal += rc as f32;
+            state.stock.food += rf as f32;
+            push_event(state, format!("Mission complete: {} {}.", kind.label(), kind.target()));
+        }
+    }
+    if !state.tunnel.unlocked && state.all_missions_done() {
+        state.tunnel.unlocked = true;
+        push_event(state, "All missions complete - the Tunnel can now be excavated!");
     }
 
     // --- Defeat ---

@@ -111,7 +111,7 @@ pub fn spawn_menu(mut commands: Commands, settings: Res<Settings>, view: Res<Gam
             ));
             p.spawn((
                 Text::new(
-                    "In game: LMB place/select   RMB cancel   1-4 quick build   WASD pan   Q/E rotate   MMB tilt   wheel zoom",
+                    "In game: LMB place/select   RMB cancel   1-7 quick build   WASD pan   Q/E rotate   MMB tilt   wheel zoom",
                 ),
                 TextFont::from_font_size(13.0),
                 TextColor(TEXT_DIM),

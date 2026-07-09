@@ -82,8 +82,8 @@ src/net/    TCP + WebSocket + in-memory kanallar; server thread 5 Hz tick, snaps
 src/client/ Bevy 0.19: protsedural render (assetlarsiz), UI, input, chat, minimap
             minimap.rs — butun xaritaning burchakdagi ko'rinishi (teren+binolar+kamera)
             local_server.rs — brauzerda yakka o'yin (sim Bevy tizimi sifatida, threadsiz)
-tests/      46 sim-invariant testi + 12 e2e test (TCP, WebSocket, HTTP, chat,
-            attributsiya, reconnect, rollar) — protokol fuzz testi ham
+tests/      53 sim-invariant testi + 12 e2e test (TCP, WebSocket, HTTP, chat,
+            attributsiya, reconnect, rollar, missiya/tunnel) — protokol fuzz testi ham
 ```
 
 - **Server-avtoritativ:** mijozlar faqat buyruq yuboradi (`Place`, `Demolish`,
@@ -111,7 +111,7 @@ Binar: `target/release/frozen_city(.exe)`. Multiplayer uchun hostning 4595/TCP p
 ## Testlar
 
 ```bash
-cargo test          # 58 test: determinizm, invariantlar, protokol+fuzz, TCP/WS/HTTP e2e, chat/attributsiya/reconnect/rollar
+cargo test          # 65 test: determinizm, invariantlar, protokol+fuzz, e2e, chat/attributsiya/reconnect/rollar/missiya
 cargo run -- --smoke  # render smoke-test (avtomatik yopiladi)
 ```
 
@@ -119,4 +119,4 @@ cargo run -- --smoke  # render smoke-test (avtomatik yopiladi)
 
 **Vizyon:** shaxsiy olam (missiyalar) → **Tunnel** → Global Olam (butun dunyo bitta doimiy olamda) → do'stlarni o'z olamingga taklif qilish.
 
-V0.2 tarmoq poydevori — ✅ chat · ✅ attributsiya · ✅ reconnect · ✅ rate-limit · ✅ rollar/egalik · ✅ minimap; qoldi: delta-snapshot, interpolatsiya · V0.3 missiyalar + Tunnel · V0.4 akkauntlar + doimiy shaxsiy olamlar · V0.5 Global Olam (hub) · V0.6 taklif va mehmon co-op · V1.0 sayqal + tarqatish. Batafsil: [ROADMAP.md](ROADMAP.md).
+V0.2 tarmoq poydevori — ✅ chat · ✅ attributsiya · ✅ reconnect · ✅ rate-limit · ✅ rollar/egalik · ✅ minimap · V0.3 — ✅ missiyalar · ✅ Tunnel (graduatsiya); qoldi: yangi binolar, texnologiya, voqealar · V0.4 akkauntlar + doimiy shaxsiy olamlar · V0.5 Global Olam (hub) · V0.6 taklif va mehmon co-op · V1.0 sayqal + tarqatish. Batafsil: [ROADMAP.md](ROADMAP.md).

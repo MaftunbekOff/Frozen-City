@@ -13,8 +13,9 @@ M0–M7 bosqichlar yakunlangan:
 - ✅ HUD, qurish/bino/pech panellari, menyu, voqealar lentasi, game-over
 - ✅ Brauzer (WASM), URL parametrlari, inline singleplayer
 - ✅ Mobil touch boshqaruv va grafika sifat darajalari
-- ✅ 58 test: sim invariantlari + attributsiya/chat/ping/reconnect/rollar e2e + protokol fuzz
+- ✅ 65 test: sim invariantlari + attributsiya/chat/ping/reconnect/rollar/missiya e2e + fuzz
 - ✅ Mini-xarita (minimap): butun xaritaning burchakdagi ko'rinishi + bosib borish + pinglar
+- ✅ V0.3 boshlandi: **missiyalar** (deterministik quest+mukofot) va **Tunnel** (graduatsiya)
 
 **V0.2 (jarayonda):** chat, attributsiya, reconnect, rate-limit va **rollar/egalik**
 yakunlandi; qoldi: **delta-snapshot** va **interpolatsiya**.
@@ -110,19 +111,23 @@ Tunnelgacha yetaklasin.
 
 ### Vazifalar
 
-- [ ] **Missiya tizimi**: deterministik quest'lar («3 chodir qur», «10 kun omon
-      qol», «50 ko'mir zaxira qil»), mukofotlar (resurs, yangi bino/texnologiya
-      ochilishi). Birinchi missiyalar tutorial vazifasini ham bajaradi.
-- [ ] **G'alaba sharti qayta ishlanadi**: «12-kun» o'rniga missiya-progressiya;
-      shahar doimiy yashaydi (endless asos), mag'lubiyat baribir mumkin.
+- [x] **Missiya tizimi**: deterministik quest'lar (chodir qur, aholi, arra zavodi,
+      ko'mir zaxirasi, kun omon qol) + resurs mukofotlari; progress snapshot ichida
+      (`GameState.missions`), simda deterministik baholanadi. Client'da missiya paneli.
+- [~] **G'alaba sharti qayta ishlanadi**: Tunnel bitgani = **graduatsiya g'alabasi**
+      (Global Olamga chiqish) — «12-kun» g'alaba yonida qo'shimcha yo'l sifatida.
+      To'liq endless rejim (kun-g'alabani olib tashlash) keyingi qadam.
 - [ ] **Yangi binolar** (4 → 8+): Kasalxona, Oshxona, Issiqxona, Ombor — missiya
       va texnologiyalar orqali ochiladi.
 - [ ] **Texnologiya daraxti**: Tadqiqot punkti + 6–10 texnologiya.
 - [ ] **Voqealar tizimi**: kasallik, qochoqlar karvoni (tanlov), qor bo'roni.
-- [ ] **TUNNEL**: eng katta qurilish loyihasi — ko'p bosqichli (qazish →
-      mustahkamlash → ochilish), katta resurs + missiya shartlari. Bitgach
-      Global Olamga o'tish ochiladi. Hozircha: mavjud umumiy serverga o'tish.
-- [ ] **Balans regression testlari**: standart strategiyalar sim-testda.
+- [x] **TUNNEL**: ko'p bosqichli megaloyiha — barcha missiyalar bitgach ochiladi,
+      `InvestTunnel` buyrug'i bilan bosqichma-bosqich qaziladi (3 bosqich), bitgach
+      graduatsiya g'alabasi (Global Olamga chiqish signali). Client'da Tunnel paneli.
+      Keyingisi: haqiqiy hub'ga o'tish (V0.5).
+- [ ] **Yangi binolar** (4 → 8+) va **texnologiya daraxti** va **voqealar tizimi**
+      (kasallik, karvon, bo'ron) — V0.3 ning qolgan kontenti.
+- [~] **Balans regression testlari**: 7 missiya/tunnel sim-testi qo'shildi.
 
 ### Natija mezonlari
 
