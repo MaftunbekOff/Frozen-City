@@ -163,19 +163,43 @@ fn main() {
         resolution = resolution.with_scale_factor_override(dpr.min(cap));
     }
 
+    #[allow(unused_mut)]
+    let mut plugins = DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: "Frozen City".to_string(),
+            resolution,
+            present_mode: PresentMode::AutoVsync,
+            // On the web, fill the browser window (no-op on native).
+            fit_canvas_to_parent: true,
+            ..default()
+        }),
+        ..default()
+    });
+    // This binary is the dedicated WebGPU bundle (see Cargo.toml's `webgpu`
+    // feature and build-web.sh): boot.js only loads it after a real
+    // `navigator.gpu.requestAdapter()` capability probe succeeded, so WebGPU
+    // should always be available here. `Backends::GL` is included anyway as a
+    // cheap extra safety net — Bevy's own default would request
+    // `BROWSER_WEBGPU` alone and hard-panic instead of falling back if the
+    // probe ever turns out to be a false positive.
+    #[cfg(all(target_arch = "wasm32", feature = "webgpu"))]
+    {
+        use bevy::render::{
+            settings::{Backends, RenderCreation, WgpuSettings},
+            RenderPlugin,
+        };
+        plugins = plugins.set(RenderPlugin {
+            render_creation: RenderCreation::Automatic(Box::new(WgpuSettings {
+                backends: Some(Backends::BROWSER_WEBGPU | Backends::GL),
+                ..default()
+            })),
+            ..default()
+        });
+    }
+
     App::new()
         .insert_resource(ClearColor(Color::srgb(0.035, 0.055, 0.095)))
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Frozen City".to_string(),
-                resolution,
-                present_mode: PresentMode::AutoVsync,
-                // On the web, fill the browser window (no-op on native).
-                fit_canvas_to_parent: true,
-                ..default()
-            }),
-            ..default()
-        }))
+        .add_plugins(plugins)
         .insert_resource(Settings {
             name: cli.name,
             join_addr: cli.join_addr,

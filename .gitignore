@@ -1,3 +1,4 @@
 /target
-/web/pkg/
+/web/pkg-webgpu/
+/web/pkg-webgl/
 /cloudflared.exe

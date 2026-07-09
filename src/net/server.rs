@@ -440,10 +440,13 @@ fn serve_static(mut stream: TcpStream, path: &str, accepts_gzip: bool) {
         Some(body) => {
             let mime = content_type(&candidate);
             let enc = if gzipped { "Content-Encoding: gzip\r\n" } else { "" };
-            // The wasm/js bundle is not content-hashed, so cache briefly with
-            // revalidation rather than forever (avoids a stale build after a
-            // redeploy against the server-authoritative wire format).
-            let cache = if candidate.starts_with(PathBuf::from(WEB_ROOT).join("pkg")) {
+            // The wasm/js bundles are not content-hashed, so cache briefly
+            // with revalidation rather than forever (avoids a stale build
+            // after a redeploy against the server-authoritative wire
+            // format). A plain string check, not `Path::starts_with` (which
+            // compares whole components — "pkg-webgpu" would never match a
+            // "pkg" prefix that way).
+            let cache = if rel.trim_start_matches('/').starts_with("pkg-") {
                 "Cache-Control: public, max-age=3600\r\n"
             } else {
                 "Cache-Control: no-cache\r\n"

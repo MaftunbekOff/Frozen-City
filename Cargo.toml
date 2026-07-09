@@ -5,10 +5,22 @@ edition = "2021"
 
 [dependencies]
 # `wav` adds the WAV decoder so the procedurally-synthesized SFX
-# (src/client/audio.rs) can be decoded; bevy's default features are kept.
+# (src/client/audio.rs) can be decoded; bevy's default features (which
+# include webgl2) are kept.
 bevy = { version = "0.19", features = ["wav"] }
 serde = { version = "1", features = ["derive"] }
 bincode = "1.3"
+
+[features]
+# Built as a SEPARATE wasm bundle (see build-web.sh), never mixed into the
+# default build: Bevy's WgpuSettings, when the `webgpu` feature is present,
+# only checks that `navigator.gpu` *exists* before committing to it — real
+# adapter acquisition can still fail (e.g. no GPU driver), and there is no
+# automatic fallback to WebGL2 at that point, just a hard panic. boot.js picks
+# between this bundle and the plain (default-features) WebGL2 one at runtime,
+# after actually calling `navigator.gpu.requestAdapter()` — a real capability
+# probe, not just a feature-presence check.
+webgpu = ["bevy/webgpu"]
 
 # Playable performance in dev builds: optimize deps fully, own code lightly.
 [profile.dev]
@@ -26,11 +38,6 @@ strip = true
 tungstenite = "0.29.0"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-# WebGPU is the modern, much faster web backend (Bevy's GPU-driven fast path,
-# like native Vulkan) — dramatically better than WebGL2 on mobile. Supported by
-# Android Chrome 121+, Chrome/Edge/Firefox 2024+, Safari iOS 18+. Older browsers
-# would need a separate WebGL2 build (see build-web.sh notes).
-bevy = { version = "0.19", features = ["webgpu"] }
 js-sys = "0.3.103"
 wasm-bindgen = "0.2.126"
 web-sys = { version = "0.3.103", features = ["WebSocket", "BinaryType", "MessageEvent", "CloseEvent", "ErrorEvent", "Window", "Location", "Navigator"] }

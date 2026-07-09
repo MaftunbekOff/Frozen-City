@@ -365,6 +365,7 @@ pub struct FpsText;
 pub fn fps_update(
     diagnostics: Res<bevy::diagnostic::DiagnosticsStore>,
     quality: Res<Quality>,
+    adapter: Option<Res<bevy::render::renderer::RenderAdapterInfo>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut q: Query<&mut Text, With<FpsText>>,
 ) {
@@ -373,22 +374,33 @@ pub fn fps_update(
         .get(&bevy::diagnostic::FrameTimeDiagnosticsPlugin::FPS)
         .and_then(|d| d.smoothed())
         .unwrap_or(0.0);
-    // Also surface the graphics tier and the actual backing resolution so
-    // performance problems (esp. mobile-web fill rate) can be diagnosed on-device.
+    // Also surface the graphics tier, the actual GPU backend in use (so
+    // players/devs can see WebGPU vs the WebGL2 fallback at a glance) and the
+    // backing resolution, so performance problems (esp. mobile-web fill
+    // rate) can be diagnosed on-device.
     let tier = match *quality {
         Quality::Low => "Low",
         Quality::Medium => "Med",
         Quality::High => "High",
     };
-    let s = if let Ok(w) = windows.single() {
-        format!(
-            "FPS {fps:.0}  |  {tier}  |  {}x{}",
+    // wgpu's `Backend::to_str()` returns lowercase machine names ("gl",
+    // "webgpu", "vulkan", ...); render the ones players will actually see friendlier.
+    let backend = adapter.map(|a| match a.0.backend.to_str() {
+        "webgpu" => "WebGPU".to_string(),
+        "gl" => "WebGL2".to_string(),
+        other => other.to_string(),
+    });
+    let mut s = format!("FPS {fps:.0}  |  {tier}");
+    if let Some(b) = backend {
+        s.push_str(&format!("  |  {b}"));
+    }
+    if let Ok(w) = windows.single() {
+        s.push_str(&format!(
+            "  |  {}x{}",
             w.resolution.physical_width(),
             w.resolution.physical_height()
-        )
-    } else {
-        format!("FPS {fps:.0}  |  {tier}")
-    };
+        ));
+    }
     if t.0 != s {
         t.0 = s;
     }
