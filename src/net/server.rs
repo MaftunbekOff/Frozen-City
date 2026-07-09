@@ -295,11 +295,18 @@ fn handle_http(mut stream: TcpStream, to_server: Sender<ToServer>) {
         .and_then(|l| l.split_whitespace().nth(1))
         .unwrap_or("/")
         .to_string();
-    let is_upgrade = text.to_ascii_lowercase().contains("upgrade: websocket");
+    let lower = text.to_ascii_lowercase();
+    let is_upgrade = lower.contains("upgrade: websocket");
     if is_upgrade {
         serve_websocket(stream, head, to_server);
     } else {
-        serve_static(stream, &path);
+        // Serve the precompressed .gz sibling when the client accepts gzip —
+        // the assetless wasm is ~66 MB raw vs ~15 MB gzipped, which matters a
+        // lot on mobile web.
+        let accepts_gzip = lower
+            .lines()
+            .any(|l| l.starts_with("accept-encoding:") && l.contains("gzip"));
+        serve_static(stream, &path, accepts_gzip);
     }
 }
 
@@ -407,7 +414,7 @@ fn serve_websocket(stream: TcpStream, head: Vec<u8>, to_server: Sender<ToServer>
 }
 
 /// Minimal static file server for the web build (`web/` next to the binary).
-fn serve_static(mut stream: TcpStream, path: &str) {
+fn serve_static(mut stream: TcpStream, path: &str, accepts_gzip: bool) {
     let rel = path.split('?').next().unwrap_or("/");
     let rel = if rel == "/" { "/index.html" } else { rel };
     let candidate = PathBuf::from(WEB_ROOT).join(rel.trim_start_matches('/'));
@@ -416,16 +423,33 @@ fn serve_static(mut stream: TcpStream, path: &str) {
     let safe = candidate
         .components()
         .all(|c| matches!(c, Component::Normal(_)));
-    let body = if safe {
-        std::fs::read(&candidate).ok()
+    // Prefer a precompressed `.gz` sibling (produced by build-web.sh) when the
+    // client accepts gzip — turns a 66 MB wasm transfer into ~15 MB.
+    let gz = PathBuf::from(format!("{}.gz", candidate.to_string_lossy()));
+    let (body, gzipped) = if safe && accepts_gzip {
+        match std::fs::read(&gz) {
+            Ok(b) => (Some(b), true),
+            Err(_) => (std::fs::read(&candidate).ok(), false),
+        }
+    } else if safe {
+        (std::fs::read(&candidate).ok(), false)
     } else {
-        None
+        (None, false)
     };
     let response = match body {
         Some(body) => {
             let mime = content_type(&candidate);
+            let enc = if gzipped { "Content-Encoding: gzip\r\n" } else { "" };
+            // The wasm/js bundle is not content-hashed, so cache briefly with
+            // revalidation rather than forever (avoids a stale build after a
+            // redeploy against the server-authoritative wire format).
+            let cache = if candidate.starts_with(PathBuf::from(WEB_ROOT).join("pkg")) {
+                "Cache-Control: public, max-age=3600\r\n"
+            } else {
+                "Cache-Control: no-cache\r\n"
+            };
             let mut r = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                "HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\n{enc}{cache}Content-Length: {}\r\nConnection: close\r\n\r\n",
                 body.len()
             )
             .into_bytes();

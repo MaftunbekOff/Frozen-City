@@ -502,6 +502,9 @@ pub struct GameState {
     pub missions: Vec<Mission>,
     /// The Tunnel megaproject (graduation to the Global World).
     pub tunnel: TunnelState,
+    /// Set when the win was earned by completing the Tunnel (graduating to
+    /// the Global World), as opposed to surviving to the day-count victory.
+    pub graduated: bool,
     /// Permanently unlocked technologies.
     pub techs: Vec<Tech>,
     /// Tick until which a disease is active (0 = none).

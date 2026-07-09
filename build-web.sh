@@ -17,13 +17,21 @@ cargo build --release --target wasm32-unknown-unknown
 wasm-bindgen --target web --no-typescript --out-dir web/pkg \
   target/wasm32-unknown-unknown/release/frozen_city.wasm
 
+echo "wasm size before wasm-opt: $(du -h web/pkg/frozen_city_bg.wasm | cut -f1)"
+
 # Shrink the module when binaryen is available (60+ MB -> much smaller).
 if command -v wasm-opt >/dev/null; then
   wasm-opt -Oz --strip-debug --all-features \
     -o web/pkg/frozen_city_bg.wasm.opt web/pkg/frozen_city_bg.wasm
   mv web/pkg/frozen_city_bg.wasm.opt web/pkg/frozen_city_bg.wasm
+  echo "wasm size after wasm-opt:  $(du -h web/pkg/frozen_city_bg.wasm | cut -f1)"
 else
-  echo "note: install binaryen (wasm-opt) to shrink the .wasm considerably"
+  echo "=========================================================================="
+  echo "  WARNING: binaryen (wasm-opt) not found -- shipping an UNOPTIMIZED wasm!"
+  echo "  This blob is likely ~60-70 MB, which is a serious problem on mobile."
+  echo "  Install binaryen and re-run this script to shrink it considerably:"
+  echo "    https://github.com/WebAssembly/binaryen"
+  echo "=========================================================================="
 fi
 
 # Precompressed copies: a web server with gzip_static serves these directly.

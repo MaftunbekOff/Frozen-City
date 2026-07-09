@@ -97,6 +97,7 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
             Mission { kind: MissionKind::SurviveDays(4),    reward_wood: 0,  reward_coal: 0, reward_food: 30, done: false },
         ],
         tunnel: TunnelState::default(),
+        graduated: false,
         techs: Vec::new(),
         disease_until: 0,
         blizzard_until: 0,
@@ -470,6 +471,7 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                     if state.tunnel.stage >= TUNNEL_STAGES {
                         state.tunnel.stage = TUNNEL_STAGES;
                         state.phase = GamePhase::Won;
+                        state.graduated = true;
                         push_event(state, "The Tunnel breaks through - the Global World awaits. Victory!");
                     } else {
                         push_event(state, format!("Tunnel stage {}/{} excavated.", state.tunnel.stage, TUNNEL_STAGES));

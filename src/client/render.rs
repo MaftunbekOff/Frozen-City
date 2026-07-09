@@ -23,6 +23,19 @@ use super::*;
 
 // ---------------------------------------------------------------- resources
 
+/// Fixed `BuildingKind` order backing `GameAssets::building_mats` — index
+/// `i` corresponds to `ALL_KINDS[i]`.
+const ALL_KINDS: [BuildingKind; 8] = [
+    BuildingKind::Furnace,
+    BuildingKind::Tent,
+    BuildingKind::Sawmill,
+    BuildingKind::CoalMine,
+    BuildingKind::HunterHut,
+    BuildingKind::Greenhouse,
+    BuildingKind::Hospital,
+    BuildingKind::Kitchen,
+];
+
 #[derive(Resource)]
 pub struct GameAssets {
     pub cube: Handle<Mesh>,
@@ -43,6 +56,30 @@ pub struct GameAssets {
     /// One emissive material per player-palette color, shared by all map
     /// pings so transient pings never leak fresh materials.
     pub ping_mats: [Handle<StandardMaterial>; 8],
+    /// One body material per `BuildingKind` (see `ALL_KINDS`), shared so
+    /// every building of the same kind batches into one draw call.
+    pub building_mats: [Handle<StandardMaterial>; 8],
+    /// Furnace base/chimney stone — identical for every furnace.
+    pub furnace_stone_mat: Handle<StandardMaterial>,
+    pub sawmill_roof_mat: Handle<StandardMaterial>,
+    pub sawmill_blade_mat: Handle<StandardMaterial>,
+    pub hunter_roof_mat: Handle<StandardMaterial>,
+    pub greenhouse_glass_mat: Handle<StandardMaterial>,
+    pub hospital_cross_mat: Handle<StandardMaterial>,
+    pub kitchen_stone_mat: Handle<StandardMaterial>,
+    /// Roof worker-indicator cube; identical for every building.
+    pub worker_mat: Handle<StandardMaterial>,
+}
+
+/// Shared body material handle for a building kind — keeps same-kind
+/// buildings batched into a single draw call instead of each getting its
+/// own `StandardMaterial`.
+fn building_mat(assets: &GameAssets, kind: BuildingKind) -> Handle<StandardMaterial> {
+    let i = ALL_KINDS
+        .iter()
+        .position(|&k| k == kind)
+        .expect("kind is present in ALL_KINDS");
+    assets.building_mats[i].clone()
 }
 
 #[derive(Resource, Default)]
@@ -270,6 +307,50 @@ pub fn setup_camera_and_assets(
                 emissive: c.to_linear() * 3.0,
                 ..default()
             })
+        }),
+        building_mats: std::array::from_fn(|i| {
+            materials.add(StandardMaterial {
+                base_color: kind_color(ALL_KINDS[i]),
+                perceptual_roughness: 0.9,
+                ..default()
+            })
+        }),
+        furnace_stone_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.34, 0.30, 0.29),
+            perceptual_roughness: 0.95,
+            ..default()
+        }),
+        sawmill_roof_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.42, 0.28, 0.16),
+            ..default()
+        }),
+        sawmill_blade_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.75, 0.78, 0.82),
+            metallic: 0.8,
+            perceptual_roughness: 0.35,
+            ..default()
+        }),
+        hunter_roof_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.24, 0.35, 0.22),
+            ..default()
+        }),
+        greenhouse_glass_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.62, 0.88, 0.72),
+            ..default()
+        }),
+        hospital_cross_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.85, 0.20, 0.20),
+            emissive: LinearRgba::rgb(0.35, 0.04, 0.04),
+            ..default()
+        }),
+        kitchen_stone_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.40, 0.36, 0.34),
+            ..default()
+        }),
+        worker_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.95, 0.97, 1.0),
+            emissive: LinearRgba::rgb(0.6, 0.65, 0.75),
+            ..default()
         }),
     };
     commands.insert_resource(assets);
@@ -707,12 +788,7 @@ fn spawn_building(
     low: bool,
 ) -> Entity {
     let center = building_center_world(b);
-    let color = kind_color(b.kind);
-    let body = materials.add(StandardMaterial {
-        base_color: color,
-        perceptual_roughness: 0.9,
-        ..default()
-    });
+    let body = building_mat(assets, b.kind);
     // Created up front so the pulse system's handle can live on the root.
     let fire_mat = (b.kind == BuildingKind::Furnace).then(|| {
         materials.add(StandardMaterial {
@@ -735,11 +811,7 @@ fn spawn_building(
     commands.entity(root).with_children(|p| {
         match b.kind {
             BuildingKind::Furnace => {
-                let stone = materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.34, 0.30, 0.29),
-                    perceptual_roughness: 0.95,
-                    ..default()
-                });
+                let stone = assets.furnace_stone_mat.clone();
                 // Base, glowing core, chimney.
                 p.spawn((
                     Mesh3d(assets.cylinder.clone()),
@@ -797,22 +869,14 @@ fn spawn_building(
                     MeshMaterial3d(body.clone()),
                     Transform::from_xyz(0.0, 0.25, 0.0).with_scale(Vec3::new(0.8, 0.5, 0.8)),
                 ));
-                let roof = materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.42, 0.28, 0.16),
-                    ..default()
-                });
+                let roof = assets.sawmill_roof_mat.clone();
                 p.spawn((
                     Mesh3d(assets.tent.clone()),
                     MeshMaterial3d(roof),
                     Transform::from_xyz(0.0, 0.5, 0.0).with_scale(Vec3::new(0.9, 0.3, 0.9)),
                 ));
                 // Saw blade.
-                let blade = materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.75, 0.78, 0.82),
-                    metallic: 0.8,
-                    perceptual_roughness: 0.35,
-                    ..default()
-                });
+                let blade = assets.sawmill_blade_mat.clone();
                 p.spawn((
                     Mesh3d(assets.cylinder.clone()),
                     MeshMaterial3d(blade),
@@ -842,10 +906,7 @@ fn spawn_building(
                     MeshMaterial3d(body.clone()),
                     Transform::from_xyz(0.0, 0.25, 0.0).with_scale(Vec3::new(0.75, 0.5, 0.75)),
                 ));
-                let roof = materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.24, 0.35, 0.22),
-                    ..default()
-                });
+                let roof = assets.hunter_roof_mat.clone();
                 p.spawn((
                     Mesh3d(assets.cone.clone()),
                     MeshMaterial3d(roof),
@@ -860,10 +921,7 @@ fn spawn_building(
                     Transform::from_xyz(0.0, 0.20, 0.0).with_scale(Vec3::new(0.8, 0.40, 0.8)),
                 ));
                 // Bright glass roof.
-                let glass = materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.62, 0.88, 0.72),
-                    ..default()
-                });
+                let glass = assets.greenhouse_glass_mat.clone();
                 p.spawn((
                     Mesh3d(assets.tent.clone()),
                     MeshMaterial3d(glass),
@@ -878,11 +936,7 @@ fn spawn_building(
                     Transform::from_xyz(0.0, 0.28, 0.0).with_scale(Vec3::new(0.8, 0.56, 0.8)),
                 ));
                 // Red cross on the roof (two crossbars).
-                let cross = materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.85, 0.20, 0.20),
-                    emissive: LinearRgba::rgb(0.35, 0.04, 0.04),
-                    ..default()
-                });
+                let cross = assets.hospital_cross_mat.clone();
                 p.spawn((
                     Mesh3d(assets.cube.clone()),
                     MeshMaterial3d(cross.clone()),
@@ -902,10 +956,7 @@ fn spawn_building(
                     Transform::from_xyz(0.0, 0.24, 0.0).with_scale(Vec3::new(0.78, 0.48, 0.78)),
                 ));
                 // A little chimney.
-                let stone = materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.40, 0.36, 0.34),
-                    ..default()
-                });
+                let stone = assets.kitchen_stone_mat.clone();
                 p.spawn((
                     Mesh3d(assets.cylinder.clone()),
                     MeshMaterial3d(stone),
@@ -927,11 +978,7 @@ fn spawn_building(
         // Worker cubes above the roof.
         let max = b.kind.max_workers();
         if max > 0 {
-            let w_mat = materials.add(StandardMaterial {
-                base_color: Color::srgb(0.95, 0.97, 1.0),
-                emissive: LinearRgba::rgb(0.6, 0.65, 0.75),
-                ..default()
-            });
+            let w_mat = assets.worker_mat.clone();
             for i in 0..max {
                 let off = (i as f32 - (max as f32 - 1.0) / 2.0) * 0.24;
                 p.spawn((

@@ -20,6 +20,7 @@ opt-level = 3
 [profile.release]
 lto = "thin"
 codegen-units = 1
+strip = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tungstenite = "0.29.0"

@@ -17,6 +17,14 @@ M0–M7 bosqichlar yakunlangan:
 - ✅ Mini-xarita (minimap): butun xaritaning burchakdagi ko'rinishi + bosib borish + pinglar
 - ✅ V0.3: **missiyalar**, **Tunnel** (graduatsiya), 3 yangi **bino**,
   **texnologiya daraxti** (5 tech), **voqealar tizimi** (kasallik/bo'ron/karvon-tanlov)
+- ✅ **Mobil-web unumdorlik** (V1.0 poydevori): **WebGPU** backend (WebGL2 o'rniga —
+  Bevy'ning GPU-driven tez yo'li), server **gzip** beradi (wasm 66MB→15MB, 4.4×) +
+  cache header, DPR cap + geometriya/yorug'lik kamaytirish, **umumiy bino materiallari**
+  (har bino turi bitta material = kamroq draw-call), FPS diagnostika HUD'da
+- ✅ **Graduatsiya g'alabasi ajratildi**: Tunnel bitgani (Global Olamga chiqish)
+  endi kun-omon-qolish g'alabasidan alohida ekranda ko'rsatiladi (`graduated` bayrog'i)
+- ✅ **Arxitektura auditi**: WebGL2'dan tashqari 16 ta kelajakdagi cheklov aniqlandi
+  (gzip/cache/wasm-opt/delta-snapshot va boshq.); arzon-yuqori ta'sirlilari qo'llandi
 
 **V0.2 (jarayonda):** chat, attributsiya, reconnect, rate-limit va **rollar/egalik**
 yakunlandi; qoldi: **delta-snapshot** va **interpolatsiya**.
@@ -115,8 +123,10 @@ Tunnelgacha yetaklasin.
 - [x] **Missiya tizimi**: deterministik quest'lar (chodir qur, aholi, arra zavodi,
       ko'mir zaxirasi, kun omon qol) + resurs mukofotlari; progress snapshot ichida
       (`GameState.missions`), simda deterministik baholanadi. Client'da missiya paneli.
-- [~] **G'alaba sharti qayta ishlanadi**: Tunnel bitgani = **graduatsiya g'alabasi**
-      (Global Olamga chiqish) — «12-kun» g'alaba yonida qo'shimcha yo'l sifatida.
+- [x] **G'alaba sharti qayta ishlandi**: Tunnel bitgani = **graduatsiya g'alabasi**
+      (Global Olamga chiqish) — «12-kun» g'alaba yonida qo'shimcha yo'l. `graduated`
+      bayrog'i simda faqat Tunnel bitgan tarmoqda o'rnatiladi; game-over ekrani ikki
+      g'alabani alohida ko'rsatadi («THE TUNNEL IS OPEN» vs «VICTORY»).
       To'liq endless rejim (kun-g'alabani olib tashlash) keyingi qadam.
 - [ ] **Yangi binolar** (4 → 8+): Kasalxona, Oshxona, Issiqxona, Ombor — missiya
       va texnologiyalar orqali ochiladi.
@@ -225,6 +235,10 @@ hech qachon yo'qolmaydi.
       qor bo'roni shamoli (blizzard'da kuchayadi). Qoldi: fon musiqasi, ko'proq SFX.
 - [~] **Vizual sayqal**: ✅ bino qurilish animatsiyasi (o'sish), qor bo'roni effekti
       (qalin qor + whiteout osmon/tuman + sovuq tint), tunda aurora. Qoldi: tutun sayqal, o'tishlar.
+- [~] **Unumdorlik va deploy**: ✅ WebGPU, gzip serving + cache header, umumiy bino
+      materiallari (draw-call kamaytirish), release `strip`, Cargo.lock tracked,
+      build-web.sh wasm o'lchamini ko'rsatadi. Qoldi: wasm-opt (binaryen) o'rnatish,
+      bevy feature-trim, delta-snapshot tarmoq.
 - [ ] **Lokalizatsiya**: uz / en / ru; accessibility (rang-ko'r palitra, shrift).
 - [ ] **Sozlamalar menyusi**: grafika darajasi, ovoz, til.
 - [ ] **CI/CD**: GitHub Actions — test + Windows/Linux/macOS/wasm artefaktlari.

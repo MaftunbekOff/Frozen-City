@@ -724,6 +724,10 @@ pub fn game_over_ui(
 
     for (mut text, mut color, kind) in &mut texts {
         let (new, col) = match (kind, state.phase) {
+            (GoText::Title, GamePhase::Won) if state.graduated => (
+                "THE TUNNEL IS OPEN".to_string(),
+                Color::srgb(0.55, 0.85, 1.00),
+            ),
             (GoText::Title, GamePhase::Won) => (
                 "VICTORY".to_string(),
                 Color::srgb(0.55, 0.90, 0.50),
@@ -731,6 +735,16 @@ pub fn game_over_ui(
             (GoText::Title, _) => (
                 "THE CITY HAS FALLEN".to_string(),
                 Color::srgb(0.95, 0.35, 0.30),
+            ),
+            (GoText::Info, GamePhase::Won) if state.graduated => (
+                format!(
+                    "Day {} — the Tunnel broke through. The Global World awaits!\nWood {}   Coal {}   Food {}",
+                    state.day(),
+                    state.stock.wood as i64,
+                    state.stock.coal as i64,
+                    state.stock.food as i64
+                ),
+                TEXT_DIM,
             ),
             (GoText::Info, _) => (
                 format!(
