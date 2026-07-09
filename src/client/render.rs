@@ -530,9 +530,11 @@ fn ground_mesh(tiles: &[Tile]) -> Mesh {
     buf.into_mesh()
 }
 
-fn trees_mesh(tiles: &[Tile]) -> Mesh {
+fn trees_mesh(tiles: &[Tile], dense: bool) -> Mesh {
     let mut buf = MeshBuf::default();
     let trunk = linear(Color::srgb(0.32, 0.22, 0.14));
+    // Phones: one tree per tile, fewer cone facets, no snowy cap cone.
+    let seg = if dense { 7 } else { 5 };
     for ty in 0..MAP_H as u8 {
         for tx in 0..MAP_W as u8 {
             let tile = &tiles[tile_index(tx, ty)];
@@ -540,7 +542,11 @@ fn trees_mesh(tiles: &[Tile]) -> Mesh {
                 continue;
             }
             let base = tile_center_world(tx, ty);
-            let n = 1 + (tile.deposit / 40).min(2) as u32;
+            let n = if dense {
+                1 + (tile.deposit / 40).min(2) as u32
+            } else {
+                1
+            };
             for i in 0..n {
                 let h = hash2(tx as u32 * 31 + i * 7, ty as u32 * 17 + i * 13);
                 let ox = ((h % 60) as f32 - 30.0) * 0.011;
@@ -555,16 +561,19 @@ fn trees_mesh(tiles: &[Tile]) -> Mesh {
                     c + Vec3::new(0.035, 0.16 * scale, 0.035),
                     trunk,
                 );
-                buf.cone(c + Vec3::Y * 0.12 * scale, 0.26 * scale, 0.42 * scale, 7, canopy);
-                buf.cone(c + Vec3::Y * 0.38 * scale, 0.18 * scale, 0.34 * scale, 7, snowy);
+                buf.cone(c + Vec3::Y * 0.12 * scale, 0.26 * scale, 0.42 * scale, seg, canopy);
+                if dense {
+                    buf.cone(c + Vec3::Y * 0.38 * scale, 0.18 * scale, 0.34 * scale, seg, snowy);
+                }
             }
         }
     }
     buf.into_mesh()
 }
 
-fn rocks_mesh(tiles: &[Tile]) -> Mesh {
+fn rocks_mesh(tiles: &[Tile], dense: bool) -> Mesh {
     let mut buf = MeshBuf::default();
+    let rocks_per_tile = if dense { 2u32 } else { 1 };
     for ty in 0..MAP_H as u8 {
         for tx in 0..MAP_W as u8 {
             let tile = &tiles[tile_index(tx, ty)];
@@ -573,7 +582,7 @@ fn rocks_mesh(tiles: &[Tile]) -> Mesh {
             }
             let base = tile_center_world(tx, ty);
             let richness = (tile.deposit as f32 / 500.0).clamp(0.2, 1.0);
-            for i in 0..2u32 {
+            for i in 0..rocks_per_tile {
                 let h = hash2(tx as u32 * 13 + i * 29, ty as u32 * 7 + i * 41);
                 let ox = ((h % 50) as f32 - 25.0) * 0.012;
                 let oz = (((h >> 6) % 50) as f32 - 25.0) * 0.012;
@@ -596,12 +605,15 @@ pub fn sync_terrain(
     mut commands: Commands,
     view: Res<GameView>,
     assets: Res<GameAssets>,
+    quality: Res<Quality>,
     mut viz: ResMut<TerrainViz>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
     if view.tiles.is_empty() {
         return;
     }
+    // Phones get sparser scenery — less vertex work and less overdraw.
+    let dense = *quality != Quality::Low;
     let first = viz.ground.is_none();
     if !first && viz.seen_tiles_version == view.tiles_version {
         return;
@@ -628,8 +640,8 @@ pub fn sync_terrain(
             .id()
     };
     viz.ground = Some(spawn(&mut commands, &mut meshes, ground_mesh(&view.tiles)));
-    viz.trees = Some(spawn(&mut commands, &mut meshes, trees_mesh(&view.tiles)));
-    viz.rocks = Some(spawn(&mut commands, &mut meshes, rocks_mesh(&view.tiles)));
+    viz.trees = Some(spawn(&mut commands, &mut meshes, trees_mesh(&view.tiles, dense)));
+    viz.rocks = Some(spawn(&mut commands, &mut meshes, rocks_mesh(&view.tiles, dense)));
     viz.cache = view.tiles.clone();
     viz.seen_tiles_version = view.tiles_version;
 }
@@ -640,6 +652,7 @@ pub fn sync_buildings(
     mut commands: Commands,
     view: Res<GameView>,
     assets: Res<GameAssets>,
+    quality: Res<Quality>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut viz: ResMut<BuildingViz>,
     mut worker_cubes: Query<(&WorkerCube, &mut Visibility)>,
@@ -655,7 +668,7 @@ pub fn sync_buildings(
         if viz.0.contains_key(&b.id) {
             continue;
         }
-        let e = spawn_building(&mut commands, &assets, &mut materials, b);
+        let e = spawn_building(&mut commands, &assets, &mut materials, b, *quality == Quality::Low);
         viz.0.insert(b.id, e);
     }
 
@@ -691,6 +704,7 @@ fn spawn_building(
     assets: &GameAssets,
     materials: &mut Assets<StandardMaterial>,
     b: &frozen_city::game::types::Building,
+    low: bool,
 ) -> Entity {
     let center = building_center_world(b);
     let color = kind_color(b.kind);
@@ -742,16 +756,20 @@ fn spawn_building(
                     MeshMaterial3d(stone),
                     Transform::from_xyz(0.0, 1.35, 0.0).with_scale(Vec3::new(0.85, 1.3, 0.85)),
                 ));
-                p.spawn((
-                    PointLight {
-                        color: Color::srgb(1.0, 0.62, 0.25),
-                        intensity: 2_400_000.0,
-                        range: 26.0,
-                        ..default()
-                    },
-                    Transform::from_xyz(0.0, 2.6, 0.0),
-                    FurnaceLight,
-                ));
+                // Per-fragment point lighting is costly on mobile WebGL2, so
+                // phones skip it — the emissive fire still reads as a glow.
+                if !low {
+                    p.spawn((
+                        PointLight {
+                            color: Color::srgb(1.0, 0.62, 0.25),
+                            intensity: 2_400_000.0,
+                            range: 26.0,
+                            ..default()
+                        },
+                        Transform::from_xyz(0.0, 2.6, 0.0),
+                        FurnaceLight,
+                    ));
+                }
                 // Chimney smoke: looping puffs, hidden when the fire is out.
                 for i in 0..10u32 {
                     p.spawn((

@@ -25,6 +25,11 @@ codegen-units = 1
 tungstenite = "0.29.0"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+# WebGPU is the modern, much faster web backend (Bevy's GPU-driven fast path,
+# like native Vulkan) — dramatically better than WebGL2 on mobile. Supported by
+# Android Chrome 121+, Chrome/Edge/Firefox 2024+, Safari iOS 18+. Older browsers
+# would need a separate WebGL2 build (see build-web.sh notes).
+bevy = { version = "0.19", features = ["webgpu"] }
 js-sys = "0.3.103"
 wasm-bindgen = "0.2.126"
 web-sys = { version = "0.3.103", features = ["WebSocket", "BinaryType", "MessageEvent", "CloseEvent", "ErrorEvent", "Window", "Location", "Navigator"] }
