@@ -1,3 +1,4 @@
 /target
 /web/pkg/
 /cloudflared.exe
+/wasm-opt.exe

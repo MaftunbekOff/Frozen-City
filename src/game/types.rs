@@ -37,6 +37,8 @@ pub const TENT_CAPACITY: usize = 4;
 pub const MAX_CHAT: usize = 40;
 /// Longest chat message accepted (characters, after sanitizing).
 pub const MAX_CHAT_LEN: usize = 200;
+/// Longest player display name accepted (characters, after sanitizing).
+pub const MAX_NAME_LEN: usize = 24;
 /// Maximum simultaneous map pings kept in the snapshot (global cap).
 pub const MAX_PINGS: usize = 12;
 /// Maximum live pings a single player may hold, so one spammer can't evict

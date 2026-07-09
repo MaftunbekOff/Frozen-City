@@ -23,8 +23,17 @@ M0–M7 bosqichlar yakunlangan:
   (har bino turi bitta material = kamroq draw-call), FPS diagnostika HUD'da
 - ✅ **Graduatsiya g'alabasi ajratildi**: Tunnel bitgani (Global Olamga chiqish)
   endi kun-omon-qolish g'alabasidan alohida ekranda ko'rsatiladi (`graduated` bayrog'i)
-- ✅ **Arxitektura auditi**: WebGL2'dan tashqari 16 ta kelajakdagi cheklov aniqlandi
-  (gzip/cache/wasm-opt/delta-snapshot va boshq.); arzon-yuqori ta'sirlilari qo'llandi
+- ✅ **Arxitektura auditi** (55 tekshirilgan topilma): WebGL2'dan tashqari cheklovlar
+  aniqlandi; har biri file:line bilan tuzatilgan/qisman/ochiq holatga tushirildi
+- ✅ **Xavfsizlik va robustness qattiqlashtirish** (auditdan):
+  **CSPRNG sessiya tokenlari** (`getrandom` — teskari SplitMix64 o'rniga: token-o'g'irlash/egalik-egallash yopildi),
+  **ulanish chegarasi** (MAX_CONNECTIONS=128 + Drop-guard: thread-flood DoS),
+  **WS kadr limiti** 8MB'ga moslashtirildi (64MB o'rniga),
+  **ism-sanitayzer** (bidi/zero-width/zalgo endi ismlarda ham),
+  **koordinata validatsiya** (NaN/inf + xarita chegarasi)
+- ✅ **Ikkinchi unumdorlik o'tishi**: **wasm-opt** (binaryen) yig'ishga qo'shildi (wasm o'lchami),
+  umumiy kursor materiallari, furnace ishlatilmagan handle, HUD/FPS o'zgarishda-yangilash,
+  minimap pixel-kvantlangan re-upload; **rust-toolchain pin** + gzip qamrovi kengaytirildi
 
 **V0.2 (jarayonda):** chat, attributsiya, reconnect, rate-limit va **rollar/egalik**
 yakunlandi; qoldi: **delta-snapshot** va **interpolatsiya**.
@@ -42,9 +51,19 @@ bosish o'lik kod edi (UiGlobalTransform → RelativeCursorPosition); HUD tizim-v
 ustuvorlik; reconnect token-rotatsiyasi (sniffing himoyasi); guest_perm reset-omon-qolishi;
 zalgo tartibi/diapazonlari; mini-xarita per-frame GPU yuklamasi.
 
-**Qolgan ochiq ishlar:** chiqarib yuborilgan mehmon yangi o'yinchi sifatida qayta
-kira oladi (ban ro'yxati kerak); egasi butunlay ketsa egalik o'tmaydi (owner-transfer);
-chuqurroq: TLS (wss majburiy) va bounded chiquvchi kanal.
+**Qolgan ochiq ishlar (auditdan, kelajakdagi bosqichlar):**
+- **Tarmoq (arxitekturaviy):** to'liq **delta-snapshot** (hozir faqat tiles throttle,
+  qolgani har tick to'liq) · WS/TCP kadr **siqilishi** · **bounded** chiquvchi/kiruvchi
+  navbat (hozir 30s write-timeout + drain-cap qisman himoya).
+- **Moderatsiya/egalik:** **ban ro'yxati** (kicked mehmon qaytadi) · **owner-transfer**
+  (egasi butunlay ketsa). Eslatma: cloudflared tunnel ortida barcha ulanish bitta IP —
+  per-IP cheklov/ban ishlamaydi, akkaunt-identity (V0.4) kerak.
+- **Xavfsizlik (transport):** **TLS/wss** origin'da yo'q — hozir cloudflared tunnel
+  HTTPS/WSS'ni chekkada beradi (tunnel deploy uchun yetarli), to'g'ridan-to'g'ri ochiqda emas.
+- **Web hajmi:** **bevy feature-trim** · release `opt-level="z"` (wasm) · **WebGL2 fallback**
+  build (eski brauzerlar; hozir WebGPU-only + boot.js aniqlash xabari).
+- **Kichik:** bincode **varint** · terrain **indexed mesh** · temperature() `cos`
+  cross-platform seed-repro · MIN_WIN_DAYS'ni `new_game`da ham clamp qilish.
 
 ## Katta maqsad (Vision) — o'yinchi sayohati
 

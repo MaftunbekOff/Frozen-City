@@ -56,6 +56,9 @@ pub struct GameAssets {
     /// One emissive material per player-palette color, shared by all map
     /// pings so transient pings never leak fresh materials.
     pub ping_mats: [Handle<StandardMaterial>; 8],
+    /// One material per player-palette color for remote-player cursor
+    /// markers (dimmer emissive than `ping_mats`), shared so cursors batch.
+    pub cursor_mats: [Handle<StandardMaterial>; 8],
     /// One body material per `BuildingKind` (see `ALL_KINDS`), shared so
     /// every building of the same kind batches into one draw call.
     pub building_mats: [Handle<StandardMaterial>; 8],
@@ -305,6 +308,14 @@ pub fn setup_camera_and_assets(
             materials.add(StandardMaterial {
                 base_color: c,
                 emissive: c.to_linear() * 3.0,
+                ..default()
+            })
+        }),
+        cursor_mats: std::array::from_fn(|i| {
+            let c = player_color(i as u8);
+            materials.add(StandardMaterial {
+                base_color: c,
+                emissive: LinearRgba::from(c.to_linear()) * 0.6,
                 ..default()
             })
         }),
@@ -788,7 +799,10 @@ fn spawn_building(
     low: bool,
 ) -> Entity {
     let center = building_center_world(b);
-    let body = building_mat(assets, b.kind);
+    // `body` (the shared per-kind material) is looked up inside each
+    // non-furnace arm below — furnaces use `furnace_stone_mat` + a
+    // per-entity `fire_mat` instead and never touch it, so the
+    // linear-search + clone in `building_mat` is skipped for them.
     // Created up front so the pulse system's handle can live on the root.
     let fire_mat = (b.kind == BuildingKind::Furnace).then(|| {
         materials.add(StandardMaterial {
@@ -856,6 +870,7 @@ fn spawn_building(
                 }
             }
             BuildingKind::Tent => {
+                let body = building_mat(assets, b.kind);
                 p.spawn((
                     Mesh3d(assets.tent.clone()),
                     MeshMaterial3d(body.clone()),
@@ -864,6 +879,7 @@ fn spawn_building(
                 roof_y = 0.7;
             }
             BuildingKind::Sawmill => {
+                let body = building_mat(assets, b.kind);
                 p.spawn((
                     Mesh3d(assets.cube.clone()),
                     MeshMaterial3d(body.clone()),
@@ -887,6 +903,7 @@ fn spawn_building(
                 roof_y = 0.9;
             }
             BuildingKind::CoalMine => {
+                let body = building_mat(assets, b.kind);
                 p.spawn((
                     Mesh3d(assets.cube.clone()),
                     MeshMaterial3d(body.clone()),
@@ -901,6 +918,7 @@ fn spawn_building(
                 roof_y = 1.15;
             }
             BuildingKind::HunterHut => {
+                let body = building_mat(assets, b.kind);
                 p.spawn((
                     Mesh3d(assets.cube.clone()),
                     MeshMaterial3d(body.clone()),
@@ -915,6 +933,7 @@ fn spawn_building(
                 roof_y = 1.05;
             }
             BuildingKind::Greenhouse => {
+                let body = building_mat(assets, b.kind);
                 p.spawn((
                     Mesh3d(assets.cube.clone()),
                     MeshMaterial3d(body.clone()),
@@ -930,6 +949,7 @@ fn spawn_building(
                 roof_y = 0.85;
             }
             BuildingKind::Hospital => {
+                let body = building_mat(assets, b.kind);
                 p.spawn((
                     Mesh3d(assets.cube.clone()),
                     MeshMaterial3d(body.clone()),
@@ -950,6 +970,7 @@ fn spawn_building(
                 roof_y = 0.92;
             }
             BuildingKind::Kitchen => {
+                let body = building_mat(assets, b.kind);
                 p.spawn((
                     Mesh3d(assets.cube.clone()),
                     MeshMaterial3d(body.clone()),
@@ -1355,7 +1376,6 @@ pub fn sync_player_cursors(
     time: Res<Time>,
     view: Res<GameView>,
     assets: Res<GameAssets>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
     mut viz: ResMut<CursorViz>,
     mut q: Query<(&CursorMarker, &mut Transform)>,
 ) {
@@ -1377,11 +1397,7 @@ pub fn sync_player_cursors(
             continue;
         }
         let color = player_color(p.color);
-        let mat = materials.add(StandardMaterial {
-            base_color: color,
-            emissive: LinearRgba::from(color.to_linear()) * 0.6,
-            ..default()
-        });
+        let mat = assets.cursor_mats[(p.color as usize) % assets.cursor_mats.len()].clone();
         // Downward cone floating over the ground.
         let marker = commands
             .spawn((

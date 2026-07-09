@@ -363,11 +363,22 @@ pub fn track_ui_hover(mut hover: ResMut<UiHover>, q: Query<&Interaction>) {
 pub struct FpsText;
 
 pub fn fps_update(
+    time: Res<Time>,
     diagnostics: Res<bevy::diagnostic::DiagnosticsStore>,
     quality: Res<Quality>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut q: Query<&mut Text, With<FpsText>>,
+    mut accum: Local<f32>,
 ) {
+    // Throttle to ~4Hz: the diagnostic itself is smoothed, so redoing this
+    // format! every single frame just churns the allocator for no visible
+    // benefit.
+    *accum += time.delta_secs();
+    if *accum < 0.25 {
+        return;
+    }
+    *accum = 0.0;
+
     let Ok(mut t) = q.single_mut() else { return };
     let fps = diagnostics
         .get(&bevy::diagnostic::FrameTimeDiagnosticsPlugin::FPS)
@@ -394,82 +405,132 @@ pub fn fps_update(
     }
 }
 
+/// Last-displayed value per HUD field, so `hud_update` only pays for a
+/// `format!` (and, for the events log, the sort/truncate/join) when the
+/// underlying number actually changed instead of on every frame.
+#[derive(Default)]
+pub(crate) struct HudCache {
+    wood: Option<i64>,
+    coal: Option<i64>,
+    food: Option<i64>,
+    pop: Option<(usize, u32)>,
+    clock: Option<(u32, u32, u32)>,
+    temp: Option<(i32, bool)>,
+    furnace: Option<(u8, bool)>,
+    events: Option<u64>,
+}
+
 pub fn hud_update(
     view: Res<GameView>,
+    mut cache: Local<HudCache>,
     mut q: Query<(&mut Text, Option<&mut TextColor>, &HudField)>,
 ) {
     let Some(state) = view.state.as_ref() else { return };
     for (mut text, color, field) in &mut q {
-        let new = match field {
-            HudField::Wood => format!("Wood {}", state.stock.wood as i64),
-            HudField::Coal => format!("Coal {}", state.stock.coal as i64),
-            HudField::Food => format!("Food {}", state.stock.food as i64),
-            HudField::Pop => format!(
-                "Pop {}  (idle {})",
-                state.survivors.len(),
-                state.idle_workers()
-            ),
+        match field {
+            HudField::Wood => {
+                let v = state.stock.wood as i64;
+                if cache.wood != Some(v) {
+                    cache.wood = Some(v);
+                    text.0 = format!("Wood {v}");
+                }
+            }
+            HudField::Coal => {
+                let v = state.stock.coal as i64;
+                if cache.coal != Some(v) {
+                    cache.coal = Some(v);
+                    text.0 = format!("Coal {v}");
+                }
+            }
+            HudField::Food => {
+                let v = state.stock.food as i64;
+                if cache.food != Some(v) {
+                    cache.food = Some(v);
+                    text.0 = format!("Food {v}");
+                }
+            }
+            HudField::Pop => {
+                let key = (state.survivors.len(), state.idle_workers());
+                if cache.pop != Some(key) {
+                    cache.pop = Some(key);
+                    text.0 = format!("Pop {}  (idle {})", key.0, key.1);
+                }
+            }
             HudField::Clock => {
                 let mins = (state.time_of_day() * 24.0 * 60.0) as u32;
-                format!(
-                    "Day {}/{}   {:02}:{:02}",
-                    state.day(),
-                    state.win_days,
-                    mins / 60,
-                    mins % 60
-                )
+                let key = (state.day(), state.win_days, mins);
+                if cache.clock != Some(key) {
+                    cache.clock = Some(key);
+                    text.0 = format!(
+                        "Day {}/{}   {:02}:{:02}",
+                        key.0,
+                        key.1,
+                        mins / 60,
+                        mins % 60
+                    );
+                }
             }
             HudField::Temp => {
-                let snap = if state.cold_snap { "   COLD SNAP!" } else { "" };
-                format!("{:+.0} C{}", state.temperature(), snap)
+                let temp = state.temperature();
+                let key = (temp.round() as i32, state.cold_snap);
+                if cache.temp != Some(key) {
+                    cache.temp = Some(key);
+                    let snap = if state.cold_snap { "   COLD SNAP!" } else { "" };
+                    text.0 = format!("{:+.0} C{}", temp, snap);
+                }
             }
             HudField::Furnace => {
-                let status = if state.furnace_lit {
-                    "burning"
-                } else if state.furnace_level == 0 {
-                    "off"
-                } else {
-                    "OUT OF FUEL"
-                };
-                if let Some(mut c) = color {
-                    c.0 = if state.furnace_lit {
-                        Color::srgb(0.95, 0.65, 0.30)
+                let key = (state.furnace_level, state.furnace_lit);
+                if cache.furnace != Some(key) {
+                    cache.furnace = Some(key);
+                    let status = if state.furnace_lit {
+                        "burning"
+                    } else if state.furnace_level == 0 {
+                        "off"
                     } else {
-                        Color::srgb(0.95, 0.30, 0.25)
+                        "OUT OF FUEL"
                     };
+                    if let Some(mut c) = color {
+                        c.0 = if state.furnace_lit {
+                            Color::srgb(0.95, 0.65, 0.30)
+                        } else {
+                            Color::srgb(0.95, 0.30, 0.25)
+                        };
+                    }
+                    text.0 = format!(
+                        "Furnace L{} ({:.0}/day) {}",
+                        state.furnace_level,
+                        state.furnace_level as f32 * FURNACE_COAL_PER_DAY_PER_LEVEL,
+                        status
+                    );
                 }
-                format!(
-                    "Furnace L{} ({:.0}/day) {}",
-                    state.furnace_level,
-                    state.furnace_level as f32 * FURNACE_COAL_PER_DAY_PER_LEVEL,
-                    status
-                )
             }
             HudField::Events => {
-                // Show up to 8 lines, prioritising system events (deaths,
-                // weather, victory) over cosmetic ones so the server's
-                // eviction protection actually reaches the player's eyes;
-                // then display the chosen lines chronologically.
-                let mut idx: Vec<usize> = (0..state.events.len()).collect();
-                idx.sort_by_key(|&i| {
-                    (
-                        std::cmp::Reverse(state.events[i].system),
-                        std::cmp::Reverse(i),
-                    )
-                });
-                idx.truncate(8);
-                idx.sort_unstable();
-                idx.iter()
-                    .map(|&i| {
-                        let e = &state.events[i];
-                        format!("Day {}: {}", e.day, e.text)
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n")
+                if cache.events != Some(state.total_events) {
+                    cache.events = Some(state.total_events);
+                    // Show up to 8 lines, prioritising system events (deaths,
+                    // weather, victory) over cosmetic ones so the server's
+                    // eviction protection actually reaches the player's eyes;
+                    // then display the chosen lines chronologically.
+                    let mut idx: Vec<usize> = (0..state.events.len()).collect();
+                    idx.sort_by_key(|&i| {
+                        (
+                            std::cmp::Reverse(state.events[i].system),
+                            std::cmp::Reverse(i),
+                        )
+                    });
+                    idx.truncate(8);
+                    idx.sort_unstable();
+                    text.0 = idx
+                        .iter()
+                        .map(|&i| {
+                            let e = &state.events[i];
+                            format!("Day {}: {}", e.day, e.text)
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                }
             }
-        };
-        if text.0 != new {
-            text.0 = new;
         }
     }
 }

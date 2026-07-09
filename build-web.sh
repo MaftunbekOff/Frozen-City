@@ -35,7 +35,7 @@ else
 fi
 
 # Precompressed copies: a web server with gzip_static serves these directly.
-gzip -9 -kf web/pkg/frozen_city_bg.wasm web/pkg/frozen_city.js
+gzip -9 -kf web/pkg/frozen_city_bg.wasm web/pkg/frozen_city.js web/boot.js web/index.html
 
 echo
 echo "Web build ready in web/pkg."
