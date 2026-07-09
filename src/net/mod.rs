@@ -1,3 +1,5 @@
+#[cfg(not(target_arch = "wasm32"))]
+pub mod accounts;
 pub mod client;
 pub mod protocol;
 #[cfg(not(target_arch = "wasm32"))]

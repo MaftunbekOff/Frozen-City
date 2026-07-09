@@ -22,6 +22,7 @@ use tungstenite::Message;
 
 use crate::game::sim;
 use crate::game::types::{GamePhase, GameState, PlayerCommand, PlayerInfo, TICK_MS};
+use crate::net::accounts;
 use crate::net::client::ClientConn;
 use crate::net::protocol::{
     read_frame, write_frame, ClientMsg, ServerMsg, MAX_FRAME, TILES_EVERY_N_TICKS,
@@ -29,6 +30,11 @@ use crate::net::protocol::{
 
 /// Directory the built-in HTTP server serves the web build from.
 const WEB_ROOT: &str = "web";
+
+/// Sent back as `ServerMsg::AuthFailed` when a `Login` first message doesn't
+/// match an account — deliberately generic (never "unknown login" vs "wrong
+/// password") so it can't be used to enumerate registered logins.
+const AUTH_FAILED_REASON: &str = "Noto'g'ri login yoki parol.";
 
 /// Mint a fresh, unguessable 64-bit token from the OS CSPRNG. Used for
 /// session/reconnect tokens: unlike a seeded PRNG stream (which can be
@@ -244,9 +250,26 @@ fn peek4(stream: &TcpStream) -> Option<[u8; 4]> {
 
 /// The native desktop protocol: length-prefixed bincode frames.
 fn handle_native(mut stream: TcpStream, to_server: Sender<ToServer>) {
-    // The very first frame must be Hello (the 10 s timeout is already set).
+    // The very first frame must be Hello or Login (the 10 s timeout is
+    // already set).
     let (name, token) = match read_frame::<_, ClientMsg>(&mut stream) {
         Ok(ClientMsg::Hello { name, token }) => (sanitize_name(&name), token),
+        Ok(ClientMsg::Login {
+            login,
+            password,
+            token,
+        }) => match accounts::authenticate(&login, &password) {
+            Some(display_name) => (sanitize_name(&display_name), token),
+            None => {
+                let _ = write_frame(
+                    &mut stream,
+                    &ServerMsg::AuthFailed {
+                        reason: AUTH_FAILED_REASON.to_string(),
+                    },
+                );
+                return;
+            }
+        },
         _ => return,
     };
     let _ = stream.set_read_timeout(None);
@@ -400,11 +423,26 @@ fn serve_websocket(stream: TcpStream, head: Vec<u8>, to_server: Sender<ToServer>
         return;
     };
 
-    // First frame must be Hello (still under the 10 s read timeout).
+    // First frame must be Hello or Login (still under the 10 s read timeout).
     let (name, token) = loop {
         match ws.read() {
             Ok(Message::Binary(b)) => match bincode::deserialize::<ClientMsg>(&b) {
                 Ok(ClientMsg::Hello { name, token }) => break (sanitize_name(&name), token),
+                Ok(ClientMsg::Login {
+                    login,
+                    password,
+                    token,
+                }) => match accounts::authenticate(&login, &password) {
+                    Some(display_name) => break (sanitize_name(&display_name), token),
+                    None => {
+                        if let Ok(bytes) = bincode::serialize(&ServerMsg::AuthFailed {
+                            reason: AUTH_FAILED_REASON.to_string(),
+                        }) {
+                            let _ = ws.send(Message::Binary(bytes.into()));
+                        }
+                        return;
+                    }
+                },
                 _ => return,
             },
             Ok(Message::Ping(_) | Message::Pong(_)) => continue,
@@ -776,7 +814,10 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
                         ClientMsg::Cursor { .. } => limiters
                             .get_mut(&client)
                             .is_some_and(|l| l.allow_cursor(now)),
-                        ClientMsg::Hello { .. } => false,
+                        // Both are only meaningful as the very first frame
+                        // (consumed before `join()`, never reaches here); a
+                        // later one is a protocol violation, not a command.
+                        ClientMsg::Hello { .. } | ClientMsg::Login { .. } => false,
                         // Low-frequency owner-only admin actions: never rate
                         // limited (they're structurally rare — one click each
                         // — and gating them behind the cmd/chat/ping caps
@@ -789,7 +830,7 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
                             ClientMsg::Cursor { x, y } => sim::set_cursor(&mut state, pid, x, y),
                             ClientMsg::Chat { text } => sim::push_chat(&mut state, pid, &text),
                             ClientMsg::Ping { x, y } => sim::add_ping(&mut state, pid, x, y),
-                            ClientMsg::Hello { .. } => {}
+                            ClientMsg::Hello { .. } | ClientMsg::Login { .. } => {}
                             ClientMsg::SetGuestPermission { perm } => {
                                 if state.is_owner(pid) {
                                     sim::set_guest_permission(&mut state, perm);

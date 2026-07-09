@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use bevy::prelude::*;
 
 use frozen_city::net::client::ClientConn;
-use frozen_city::net::protocol::ServerMsg;
+use frozen_city::net::protocol::{ClientMsg, ServerMsg};
 
 use super::{GameView, NetConn, Screen, Session};
 
@@ -23,6 +23,7 @@ pub fn pump_net(
     net: Res<NetConn>,
     mut view: ResMut<GameView>,
     mut session: ResMut<Session>,
+    mut next: ResMut<NextState<Screen>>,
 ) {
     let Some(conn) = &net.0 else { return };
     let msgs = {
@@ -64,6 +65,15 @@ pub fn pump_net(
                 }
                 view.state = Some(state);
                 view.version += 1;
+            }
+            ServerMsg::AuthFailed { reason } => {
+                // Unlike a generic drop, a bad login/password should not
+                // auto-retry — go straight back to the menu with the reason
+                // shown. `OnExit(Screen::Game) -> teardown_game` (registered
+                // in `ClientPlugin`) closes `net` and clears per-run state;
+                // it preserves `view.error`, so the message survives.
+                view.error = Some(reason);
+                next.set(Screen::Menu);
             }
         }
     }
@@ -122,6 +132,24 @@ pub fn watch_disconnect(
     next.set(Screen::Menu);
 }
 
+/// The first message to redial with: `Login` (with the same credentials the
+/// session originally signed in with) if this was an account session,
+/// otherwise a guest `Hello`. Either way carries the last known session
+/// token so a successful redial resumes the same player identity.
+fn reconnect_hello(session: &Session) -> ClientMsg {
+    match &session.auth {
+        Some(auth) => ClientMsg::Login {
+            login: auth.login.clone(),
+            password: auth.password.clone(),
+            token: session.token,
+        },
+        None => ClientMsg::Hello {
+            name: session.name.clone(),
+            token: session.token,
+        },
+    }
+}
+
 /// Kick off a reconnect. Native: spawn a background dial (returns true, result
 /// polled next frames). Wasm: `ws::connect` is already non-blocking, so install
 /// immediately. Returns true if a reconnect is now in progress or established.
@@ -134,12 +162,11 @@ fn start_reconnect(
 ) -> bool {
     let (tx, rx) = std::sync::mpsc::channel::<Option<ClientConn>>();
     let addr = session.join_addr.clone();
-    let name = session.name.clone();
-    let token = session.token;
+    let hello = reconnect_hello(session);
     let spawned = std::thread::Builder::new()
         .name("fc-reconnect".into())
         .spawn(move || {
-            let conn = frozen_city::net::client::connect_tcp(&addr, &name, token).ok();
+            let conn = frozen_city::net::client::connect_tcp_with(&addr, hello).ok();
             let _ = tx.send(conn);
         })
         .is_ok();
@@ -161,7 +188,7 @@ fn start_reconnect(
     } else {
         format!("ws://{}", session.join_addr)
     };
-    match frozen_city::net::ws::connect(&url, &session.name, session.token) {
+    match frozen_city::net::ws::connect_with(&url, reconnect_hello(session)) {
         Ok(conn) => {
             net.0 = Some(Mutex::new(conn));
             view.disconnected = false;

@@ -120,6 +120,15 @@ pub struct GameView {
     pub error: Option<String>,
 }
 
+/// Credentials for an account sign-in, kept in memory only for the life of
+/// the session so a dropped connection can be redialed with `Login` instead
+/// of falling back to a guest `Hello`.
+#[derive(Clone)]
+pub struct AccountAuth {
+    pub login: String,
+    pub password: String,
+}
+
 /// What is needed to transparently re-join the same world after a dropped
 /// connection. Only meaningful for the `Join` path (a remote server we can
 /// dial again); host/singleplayer worlds live in-process and cannot reconnect.
@@ -127,6 +136,9 @@ pub struct GameView {
 pub struct Session {
     pub join_addr: String,
     pub name: String,
+    /// `Some` when this session signed in with an account instead of as a
+    /// guest — reconnects replay `Login` with these instead of `Hello`.
+    pub auth: Option<AccountAuth>,
     /// Latest session token (updated on every `Welcome`).
     pub token: Option<u64>,
     /// True only for a `Join` game — enables auto-reconnect on disconnect.
@@ -254,6 +266,7 @@ impl Plugin for ClientPlugin {
             .init_resource::<ServerRes>()
             .init_resource::<GameView>()
             .init_resource::<Session>()
+            .init_resource::<menu::LoginForm>()
             .init_resource::<net_sync::Reconnecting>()
             .init_resource::<BuildMode>()
             .init_resource::<Selection>()
@@ -271,6 +284,10 @@ impl Plugin for ClientPlugin {
                 (
                     menu::autostart,
                     menu::menu_buttons,
+                    menu::login_field_focus,
+                    menu::login_form_keyboard,
+                    menu::account_login_button,
+                    menu::update_login_fields,
                     ui::generic_button_hover,
                 )
                     .run_if(in_state(Screen::Menu)),

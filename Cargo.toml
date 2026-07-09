@@ -39,6 +39,11 @@ tungstenite = "0.29.0"
 # OS CSPRNG for unguessable session/reconnect tokens (server-side only). The
 # game RNG is a deterministic, invertible SplitMix64 and must NOT mint tokens.
 getrandom = "0.2"
+# Reads the accounts DB the registration Telegram bot writes to (server-side
+# only). "bundled" compiles sqlite from source, so no system libsqlite3 dep.
+rusqlite = { version = "0.31", features = ["bundled"] }
+# Verifies passwords against the bcrypt hashes the bot stores.
+bcrypt = "0.15"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3.103"

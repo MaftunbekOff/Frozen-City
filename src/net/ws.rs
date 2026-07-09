@@ -36,10 +36,22 @@ thread_local! {
     static SOCKETS: RefCell<Vec<Option<Slot>>> = RefCell::new(Vec::new());
 }
 
-/// Open a WebSocket to `url`, queue the Hello frame, and return a live
-/// connection. Snapshots arrive on the connection's receiver. Pass `token`
-/// from a previous `Welcome` to reconnect as the same player.
+/// Open a WebSocket to `url` as a guest, queue the Hello frame, and return a
+/// live connection. Snapshots arrive on the connection's receiver. Pass
+/// `token` from a previous `Welcome` to reconnect as the same player.
 pub fn connect(url: &str, name: &str, token: Option<u64>) -> Result<ClientConn, String> {
+    connect_with(
+        url,
+        ClientMsg::Hello {
+            name: name.to_string(),
+            token,
+        },
+    )
+}
+
+/// Same as `connect`, but the caller builds the first message itself — used
+/// for account sign-in (`ClientMsg::Login`) as well as guest `Hello`.
+pub fn connect_with(url: &str, hello: ClientMsg) -> Result<ClientConn, String> {
     let ws = WebSocket::new(url).map_err(|_| format!("Invalid server address: {url}"))?;
     ws.set_binary_type(BinaryType::Arraybuffer);
 
@@ -86,11 +98,7 @@ pub fn connect(url: &str, name: &str, token: Option<u64>) -> Result<ClientConn, 
         callbacks.push(cb);
     }
 
-    let hello = bincode::serialize(&ClientMsg::Hello {
-        name: name.to_string(),
-        token,
-    })
-    .map_err(|e| e.to_string())?;
+    let hello = bincode::serialize(&hello).map_err(|e| e.to_string())?;
     shared.pending.borrow_mut().push(hello);
 
     let slot = SOCKETS.with(|s| {

@@ -84,11 +84,25 @@ impl Drop for ClientConn {
     }
 }
 
-/// Connect to a remote server over raw TCP (native only), send Hello, and
-/// spawn reader/writer threads. Pass `token` from a previous `Welcome` to
-/// resume the same player identity (reconnect); `None` for a fresh join.
+/// Connect to a remote server over raw TCP (native only) as a guest, send
+/// Hello, and spawn reader/writer threads. Pass `token` from a previous
+/// `Welcome` to resume the same player identity (reconnect); `None` for a
+/// fresh join.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn connect_tcp(addr: &str, name: &str, token: Option<u64>) -> std::io::Result<ClientConn> {
+    connect_tcp_with(
+        addr,
+        ClientMsg::Hello {
+            name: name.to_string(),
+            token,
+        },
+    )
+}
+
+/// Same as `connect_tcp`, but the caller builds the first message itself —
+/// used for account sign-in (`ClientMsg::Login`) as well as guest `Hello`.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn connect_tcp_with(addr: &str, hello: ClientMsg) -> std::io::Result<ClientConn> {
     use std::io;
     use std::net::{Shutdown, TcpStream, ToSocketAddrs};
     use std::sync::mpsc::channel;
@@ -104,13 +118,7 @@ pub fn connect_tcp(addr: &str, name: &str, token: Option<u64>) -> std::io::Resul
     let mut stream = TcpStream::connect_timeout(&sock_addr, Duration::from_secs(5))?;
     stream.set_nodelay(true).ok();
 
-    write_frame(
-        &mut stream,
-        &ClientMsg::Hello {
-            name: name.to_string(),
-            token,
-        },
-    )?;
+    write_frame(&mut stream, &hello)?;
 
     let (in_tx, in_rx) = channel::<ClientMsg>(); // app -> socket
     let (out_tx, out_rx) = channel::<ServerMsg>(); // socket -> app

@@ -33,6 +33,15 @@ pub enum ClientMsg {
     SetGuestPermission { perm: crate::game::types::GuestPermission },
     /// Owner-only: remove a guest from the world by player id. Ignored from guests.
     Kick { target: u64 },
+    /// Alternative to `Hello` as the first message on a connection: sign in
+    /// with a login/password minted by the registration bot instead of a
+    /// free-text guest name. `token` carries a session token from a previous
+    /// `Welcome`, same meaning as on `Hello`.
+    Login {
+        login: String,
+        password: String,
+        token: Option<u64>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -50,6 +59,9 @@ pub enum ServerMsg {
         /// tile grid from the last snapshot that included it.
         tiles_included: bool,
     },
+    /// Sent instead of `Welcome` when a `Login` first message had a bad
+    /// login/password; the connection is closed right after.
+    AuthFailed { reason: String },
 }
 
 pub fn write_frame<W: Write, T: Serialize>(w: &mut W, msg: &T) -> io::Result<()> {

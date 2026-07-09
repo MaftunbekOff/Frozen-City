@@ -7,3 +7,4 @@
 /web/index.html.gz
 /cloudflared.exe
 /wasm-opt.exe
+__pycache__/
