@@ -49,7 +49,11 @@ notify() {
 
 cd "$REPO_DIR"
 
-git fetch origin main --quiet
+if ! git fetch origin main --quiet 2>>"$LOG"; then
+    log "ERROR: git fetch failed (network?) — see $LOG"
+    notify "🧊❌ <b>Frozen City</b>: 'git fetch' failed — check the server's network / GitHub reachability."
+    exit 1
+fi
 LOCAL=$(git rev-parse HEAD)
 REMOTE=$(git rev-parse origin/main)
 
@@ -61,46 +65,56 @@ log "new commit(s) detected: ${LOCAL:0:7} -> ${REMOTE:0:7}"
 
 if ! git merge-base --is-ancestor "$LOCAL" origin/main; then
     log "ERROR: origin/main is not a fast-forward of local HEAD (history diverged) — refusing to auto-merge. Manual 'git pull' review needed."
+    notify "🧊❌ <b>Frozen City</b>: deploy blocked — origin/main diverged from the local branch (not a fast-forward). Needs a manual 'git pull' / review."
     exit 1
 fi
 
 if ! git pull --ff-only origin main >>/dev/null 2>&1; then
     log "ERROR: git pull --ff-only failed unexpectedly"
+    notify "🧊❌ <b>Frozen City</b>: 'git pull --ff-only' failed unexpectedly — see $LOG"
     exit 1
 fi
 log "pulled $(git log -1 --format='%h %s')"
 
 COMMIT_MSG=$(git log -1 --format='%s' "$REMOTE")
+HEADER="${LOCAL:0:7} → ${REMOTE:0:7}
+${COMMIT_MSG}"
+
+notify "🧊 <b>Frozen City</b>: new commit, testing…
+${HEADER}"
 
 log "running tests..."
 if ! cargo test --release >>"$LOG" 2>&1; then
     log "ERROR: tests failed at ${REMOTE:0:7} — deploy aborted, live service untouched. See $LOG for the failing test."
     notify "🧊❌ <b>Frozen City</b>: deploy failed (tests)
-${LOCAL:0:7} → ${REMOTE:0:7}
-${COMMIT_MSG}
+${HEADER}
 Live server untouched."
     exit 1
 fi
+
+notify "🧊 tests passed ✓ — building native release…"
 
 log "building native release..."
 if ! cargo build --release >>"$LOG" 2>&1; then
     log "ERROR: native build failed — deploy aborted, live service untouched."
     notify "🧊❌ <b>Frozen City</b>: deploy failed (native build)
-${LOCAL:0:7} → ${REMOTE:0:7}
-${COMMIT_MSG}
+${HEADER}
 Live server untouched."
     exit 1
 fi
+
+notify "🧊 native build done ✓ — building the web package now (longest step, ~5-9 min)…"
 
 log "building web package..."
 if ! ./build-web.sh >>"$LOG" 2>&1; then
     log "ERROR: web build failed — deploy aborted, live service untouched."
     notify "🧊❌ <b>Frozen City</b>: deploy failed (web build)
-${LOCAL:0:7} → ${REMOTE:0:7}
-${COMMIT_MSG}
+${HEADER}
 Live server untouched."
     exit 1
 fi
+
+notify "🧊 web build done ✓ — swapping the live server…"
 
 log "deploying to $DEPLOY_DIR and restarting $SERVICE..."
 sudo systemctl stop "$SERVICE"
@@ -114,8 +128,7 @@ sleep 2
 if systemctl is-active --quiet "$SERVICE"; then
     log "deploy OK — live at ${REMOTE:0:7}"
     notify "🧊✅ <b>Frozen City</b>: deployed
-${LOCAL:0:7} → ${REMOTE:0:7}
-${COMMIT_MSG}
+${HEADER}
 https://twelfth.uz/game/"
 else
     log "ERROR: $SERVICE failed to start after deploy — check 'journalctl -u $SERVICE'"
