@@ -90,6 +90,7 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
         total_chat: 0,
         pings: Vec::new(),
         guest_perm: GuestPermission::Build,
+        owner_id: None,
         next_id,
         rng: rng.0,
     };
@@ -190,9 +191,11 @@ pub fn push_action_event(state: &mut GameState, text: impl Into<String>) {
 }
 
 pub fn player_joined(state: &mut GameState, id: u64, name: &str) {
-    // The first player to join a fresh world owns it; everyone after is a
-    // guest, bounded by `state.guest_perm`.
-    let role = if state.players.is_empty() {
+    // Ownership is bound to the FIRST player ever to join, tracked in
+    // `owner_id` — NOT the momentary roster size. If the owner is mid-reconnect
+    // (roster briefly empty), a fresh joiner must not be able to seize the world.
+    let role = if state.owner_id.is_none_or(|o| o == id) {
+        state.owner_id = Some(id);
         Role::Owner
     } else {
         Role::Guest
@@ -212,13 +215,15 @@ pub fn player_joined(state: &mut GameState, id: u64, name: &str) {
         demolished: 0,
         role,
     });
-    push_event(state, format!("{} joined the city.", name));
+    // Join/leave churn is cosmetic so a flood of connects can never evict a
+    // genuine system event (death, weather, victory) from the capped log.
+    push_action_event(state, format!("{} joined the city.", name));
 }
 
 pub fn player_left(state: &mut GameState, id: u64) {
     if let Some(p) = state.players.iter().find(|p| p.id == id) {
         let name = p.name.clone();
-        push_event(state, format!("{} left the city.", name));
+        push_action_event(state, format!("{} left the city.", name));
     }
     state.players.retain(|p| p.id != id);
 }
@@ -251,7 +256,7 @@ pub fn player_rejoined(state: &mut GameState, saved: PlayerInfo) {
         cursor: None,
         ..saved
     });
-    push_event(state, format!("{} reconnected.", name));
+    push_action_event(state, format!("{} reconnected.", name));
 }
 
 pub fn set_cursor(state: &mut GameState, id: u64, x: f32, y: f32) {
@@ -288,24 +293,37 @@ pub fn push_chat(state: &mut GameState, player_id: u64, text: &str) {
     // line into multi-row visual noise for every viewer on the shared server.
     let is_combining = |c: char| {
         matches!(c,
-            '\u{0300}'..='\u{036F}'  // combining diacritical marks
+            '\u{0300}'..='\u{036F}'   // combining diacritical marks
+            | '\u{0483}'..='\u{0489}' // Cyrillic combining
+            | '\u{0591}'..='\u{05C7}' // Hebrew points
+            | '\u{0610}'..='\u{061A}' // Arabic
+            | '\u{064B}'..='\u{065F}' // Arabic tashkil
+            | '\u{06D6}'..='\u{06ED}' // Arabic
+            | '\u{0900}'..='\u{0903}' // Devanagari
+            | '\u{093A}'..='\u{094F}' // Devanagari matras
+            | '\u{0951}'..='\u{0957}' // Devanagari
+            | '\u{0E31}'..='\u{0E3A}' // Thai vowels/tones
+            | '\u{0E47}'..='\u{0E4E}' // Thai tones
             | '\u{1AB0}'..='\u{1AFF}' // combining diacritical marks extended
             | '\u{1DC0}'..='\u{1DFF}' // combining diacritical marks supplement
             | '\u{20D0}'..='\u{20FF}' // combining diacritical marks for symbols
             | '\u{FE20}'..='\u{FE2F}' // combining half marks
         )
     };
+    // Order matters: strip bad chars, THEN cap stacked combining marks, and
+    // only THEN apply the length budget — so a zalgo-heavy prefix can't eat the
+    // whole MAX_CHAT_LEN budget and silently discard legitimate trailing text.
     let sanitized: String = text
         .trim()
         .chars()
         .filter(|c| !is_bad(*c))
-        .take(MAX_CHAT_LEN)
         .scan(0u32, |run, c| {
             *run = if is_combining(c) { *run + 1 } else { 0 };
             Some((c, *run))
         })
         .filter(|(_, run)| *run <= 2)
         .map(|(c, _)| c)
+        .take(MAX_CHAT_LEN)
         .collect();
     if sanitized.trim().is_empty() {
         return;

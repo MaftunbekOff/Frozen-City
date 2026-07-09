@@ -82,7 +82,7 @@ src/net/    TCP + WebSocket + in-memory kanallar; server thread 5 Hz tick, snaps
 src/client/ Bevy 0.19: protsedural render (assetlarsiz), UI, input, chat, minimap
             minimap.rs — butun xaritaning burchakdagi ko'rinishi (teren+binolar+kamera)
             local_server.rs — brauzerda yakka o'yin (sim Bevy tizimi sifatida, threadsiz)
-tests/      44 sim-invariant testi + 12 e2e test (TCP, WebSocket, HTTP, chat,
+tests/      46 sim-invariant testi + 12 e2e test (TCP, WebSocket, HTTP, chat,
             attributsiya, reconnect, rollar) — protokol fuzz testi ham
 ```
 
@@ -111,7 +111,7 @@ Binar: `target/release/frozen_city(.exe)`. Multiplayer uchun hostning 4595/TCP p
 ## Testlar
 
 ```bash
-cargo test          # 56 test: determinizm, invariantlar, protokol+fuzz, TCP/WS/HTTP e2e, chat/attributsiya/reconnect/rollar
+cargo test          # 58 test: determinizm, invariantlar, protokol+fuzz, TCP/WS/HTTP e2e, chat/attributsiya/reconnect/rollar
 cargo run -- --smoke  # render smoke-test (avtomatik yopiladi)
 ```
 

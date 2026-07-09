@@ -644,7 +644,10 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
                             let player_id = saved.id;
                             session_order.retain(|&tok| tok != t);
                             sim::player_rejoined(&mut state, saved);
-                            (player_id, t, true)
+                            // Rotate the token on every reconnect: the old one
+                            // was sent once in plaintext, so a sniffed token is
+                            // dead the moment the real client reconnects.
+                            (player_id, token_rng.next_u64(), true)
                         } else {
                             let player_id = next_player_id;
                             next_player_id += 1;
@@ -722,7 +725,11 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
                                 }
                             }
                             ClientMsg::Kick { target } => {
-                                if state.is_owner(pid) && target != pid {
+                                // Owner-only; never self, never another owner.
+                                if state.is_owner(pid)
+                                    && target != pid
+                                    && !state.is_owner(target)
+                                {
                                     // Reverse-lookup the connection serving
                                     // this player, if it's still live.
                                     let kc = player_of
@@ -786,6 +793,11 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
         let now = Instant::now();
         if now >= next_tick {
             let day_before = state.day();
+            // Drop commands queued by a player who has since left or been
+            // kicked: `can_issue` trusts pids absent from the roster, so an
+            // unapplied command from a departed guest must not slip through
+            // with unrestricted permission.
+            pending.retain(|(pid, _)| state.player(*pid).is_some());
             for (pid, cmd) in pending.drain(..) {
                 sim::apply_command(&mut state, pid, &cmd);
             }
@@ -802,8 +814,15 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
                         game_over_since = None;
                         let seed = state.rng ^ 0xA5A5_5A5A_D00D_FEED ^ state.tick;
                         let players = state.players.clone();
+                        // Carry ownership and the owner-set guest policy across
+                        // the reset, otherwise a ViewOnly-locked world silently
+                        // reopens to Build for everyone each game cycle.
+                        let guest_perm = state.guest_perm;
+                        let owner_id = state.owner_id;
                         state = sim::new_game(seed, config.win_days);
                         state.players = players;
+                        state.guest_perm = guest_perm;
+                        state.owner_id = owner_id;
                         printed_events = 0;
                         printed_chat = 0;
                         sim::push_event(

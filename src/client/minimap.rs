@@ -7,7 +7,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::image::{Image, ImageSampler};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use bevy::window::PrimaryWindow;
+use bevy::ui::RelativeCursorPosition;
 
 use frozen_city::game::types::{tile_index, BuildingKind, MAP_H, MAP_W};
 
@@ -29,6 +29,12 @@ struct MinimapCache {
     terrain: Vec<u8>,
     tiles_version: u64,
     has_terrain: bool,
+    /// Last-baked signature; the overlay is only re-drawn/re-uploaded when the
+    /// snapshot or the camera view box actually changed.
+    baked: bool,
+    last_version: u64,
+    last_focus: Vec3,
+    last_dist: f32,
 }
 
 #[derive(Component)]
@@ -76,8 +82,10 @@ fn spawn_minimap(mut commands: Commands, tex: Res<MinimapTex>) {
             },
             BackgroundColor(Color::srgba(0.04, 0.06, 0.10, 0.85)),
             BorderColor::all(Color::srgba(0.55, 0.68, 0.85, 0.6)),
-            // Register as a UI region so world clicks/zoom are suppressed here.
+            // Register as a UI region so world clicks/zoom are suppressed here,
+            // and track the cursor's position within it for click-to-navigate.
             Interaction::default(),
+            RelativeCursorPosition::default(),
             UiBlocker,
             MinimapNode,
             DespawnOnExit(Screen::Game),
@@ -121,6 +129,20 @@ fn update_minimap(
     mut images: ResMut<Assets<Image>>,
 ) {
     let Some(state) = view.ready() else { return };
+
+    // Skip the whole clone + overlay + GPU re-upload when nothing that shows on
+    // the minimap changed since the last bake (idle frames between snapshots).
+    if cache.baked
+        && cache.last_version == view.version
+        && cache.last_focus == rig.focus
+        && cache.last_dist == rig.dist
+    {
+        return;
+    }
+    cache.baked = true;
+    cache.last_version = view.version;
+    cache.last_focus = rig.focus;
+    cache.last_dist = rig.dist;
 
     // Rebuild the cached terrain layer only when the tile grid actually changes.
     if !cache.has_terrain || cache.tiles_version != view.tiles_version {
@@ -207,32 +229,24 @@ fn update_minimap(
 }
 
 /// Click (or drag) on the minimap to move the camera focus to that spot.
+/// `RelativeCursorPosition` hands us the cursor in the node's own [0,1] space,
+/// correct across window scale factor and `UiScale` — unlike a world-space
+/// `GlobalTransform`, which UI nodes don't even carry in Bevy 0.19.
 fn minimap_click(
     buttons: Res<ButtonInput<MouseButton>>,
-    windows: Query<&Window, With<PrimaryWindow>>,
-    minimap: Query<(&Interaction, &GlobalTransform), With<MinimapNode>>,
+    minimap: Query<&RelativeCursorPosition, With<MinimapNode>>,
     mut rig: ResMut<CamRig>,
 ) {
     if !buttons.pressed(MouseButton::Left) {
         return;
     }
-    let Ok((interaction, gt)) = minimap.single() else { return };
-    // Only when the pointer is actually over the minimap.
-    if *interaction == Interaction::None {
+    let Ok(rel) = minimap.single() else { return };
+    // `normalized` is Some only while the cursor is within the minimap.
+    let Some(norm) = rel.normalized else { return };
+    if norm.x < 0.0 || norm.x > 1.0 || norm.y < 0.0 || norm.y > 1.0 {
         return;
     }
-    let Ok(window) = windows.single() else { return };
-    let Some(cursor) = window.cursor_position() else { return };
-
-    // The node's GlobalTransform sits at its center (logical pixels); map the
-    // cursor into the [0,1]^2 minimap box, then into tile coordinates.
-    let center = gt.translation().truncate();
-    let origin = center - Vec2::splat(MINIMAP_PX / 2.0);
-    let local = (cursor - origin) / MINIMAP_PX;
-    if local.x < 0.0 || local.x > 1.0 || local.y < 0.0 || local.y > 1.0 {
-        return;
-    }
-    let tx = local.x * MAP_W as f32;
-    let ty = local.y * MAP_H as f32;
+    let tx = norm.x * MAP_W as f32;
+    let ty = norm.y * MAP_H as f32;
     rig.focus = tilef_to_world((tx, ty));
 }

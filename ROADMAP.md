@@ -13,8 +13,8 @@ M0–M7 bosqichlar yakunlangan:
 - ✅ HUD, qurish/bino/pech panellari, menyu, voqealar lentasi, game-over
 - ✅ Brauzer (WASM), URL parametrlari, inline singleplayer
 - ✅ Mobil touch boshqaruv va grafika sifat darajalari
-- ✅ 56 test: sim invariantlari + attributsiya/chat/ping/reconnect/rollar e2e + protokol fuzz
-- ✅ Mini-xarita (minimap): butun xaritaning burchakdagi ko'rinishi + bosib borish
+- ✅ 58 test: sim invariantlari + attributsiya/chat/ping/reconnect/rollar e2e + protokol fuzz
+- ✅ Mini-xarita (minimap): butun xaritaning burchakdagi ko'rinishi + bosib borish + pinglar
 
 **V0.2 (jarayonda):** chat, attributsiya, reconnect, rate-limit va **rollar/egalik**
 yakunlandi; qoldi: **delta-snapshot** va **interpolatsiya**.
@@ -25,9 +25,16 @@ yakunlandi; qoldi: **delta-snapshot** va **interpolatsiya**.
 - ✅ Voqealar lentasi — tizim voqealari (o'lim/ob-havo) player-spam bilan o'chmaydi.
 - ✅ Chat "zalgo" — ketma-ket combining-mark'lar cheklandi (bidi/zero-width ham).
 
-**Qolgan ochiq ishlar:** chiqarib yuborilgan mehmon darhol yangi o'yinchi sifatida
-qayta kira oladi (ban ro'yxati kerak); egasi ketsa egalik o'tmaydi (owner-transfer);
-chuqurroq: bounded chiquvchi kanal.
+**Ikkinchi review (rollar/minimap) natijasida tuzatilgan:** egalik yagonaligi
+(`owner_id` — parked egasini begona egallay olmaydi, ikki egadan himoya); navbatdagi
+buyruq ruxsat-bypass'i (uzilgan/kicked o'yinchi buyrug'i tashlanadi); mini-xarita
+bosish o'lik kod edi (UiGlobalTransform → RelativeCursorPosition); HUD tizim-voqealariga
+ustuvorlik; reconnect token-rotatsiyasi (sniffing himoyasi); guest_perm reset-omon-qolishi;
+zalgo tartibi/diapazonlari; mini-xarita per-frame GPU yuklamasi.
+
+**Qolgan ochiq ishlar:** chiqarib yuborilgan mehmon yangi o'yinchi sifatida qayta
+kira oladi (ban ro'yxati kerak); egasi butunlay ketsa egalik o'tmaydi (owner-transfer);
+chuqurroq: TLS (wss majburiy) va bounded chiquvchi kanal.
 
 ## Katta maqsad (Vision) — o'yinchi sayohati
 

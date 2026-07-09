@@ -429,15 +429,26 @@ pub fn hud_update(
                 )
             }
             HudField::Events => {
-                let mut lines: Vec<String> = state
-                    .events
-                    .iter()
-                    .rev()
-                    .take(8)
-                    .map(|e| format!("Day {}: {}", e.day, e.text))
-                    .collect();
-                lines.reverse();
-                lines.join("\n")
+                // Show up to 8 lines, prioritising system events (deaths,
+                // weather, victory) over cosmetic ones so the server's
+                // eviction protection actually reaches the player's eyes;
+                // then display the chosen lines chronologically.
+                let mut idx: Vec<usize> = (0..state.events.len()).collect();
+                idx.sort_by_key(|&i| {
+                    (
+                        std::cmp::Reverse(state.events[i].system),
+                        std::cmp::Reverse(i),
+                    )
+                });
+                idx.truncate(8);
+                idx.sort_unstable();
+                idx.iter()
+                    .map(|&i| {
+                        let e = &state.events[i];
+                        format!("Day {}: {}", e.day, e.text)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
             }
         };
         if text.0 != new {

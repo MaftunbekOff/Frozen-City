@@ -247,6 +247,57 @@ fn kick_player_is_a_noop_for_a_missing_target() {
     assert_eq!(state.events.len(), events_before, "no event for a no-op kick");
 }
 
+#[test]
+fn a_parked_owner_keeps_ownership_from_a_fresh_joiner() {
+    let mut state = sim::new_game(5, 12);
+    sim::player_joined(&mut state, 1, "Owner");
+    assert_eq!(state.player(1).unwrap().role, Role::Owner);
+
+    // The owner's connection drops (roster empties) but their session is parked
+    // for reconnect — ownership must not evaporate with the live roster.
+    sim::player_left(&mut state, 1);
+    assert!(state.players.is_empty());
+    assert_eq!(state.owner_id, Some(1), "ownership is remembered while parked");
+
+    // A stranger joins the momentarily-empty world — must NOT seize ownership.
+    sim::player_joined(&mut state, 2, "Stranger");
+    assert_eq!(
+        state.player(2).unwrap().role,
+        Role::Guest,
+        "an empty roster must not grant ownership to a fresh joiner"
+    );
+
+    // The real owner returns and regains Owner.
+    sim::player_joined(&mut state, 1, "Owner");
+    assert_eq!(state.player(1).unwrap().role, Role::Owner);
+    assert_eq!(
+        state.players.iter().filter(|p| p.role == Role::Owner).count(),
+        1,
+        "exactly one owner at a time"
+    );
+}
+
+#[test]
+fn push_chat_zalgo_prefix_keeps_trailing_text() {
+    let mut state = sim::new_game(5, 12);
+    sim::player_joined(&mut state, 7, "Zara");
+
+    // A zalgo-heavy prefix must not consume the whole length budget and discard
+    // the sender's real trailing message (combining-cap runs before the cap).
+    let mut text = String::from("a");
+    for _ in 0..199 {
+        text.push('\u{0301}');
+    }
+    text.push_str(" HELP");
+    sim::push_chat(&mut state, 7, &text);
+
+    let stored = &state.chat[0].text;
+    assert!(
+        stored.contains("HELP"),
+        "trailing text must survive the zalgo cap: {stored:?}"
+    );
+}
+
 // --- helpers ---
 
 fn find_spot(state: &GameState, kind: BuildingKind) -> (u8, u8) {

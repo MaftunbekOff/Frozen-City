@@ -282,6 +282,10 @@ pub struct GameState {
     pub pings: Vec<Ping>,
     /// What guests may do in this world, set by the owner.
     pub guest_perm: GuestPermission,
+    /// The player id that owns this world. Set once when the very first player
+    /// joins and never cleared automatically, so a momentarily-empty roster
+    /// (owner mid-reconnect) can't let a stranger seize ownership.
+    pub owner_id: Option<u64>,
     pub next_id: u32,
     /// SplitMix64 RNG state.
     pub rng: u64,
