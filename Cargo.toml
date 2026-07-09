@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bevy = "0.19"
+# `wav` adds the WAV decoder so the procedurally-synthesized SFX
+# (src/client/audio.rs) can be decoded; bevy's default features are kept.
+bevy = { version = "0.19", features = ["wav"] }
 serde = { version = "1", features = ["derive"] }
 bincode = "1.3"
 

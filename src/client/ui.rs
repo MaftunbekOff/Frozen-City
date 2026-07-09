@@ -364,14 +364,31 @@ pub struct FpsText;
 
 pub fn fps_update(
     diagnostics: Res<bevy::diagnostic::DiagnosticsStore>,
+    quality: Res<Quality>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut q: Query<&mut Text, With<FpsText>>,
 ) {
     let Ok(mut t) = q.single_mut() else { return };
-    let s = diagnostics
+    let fps = diagnostics
         .get(&bevy::diagnostic::FrameTimeDiagnosticsPlugin::FPS)
         .and_then(|d| d.smoothed())
-        .map(|v| format!("FPS {v:.0}"))
-        .unwrap_or_default();
+        .unwrap_or(0.0);
+    // Also surface the graphics tier and the actual backing resolution so
+    // performance problems (esp. mobile-web fill rate) can be diagnosed on-device.
+    let tier = match *quality {
+        Quality::Low => "Low",
+        Quality::Medium => "Med",
+        Quality::High => "High",
+    };
+    let s = if let Ok(w) = windows.single() {
+        format!(
+            "FPS {fps:.0}  |  {tier}  |  {}x{}",
+            w.resolution.physical_width(),
+            w.resolution.physical_height()
+        )
+    } else {
+        format!("FPS {fps:.0}  |  {tier}")
+    };
     if t.0 != s {
         t.0 = s;
     }

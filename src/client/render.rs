@@ -146,6 +146,16 @@ pub struct Smoke {
     pub phase: f32,
 }
 
+/// Newly-spawned buildings scale up from nothing for tactile placement feedback.
+#[derive(Component)]
+pub struct SpawnGrow {
+    pub age: f32,
+}
+
+/// Full-screen cold haze that fades in during a blizzard.
+#[derive(Component)]
+pub struct BlizzardOverlay;
+
 // ------------------------------------------------------------------- setup
 
 pub fn setup_camera_and_assets(
@@ -290,10 +300,29 @@ fn tent_mesh() -> Mesh {
 pub fn enter_game(
     mut commands: Commands,
     assets: Res<GameAssets>,
+    quality: Res<Quality>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut rig: ResMut<super::input::CamRig>,
 ) {
     *rig = super::input::CamRig::default();
+
+    // Full-screen cold haze for blizzards. `GlobalZIndex(-1)` keeps it behind
+    // the HUD (so panels stay clear) and it has no `Interaction`, so it never
+    // captures clicks — it only tints the visible world.
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.0),
+            right: Val::Px(0.0),
+            top: Val::Px(0.0),
+            bottom: Val::Px(0.0),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.80, 0.86, 0.95, 0.0)),
+        GlobalZIndex(-1),
+        BlizzardOverlay,
+        DespawnOnExit(Screen::Game),
+    ));
 
     // Furnace heat radius: flat ring on the ground, scaled by the radius.
     let heat_mat = materials.add(StandardMaterial {
@@ -345,9 +374,11 @@ pub fn enter_game(
         DespawnOnExit(Screen::Game),
     ));
 
-    // Snowfall volume around the camera focus.
+    // Snowfall volume around the camera focus. Phones get far fewer flakes —
+    // each is a translucent draw and mobile GPUs are fill-rate bound.
+    let flake_count = if *quality == Quality::Low { 60 } else { 240 };
     let mut rng = Rng::new(0x5005_7EA1);
-    for _ in 0..240 {
+    for _ in 0..flake_count {
         let x = rng.range(-24, 24) as f32 + rng.below(100) as f32 * 0.01;
         let z = rng.range(-24, 24) as f32 + rng.below(100) as f32 * 0.01;
         let y = rng.below(140) as f32 * 0.1;
@@ -681,6 +712,7 @@ fn spawn_building(
             Transform::from_translation(center),
             Visibility::Inherited,
             BuildingMarker,
+            SpawnGrow { age: 0.0 },
             DespawnOnExit(Screen::Game),
         ))
         .id();
@@ -1025,6 +1057,7 @@ pub fn animate_survivors(
 
 /// Sun, ambient light, fog and sky color track the in-game time of day.
 pub fn animate_environment(
+    time: Res<Time>,
     view: Res<GameView>,
     assets: Res<GameAssets>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -1036,6 +1069,7 @@ pub fn animate_environment(
     let t = state.time_of_day();
     let daylight = (1.0 - (std::f32::consts::TAU * t).cos()) / 2.0;
     let cold = state.cold_snap && state.is_night();
+    let blizzard = state.blizzard_active();
 
     // Windows glow as the light fades.
     let glow = (1.0 - daylight).powf(2.0);
@@ -1049,18 +1083,35 @@ pub fn animate_environment(
     } else {
         Vec3::new(0.42, 0.50, 0.62)
     };
-    let sky = sky_night.lerp(sky_day, daylight.powf(1.2));
+    let mut sky = sky_night.lerp(sky_day, daylight.powf(1.2));
+
+    // Aurora: a faint green/violet shimmer high in the deep-night sky.
+    let night = (1.0 - daylight * 4.0).clamp(0.0, 1.0);
+    if night > 0.0 {
+        let e = time.elapsed_secs();
+        let g = 0.030 * (e * 0.23).sin().max(0.0) * night;
+        let v = 0.020 * (e * 0.17 + 1.3).sin().max(0.0) * night;
+        sky.x += v * 0.6;
+        sky.y += g;
+        sky.z += v;
+    }
+    // Blizzard whiteout: pull the sky toward pale cold gray.
+    if blizzard {
+        sky = sky.lerp(Vec3::new(0.55, 0.60, 0.68), 0.6);
+    }
     clear.0 = Color::srgb(sky.x, sky.y, sky.z);
 
+    // During a blizzard visibility collapses (fog closes right in).
+    let vis = if blizzard { 0.45 } else { 1.0 };
     for (mut f, mut ambient) in &mut cam_fx {
         f.color = Color::srgb(sky.x, sky.y, sky.z);
-        let start = 24.0 + 46.0 * daylight;
+        let start = (24.0 + 46.0 * daylight) * vis;
         f.falloff = FogFalloff::Linear {
             start,
-            end: start + 60.0 + 40.0 * daylight,
+            end: start + (60.0 + 40.0 * daylight) * vis,
         };
         ambient.brightness = 45.0 + 300.0 * daylight;
-        ambient.color = if cold {
+        ambient.color = if cold || blizzard {
             Color::srgb(0.55, 0.68, 1.0)
         } else {
             Color::srgb(0.70, 0.78, 0.95)
@@ -1186,6 +1237,49 @@ pub fn animate_smoke(
         );
         // Puffs grow as they rise, then pop back to the chimney.
         tr.scale = Vec3::splat(0.08 + t * 0.42);
+    }
+}
+
+/// Grow newly-placed buildings from almost nothing over a short beat.
+pub fn animate_spawn(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut q: Query<(Entity, &mut Transform, &mut SpawnGrow)>,
+) {
+    for (e, mut tr, mut grow) in &mut q {
+        grow.age += time.delta_secs();
+        let t = (grow.age / 0.35).clamp(0.0, 1.0);
+        // Smoothstep from a tiny seed to full size.
+        let s = 0.08 + 0.92 * (t * t * (3.0 - 2.0 * t));
+        tr.scale = Vec3::splat(s);
+        if t >= 1.0 {
+            tr.scale = Vec3::ONE;
+            commands.entity(e).remove::<SpawnGrow>();
+        }
+    }
+}
+
+/// Fade the full-screen cold haze in/out with the blizzard, plus a faint pulse.
+pub fn animate_blizzard_overlay(
+    time: Res<Time>,
+    view: Res<GameView>,
+    mut q: Query<&mut BackgroundColor, With<BlizzardOverlay>>,
+    mut alpha: Local<f32>,
+) {
+    let active = view
+        .state
+        .as_ref()
+        .map(|s| s.blizzard_active())
+        .unwrap_or(false);
+    let target = if active { 0.20 } else { 0.0 };
+    *alpha += (target - *alpha) * (2.0 * time.delta_secs()).min(1.0);
+    let pulse = if active {
+        0.03 * (time.elapsed_secs() * 1.7).sin()
+    } else {
+        0.0
+    };
+    for mut bg in &mut q {
+        bg.0 = Color::srgba(0.80, 0.86, 0.95, (*alpha + pulse).max(0.0));
     }
 }
 
@@ -1383,6 +1477,7 @@ pub fn sync_pings(
 pub fn snow_fall(
     time: Res<Time>,
     rig: Res<super::input::CamRig>,
+    view: Res<GameView>,
     mut flakes: Query<(&mut Transform, &Snowflake)>,
     mut rng: Local<Rng>,
 ) {
@@ -1391,10 +1486,18 @@ pub fn snow_fall(
     let focus = rig.focus;
     let dt = time.delta_secs();
     let elapsed = time.elapsed_secs();
+    // A blizzard drives the snow harder and more sideways.
+    let blizzard = view
+        .state
+        .as_ref()
+        .map(|s| s.blizzard_active())
+        .unwrap_or(false);
+    let fall_k = if blizzard { 2.0 } else { 1.0 };
+    let drift_k = if blizzard { 2.6 } else { 1.0 };
 
     for (mut t, flake) in &mut flakes {
-        t.translation.y -= flake.fall * dt;
-        t.translation.x += (elapsed * 0.8 + flake.phase).sin() * flake.drift * dt;
+        t.translation.y -= flake.fall * fall_k * dt;
+        t.translation.x += (elapsed * 0.8 + flake.phase).sin() * flake.drift * drift_k * dt;
         t.translation.z += (elapsed * 0.63 + flake.phase * 1.7).cos() * flake.drift * 0.6 * dt;
         if t.translation.y < 0.0 {
             t.translation.y = top;

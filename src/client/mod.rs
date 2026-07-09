@@ -13,7 +13,9 @@ use frozen_city::net::protocol::ClientMsg;
 #[cfg(not(target_arch = "wasm32"))]
 use frozen_city::net::server::ServerHandle;
 
+pub mod audio;
 pub mod chat;
+pub mod events;
 pub mod input;
 #[cfg(target_arch = "wasm32")]
 pub mod local_server;
@@ -296,6 +298,8 @@ impl Plugin for ClientPlugin {
                     render::animate_effects,
                     render::animate_smoke,
                     render::animate_survivors,
+                    render::animate_spawn,
+                    render::animate_blizzard_overlay,
                     render::sync_player_cursors,
                     render::update_cursor_labels,
                     render::sync_pings,
@@ -340,6 +344,8 @@ impl Plugin for ClientPlugin {
         app.add_plugins(roles::plugin);
         app.add_plugins(missions::plugin);
         app.add_plugins(research::plugin);
+        app.add_plugins(events::plugin);
+        app.add_plugins(audio::plugin);
         #[cfg(target_arch = "wasm32")]
         app.add_plugins(local_server::plugin);
     }

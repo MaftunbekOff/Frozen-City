@@ -415,6 +415,39 @@ pub const TECH_RATIONING_FOOD: f32 = 0.85;
 /// Hospital-care multiplier with Medicine.
 pub const TECH_MEDICINE_CARE: f32 = 1.5;
 
+// --- V0.3: dynamic events (disease, refugee caravan, blizzard) ---
+
+/// A refugee caravan offering shelter to newcomers in exchange for food.
+/// Sits in `GameState.pending_event` until answered or it expires.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CaravanOffer {
+    pub count: u32,
+    pub food_cost: u32,
+    /// Tick after which the offer lapses (auto-declined).
+    pub expires: u64,
+}
+
+/// Events never fire before this in-game day, so a fresh colony (and short
+/// deterministic tests) is never disrupted while finding its feet.
+pub const EVENT_GRACE_DAY: u32 = 3;
+
+/// Per-day chance a sickness breaks out, and how long/hard it hits.
+pub const DISEASE_CHANCE: f32 = 0.16;
+pub const DISEASE_TICKS: u64 = 2 * TICKS_PER_DAY;
+/// Extra HP lost per in-game day while a disease is active (offset by hospitals).
+pub const DISEASE_HP_PER_DAY: f32 = 6.0;
+
+/// Per-day chance of a blizzard, its duration, and the extra cold it brings.
+pub const BLIZZARD_CHANCE: f32 = 0.14;
+pub const BLIZZARD_TICKS: u64 = TICKS_PER_DAY;
+pub const BLIZZARD_COLD: f32 = -8.0;
+
+/// Per-day chance a refugee caravan arrives, and the offer's shape.
+pub const CARAVAN_CHANCE: f32 = 0.22;
+pub const CARAVAN_FOOD_PER_PERSON: u32 = 4;
+/// How long the player has to decide (half an in-game day).
+pub const CARAVAN_EXPIRE_TICKS: u64 = TICKS_PER_DAY / 2;
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct GameEvent {
     pub day: u32,
@@ -435,6 +468,8 @@ pub enum PlayerCommand {
     InvestTunnel,
     /// Spend resources to permanently unlock a technology.
     Research { tech: Tech },
+    /// Answer a pending event choice (e.g. a refugee caravan).
+    RespondEvent { accept: bool },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -469,6 +504,15 @@ pub struct GameState {
     pub tunnel: TunnelState,
     /// Permanently unlocked technologies.
     pub techs: Vec<Tech>,
+    /// Tick until which a disease is active (0 = none).
+    pub disease_until: u64,
+    /// Tick until which a blizzard is active (0 = none).
+    pub blizzard_until: u64,
+    /// An unanswered event choice (refugee caravan), if any.
+    pub pending_event: Option<CaravanOffer>,
+    /// Private RNG stream for events, kept separate from the main sim RNG so
+    /// adding events never perturbs mapgen/cold-snap/arrival determinism.
+    pub event_rng: u64,
     /// What guests may do in this world, set by the owner.
     pub guest_perm: GuestPermission,
     /// The player id that owns this world. Set once when the very first player
@@ -510,7 +554,8 @@ impl GameState {
         let t = self.time_of_day();
         let diurnal = -6.0 * (std::f32::consts::TAU * t).cos();
         let snap = if self.cold_snap && t >= 0.7 { -10.0 } else { 0.0 };
-        base + diurnal + snap
+        let blizzard = if self.blizzard_active() { BLIZZARD_COLD } else { 0.0 };
+        base + diurnal + snap + blizzard
     }
 
     /// Heat radius in tiles around the furnace center; 0 when unlit.
@@ -578,6 +623,14 @@ impl GameState {
         self.techs.contains(&t)
     }
 
+    pub fn disease_active(&self) -> bool {
+        self.tick < self.disease_until
+    }
+
+    pub fn blizzard_active(&self) -> bool {
+        self.tick < self.blizzard_until
+    }
+
     /// Whether any connected player currently owns the world.
     pub fn owner_present(&self) -> bool {
         self.players.iter().any(|p| p.role == Role::Owner)
@@ -603,7 +656,8 @@ impl GameState {
                 PlayerCommand::Place { .. }
                 | PlayerCommand::AdjustWorkers { .. }
                 | PlayerCommand::InvestTunnel
-                | PlayerCommand::Research { .. } => true,
+                | PlayerCommand::Research { .. }
+                | PlayerCommand::RespondEvent { .. } => true,
                 // Guests may only tear down their own buildings, never touch the
                 // furnace, under the Build policy.
                 PlayerCommand::Demolish { building } => self

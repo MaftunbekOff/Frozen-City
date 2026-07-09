@@ -82,11 +82,12 @@ O'yin **3D** (low-poly, protsedural): qiya 2.5D ko'rinish standart, lekin kamera
 src/game/   sof deterministik simulyatsiya (Bevy'siz) — testlanadi, WASM'da ham ishlaydi
 src/net/    TCP + WebSocket + in-memory kanallar; server thread 5 Hz tick, snapshot broadcast
             ws.rs — brauzer WebSocket transporti (wasm)
-src/client/ Bevy 0.19: protsedural render (assetlarsiz), UI, input, chat, minimap
+src/client/ Bevy 0.19: protsedural render (assetlarsiz), UI, input, chat, minimap, audio
             minimap.rs — butun xaritaning burchakdagi ko'rinishi (teren+binolar+kamera)
+            audio.rs — protsedural WAV effektlari (qurish/voqea/bo'ron shamoli), assetsiz
             local_server.rs — brauzerda yakka o'yin (sim Bevy tizimi sifatida, threadsiz)
-tests/      66 sim-invariant testi + 12 e2e test (TCP, WebSocket, HTTP, chat,
-            attributsiya, reconnect, rollar, missiya/tunnel, binolar, texnologiya) — protokol fuzz ham
+tests/      75 sim-invariant testi + 12 e2e test (TCP, WebSocket, HTTP, chat,
+            attributsiya, reconnect, rollar, missiya/tunnel, binolar, texnologiya, voqealar) — fuzz ham
 ```
 
 - **Server-avtoritativ:** mijozlar faqat buyruq yuboradi (`Place`, `Demolish`,
@@ -114,7 +115,7 @@ Binar: `target/release/frozen_city(.exe)`. Multiplayer uchun hostning 4595/TCP p
 ## Testlar
 
 ```bash
-cargo test          # 78 test: determinizm, invariantlar, protokol+fuzz, e2e, chat/rollar/missiya/binolar/texnologiya
+cargo test          # 87 test: determinizm, invariantlar, protokol+fuzz, e2e, rollar/missiya/binolar/texnologiya/voqealar
 cargo run -- --smoke  # render smoke-test (avtomatik yopiladi)
 ```
 
@@ -122,4 +123,4 @@ cargo run -- --smoke  # render smoke-test (avtomatik yopiladi)
 
 **Vizyon:** shaxsiy olam (missiyalar) → **Tunnel** → Global Olam (butun dunyo bitta doimiy olamda) → do'stlarni o'z olamingga taklif qilish.
 
-V0.2 tarmoq poydevori — ✅ chat · ✅ attributsiya · ✅ reconnect · ✅ rate-limit · ✅ rollar/egalik · ✅ minimap · V0.3 — ✅ missiyalar · ✅ Tunnel · ✅ 3 yangi bino · ✅ texnologiya daraxti; qoldi: voqealar tizimi · V0.4 akkauntlar + doimiy shaxsiy olamlar · V0.5 Global Olam (hub) · V0.6 taklif va mehmon co-op · V1.0 sayqal + tarqatish. Batafsil: [ROADMAP.md](ROADMAP.md).
+V0.2 tarmoq poydevori — ✅ chat · ✅ attributsiya · ✅ reconnect · ✅ rate-limit · ✅ rollar/egalik · ✅ minimap · V0.3 — ✅ missiyalar · ✅ Tunnel · ✅ 3 yangi bino · ✅ texnologiya daraxti · ✅ voqealar tizimi (kasallik/bo'ron/karvon-tanlov) · V0.4 akkauntlar + doimiy shaxsiy olamlar · V0.5 Global Olam (hub) · V0.6 taklif va mehmon co-op · V1.0 sayqal + tarqatish. Batafsil: [ROADMAP.md](ROADMAP.md).

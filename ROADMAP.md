@@ -13,10 +13,10 @@ M0–M7 bosqichlar yakunlangan:
 - ✅ HUD, qurish/bino/pech panellari, menyu, voqealar lentasi, game-over
 - ✅ Brauzer (WASM), URL parametrlari, inline singleplayer
 - ✅ Mobil touch boshqaruv va grafika sifat darajalari
-- ✅ 78 test: sim invariantlari + attributsiya/chat/ping/reconnect/rollar/missiya/bino/texnologiya + fuzz
+- ✅ 87 test: sim invariantlari + attributsiya/chat/reconnect/rollar/missiya/bino/texnologiya/voqea + fuzz
 - ✅ Mini-xarita (minimap): butun xaritaning burchakdagi ko'rinishi + bosib borish + pinglar
-- ✅ V0.3: **missiyalar** (quest+mukofot), **Tunnel** (graduatsiya),
-  3 yangi **bino** (Issiqxona/Kasalxona/Oshxona), **texnologiya daraxti** (5 tech)
+- ✅ V0.3: **missiyalar**, **Tunnel** (graduatsiya), 3 yangi **bino**,
+  **texnologiya daraxti** (5 tech), **voqealar tizimi** (kasallik/bo'ron/karvon-tanlov)
 
 **V0.2 (jarayonda):** chat, attributsiya, reconnect, rate-limit va **rollar/egalik**
 yakunlandi; qoldi: **delta-snapshot** va **interpolatsiya**.
@@ -131,8 +131,11 @@ Tunnelgacha yetaklasin.
 - [x] **Texnologiya daraxti**: 5 texnologiya (Izolyatsiya, Samarali pech, Asboblar,
       Ratsion, Tibbiyot) — resurs evaziga ochiladi (`Research` buyrug'i), effektlar
       simda qo'llanadi. Client'da modal panel (R bilan ochiladi).
-- [ ] **Voqealar tizimi** (kasallik, qochoqlar karvoni — tanlov, qor bo'roni).
-- [~] **Balans regression testlari**: 20 missiya/tunnel/bino/texnologiya sim-testi qo'shildi.
+- [x] **Voqealar tizimi**: **kasallik** (HP kamayadi, kasalxona yumshatadi),
+      **qor bo'roni** (kuchli sovuq), va **qochoqlar karvoni — tanlov** (qabul
+      qil/rad et: oziq evaziga aholi). Alohida event-RNG (asosiy sim RNG'ga
+      tegmaydi) + grace-period (3-kundan). Client'da karvon popup + status indikatorlar.
+- [~] **Balans regression testlari**: 29 missiya/tunnel/bino/texnologiya/voqea sim-testi.
 
 ### Natija mezonlari
 
@@ -218,8 +221,10 @@ hech qachon yo'qolmaydi.
 
 ### Vazifalar
 
-- [ ] **Ovoz**: effektlar (qurish, pech, shamol, voqea) + fon musiqasi; WASM'da ham.
-- [ ] **Vizual sayqal**: qurilish animatsiyasi, tutun, qor bo'roni/aurora.
+- [~] **Ovoz**: ✅ protsedural (assetsiz) effektlar — qurish "thunk", voqea chime,
+      qor bo'roni shamoli (blizzard'da kuchayadi). Qoldi: fon musiqasi, ko'proq SFX.
+- [~] **Vizual sayqal**: ✅ bino qurilish animatsiyasi (o'sish), qor bo'roni effekti
+      (qalin qor + whiteout osmon/tuman + sovuq tint), tunda aurora. Qoldi: tutun sayqal, o'tishlar.
 - [ ] **Lokalizatsiya**: uz / en / ru; accessibility (rang-ko'r palitra, shrift).
 - [ ] **Sozlamalar menyusi**: grafika darajasi, ovoz, til.
 - [ ] **CI/CD**: GitHub Actions — test + Windows/Linux/macOS/wasm artefaktlari.

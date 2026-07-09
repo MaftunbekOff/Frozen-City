@@ -151,15 +151,15 @@ fn main() {
 
     #[allow(unused_mut)]
     let mut resolution: WindowResolution = (1280, 720).into();
-    // High-DPI phones would otherwise render 3x3 physical pixels per CSS
-    // pixel — far too much fill rate for mobile GPUs on WebGL2. Desktop
-    // browsers keep more density for crispness.
+    // High-DPI phones would otherwise render up to 3x3 physical pixels per CSS
+    // pixel — far too much fill rate for mobile GPUs on WebGL2. Phones (Low)
+    // render 1:1 with CSS pixels; desktop browsers keep more density for crispness.
     #[cfg(target_arch = "wasm32")]
     {
         let dpr = web_sys::window()
             .map(|w| w.device_pixel_ratio())
             .unwrap_or(1.0) as f32;
-        let cap = if quality == client::Quality::Low { 1.5 } else { 2.0 };
+        let cap = if quality == client::Quality::Low { 1.0 } else { 1.75 };
         resolution = resolution.with_scale_factor_override(dpr.min(cap));
     }
 

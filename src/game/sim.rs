@@ -98,6 +98,10 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
         ],
         tunnel: TunnelState::default(),
         techs: Vec::new(),
+        disease_until: 0,
+        blizzard_until: 0,
+        pending_event: None,
+        event_rng: Rng::new(seed.rotate_left(21) ^ 0x00E0_0DE0_1234_5678).0,
         guest_perm: GuestPermission::Build,
         owner_id: None,
         next_id,
@@ -484,6 +488,32 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                 push_event(state, format!("Researched: {}.", tech.name()));
             }
         }
+        PlayerCommand::RespondEvent { accept } => {
+            if let Some(offer) = state.pending_event.take() {
+                if *accept {
+                    let pop = state.survivors.len() as i32;
+                    let space = (state.housing_capacity() as i32 + 2 - pop).max(0);
+                    let take = (offer.count as i32).min(space).min(MAX_POPULATION - pop).max(0) as u32;
+                    // Charge only for the refugees actually admitted, never the
+                    // full offer, so a tight housing/pop cap doesn't waste food.
+                    let cost = (take * CARAVAN_FOOD_PER_PERSON) as f32;
+                    if take > 0 && state.stock.food >= cost {
+                        state.stock.food -= cost;
+                        let mut erng_local = Rng(state.event_rng);
+                        for _ in 0..take {
+                            let s = new_survivor(&mut erng_local, &mut state.next_id);
+                            state.survivors.push(s);
+                        }
+                        state.event_rng = erng_local.0;
+                        push_event(state, format!("{} refugees joined the city.", take));
+                    } else {
+                        push_event(state, "There was no room or food for the caravan.");
+                    }
+                } else {
+                    push_event(state, "The caravan was turned away.");
+                }
+            }
+        }
     }
 }
 
@@ -493,6 +523,7 @@ pub fn tick(state: &mut GameState) {
         return;
     }
     let mut rng = Rng(state.rng);
+    let mut erng = Rng(state.event_rng);
     state.tick += 1;
 
     // --- Expire stale map pings ---
@@ -512,11 +543,21 @@ pub fn tick(state: &mut GameState) {
                 format!("The city has survived {} days. Victory!", state.win_days),
             );
             state.rng = rng.0;
+            state.event_rng = erng.0;
             return;
         }
         state.cold_snap = day >= 3 && rng.chance(0.30);
         if state.cold_snap {
             push_event(state, "Forecast: a brutal cold snap will strike tonight!");
+        }
+
+        if state.day() >= EVENT_GRACE_DAY && !state.disease_active() && erng.chance(DISEASE_CHANCE) {
+            state.disease_until = state.tick + DISEASE_TICKS;
+            push_event(state, "A sickness is spreading through the city.");
+        }
+        if state.day() >= EVENT_GRACE_DAY && !state.blizzard_active() && erng.chance(BLIZZARD_CHANCE) {
+            state.blizzard_until = state.tick + BLIZZARD_TICKS;
+            push_event(state, "A blizzard is closing in — brace for deep cold.");
         }
     }
 
@@ -646,7 +687,8 @@ pub fn tick(state: &mut GameState) {
     } else {
         0.0
     };
-    let mut deaths: Vec<(String, bool)> = Vec::new();
+    let mut deaths: Vec<(String, &'static str)> = Vec::new();
+    let disease = state.disease_active();
 
     for (i, s) in state.survivors.iter_mut().enumerate() {
         s.hunger = (s.hunger + hunger_per_tick).min(120.0);
@@ -676,15 +718,25 @@ pub fn tick(state: &mut GameState) {
         if care_per_tick > 0.0 {
             s.hp = (s.hp + care_per_tick).min(100.0);
         }
+        if disease {
+            s.hp -= DISEASE_HP_PER_DAY / TICKS_PER_DAY as f32;
+        }
         if s.hp <= 0.0 {
-            deaths.push((s.name.clone(), s.hunger >= 80.0));
+            // Attribute the death to the most likely cause for the event log.
+            let cause = if s.hunger >= 80.0 {
+                "starved"
+            } else if disease {
+                "succumbed to illness"
+            } else {
+                "froze to death"
+            };
+            deaths.push((s.name.clone(), cause));
         }
     }
 
     if !deaths.is_empty() {
         state.survivors.retain(|s| s.hp > 0.0);
-        for (name, starved) in deaths {
-            let cause = if starved { "starved" } else { "froze to death" };
+        for (name, cause) in deaths {
             push_event(state, format!("{} has {}.", name, cause));
         }
         clamp_workers(state);
@@ -703,6 +755,43 @@ pub fn tick(state: &mut GameState) {
             let plural = if n == 1 { "" } else { "s" };
             push_event(state, format!("{} newcomer{} arrived seeking shelter.", n, plural));
         }
+    }
+
+    if state.tick % TICKS_PER_DAY == ARRIVAL_TICK
+        && state.day() >= EVENT_GRACE_DAY
+        && state.pending_event.is_none()
+        && erng.chance(CARAVAN_CHANCE)
+    {
+        let count = 2 + erng.below(3);
+        state.pending_event = Some(CaravanOffer {
+            count,
+            food_cost: count * CARAVAN_FOOD_PER_PERSON,
+            expires: state.tick + CARAVAN_EXPIRE_TICKS,
+        });
+        push_event(
+            state,
+            format!(
+                "A caravan of {} refugees asks for shelter (needs {} food). Answer them.",
+                count,
+                count * CARAVAN_FOOD_PER_PERSON
+            ),
+        );
+    }
+
+    // --- Event lifecycle: expiry and endings ---
+    if let Some(o) = state.pending_event {
+        if state.tick >= o.expires {
+            state.pending_event = None;
+            push_event(state, "The caravan gave up waiting and moved on.");
+        }
+    }
+    if state.disease_until != 0 && state.tick == state.disease_until {
+        state.disease_until = 0;
+        push_event(state, "The sickness fades.");
+    }
+    if state.blizzard_until != 0 && state.tick == state.blizzard_until {
+        state.blizzard_until = 0;
+        push_event(state, "The blizzard passes.");
     }
 
     // --- Missions & Tunnel ---
@@ -737,6 +826,7 @@ pub fn tick(state: &mut GameState) {
     }
 
     state.rng = rng.0;
+    state.event_rng = erng.0;
 }
 
 /// Remove one unit of wood from the nearest forest tile within `r` of (cx, cy).
