@@ -33,8 +33,11 @@ struct MinimapCache {
     /// snapshot or the camera view box actually changed.
     baked: bool,
     last_version: u64,
-    last_focus: Vec3,
-    last_dist: f32,
+    /// Last-uploaded view box in integer minimap-pixel space (fx, fy, half).
+    /// Panning/zooming the camera moves `rig.focus`/`rig.dist` continuously,
+    /// but the on-screen box only needs to be re-baked once it has actually
+    /// shifted by a whole pixel.
+    last_box: (i32, i32, i32),
 }
 
 #[derive(Component)]
@@ -130,19 +133,24 @@ fn update_minimap(
 ) {
     let Some(state) = view.ready() else { return };
 
+    // Camera view box in minimap-pixel space (north-up; it doesn't rotate with
+    // the 3D camera), computed up front so it can also gate the re-bake below.
+    let fx = (rig.focus.x / TILE + MAP_W as f32 / 2.0).round() as i32;
+    let fy = (rig.focus.z / TILE + MAP_H as f32 / 2.0).round() as i32;
+    let half = (rig.dist * 0.35).clamp(4.0, 40.0) as i32;
+    let view_box = (fx, fy, half);
+
     // Skip the whole clone + overlay + GPU re-upload when nothing that shows on
-    // the minimap changed since the last bake (idle frames between snapshots).
-    if cache.baked
-        && cache.last_version == view.version
-        && cache.last_focus == rig.focus
-        && cache.last_dist == rig.dist
-    {
+    // the minimap changed since the last bake: no new snapshot, and the view
+    // box hasn't moved by a whole on-screen pixel (panning/zooming changes
+    // `rig.focus`/`rig.dist` continuously, but most of that motion doesn't
+    // shift the quantized box at all).
+    if cache.baked && cache.last_version == view.version && cache.last_box == view_box {
         return;
     }
     cache.baked = true;
     cache.last_version = view.version;
-    cache.last_focus = rig.focus;
-    cache.last_dist = rig.dist;
+    cache.last_box = view_box;
 
     // Rebuild the cached terrain layer only when the tile grid actually changes.
     if !cache.has_terrain || cache.tiles_version != view.tiles_version {
@@ -209,10 +217,7 @@ fn update_minimap(
     }
 
     // Camera view box: a hollow rectangle around the camera focus, sized by the
-    // zoom distance (north-up; it doesn't rotate with the 3D camera).
-    let fx = (rig.focus.x / TILE + MAP_W as f32 / 2.0).round() as i32;
-    let fy = (rig.focus.z / TILE + MAP_H as f32 / 2.0).round() as i32;
-    let half = (rig.dist * 0.35).clamp(4.0, 40.0) as i32;
+    // zoom distance (fx/fy/half computed above, alongside the re-bake gate).
     let frame = bytes(Color::srgb(0.98, 0.95, 0.55));
     for x in (fx - half)..=(fx + half) {
         put(&mut buf, x, fy - half, frame);

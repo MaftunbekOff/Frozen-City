@@ -12,7 +12,7 @@ use std::collections::{HashMap, VecDeque};
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::sync::Arc;
 use std::thread;
@@ -20,16 +20,25 @@ use std::time::{Duration, Instant};
 
 use tungstenite::Message;
 
-use crate::game::rng::Rng;
 use crate::game::sim;
 use crate::game::types::{GamePhase, GameState, PlayerCommand, PlayerInfo, TICK_MS};
 use crate::net::client::ClientConn;
 use crate::net::protocol::{
-    read_frame, write_frame, ClientMsg, ServerMsg, TILES_EVERY_N_TICKS,
+    read_frame, write_frame, ClientMsg, ServerMsg, MAX_FRAME, TILES_EVERY_N_TICKS,
 };
 
 /// Directory the built-in HTTP server serves the web build from.
 const WEB_ROOT: &str = "web";
+
+/// Mint a fresh, unguessable 64-bit token from the OS CSPRNG. Used for
+/// session/reconnect tokens: unlike a seeded PRNG stream (which can be
+/// inverted from a single observed output), each draw here is independent
+/// and can't be predicted from a token an attacker sniffs off the wire.
+fn fresh_token() -> u64 {
+    let mut b = [0u8; 8];
+    getrandom::getrandom(&mut b).expect("OS CSPRNG unavailable");
+    u64::from_le_bytes(b)
+}
 
 pub struct ServerConfig {
     /// Bind a TCP listener on this port; `None` = local-only (singleplayer).
@@ -145,18 +154,49 @@ pub fn connect_local(handle: &ServerHandle, name: String) -> ClientConn {
     }
 }
 
+/// Hard cap on concurrent accepted connections (native, WebSocket and plain
+/// HTTP all share this accept path), so a connection flood can't spawn
+/// unbounded OS threads and exhaust memory/handles.
+const MAX_CONNECTIONS: usize = 128;
+
+/// Decrements the shared active-connection counter when a handler thread
+/// exits, on every exit path (normal return or panic unwind).
+struct ConnGuard(Arc<AtomicUsize>);
+
+impl Drop for ConnGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 fn accept_loop(listener: TcpListener, to_server: Sender<ToServer>, shutdown: Arc<AtomicBool>) {
+    let active = Arc::new(AtomicUsize::new(0));
     loop {
         if shutdown.load(Ordering::SeqCst) {
             return;
         }
         match listener.accept() {
             Ok((stream, _peer)) => {
+                if active.load(Ordering::Relaxed) >= MAX_CONNECTIONS {
+                    // Over the cap: close the socket without spawning a
+                    // handler, rather than let threads grow unbounded.
+                    drop(stream);
+                    continue;
+                }
+                active.fetch_add(1, Ordering::Relaxed);
                 let tx = to_server.clone();
-                thread::Builder::new()
+                let counted = active.clone();
+                let spawned = thread::Builder::new()
                     .name("fc-conn".into())
-                    .spawn(move || handle_socket(stream, tx))
-                    .ok();
+                    .spawn(move || {
+                        let _guard = ConnGuard(counted);
+                        handle_socket(stream, tx)
+                    });
+                if spawned.is_err() {
+                    // Thread failed to spawn, so no guard exists to release
+                    // the slot we already reserved.
+                    active.fetch_sub(1, Ordering::Relaxed);
+                }
             }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(150));
@@ -347,7 +387,16 @@ fn serve_websocket(stream: TcpStream, head: Vec<u8>, to_server: Sender<ToServer>
         pos: 0,
         inner: stream,
     };
-    let Ok(mut ws) = tungstenite::accept(prefixed) else {
+    // Cap WebSocket message/frame sizes at the same MAX_FRAME the native
+    // length-prefixed protocol enforces (protocol.rs) — the default 64 MiB
+    // tungstenite limit would otherwise let a browser client push far more
+    // than a native client ever could.
+    // WebSocketConfig is #[non_exhaustive], so it can't be built with a struct
+    // literal from outside tungstenite — start from default and set the caps.
+    let mut ws_config = tungstenite::protocol::WebSocketConfig::default();
+    ws_config.max_message_size = Some(MAX_FRAME as usize);
+    ws_config.max_frame_size = Some(MAX_FRAME as usize);
+    let Ok(mut ws) = tungstenite::accept_with_config(prefixed, Some(ws_config)) else {
         return;
     };
 
@@ -611,16 +660,11 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
     let mut next_client_id: u64 = 1;
     let mut next_player_id: u64 = 1;
     // Session tokens must be unguessable: a sequential counter would let anyone
-    // hijack a disconnected player by trying Hello{token: 1, 2, 3, ...}. Seed a
-    // private SplitMix64 stream from wall-clock entropy (kept separate from the
-    // deterministic game RNG in GameState) and draw a full 64-bit token each join.
-    let mut token_rng = Rng::new(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(0x9E37_79B9_7F4A_7C15)
-            ^ config.seed.rotate_left(32),
-    );
+    // hijack a disconnected player by trying Hello{token: 1, 2, 3, ...}, and a
+    // seeded PRNG stream (even one seeded from wall-clock entropy) is invertible
+    // from a single observed output, letting an attacker who sniffs one token
+    // predict every subsequent one. Each token is instead drawn independently
+    // from the OS CSPRNG via `fresh_token()`.
     let mut player_of: HashMap<u64, u64> = HashMap::new(); // connection id -> player id
     let mut token_of: HashMap<u64, u64> = HashMap::new(); // connection id -> session token
     let mut sessions: HashMap<u64, PlayerInfo> = HashMap::new(); // session token -> saved info of a disconnected player
@@ -674,11 +718,11 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
                             // Rotate the token on every reconnect: the old one
                             // was sent once in plaintext, so a sniffed token is
                             // dead the moment the real client reconnects.
-                            (player_id, token_rng.next_u64(), true)
+                            (player_id, fresh_token(), true)
                         } else {
                             let player_id = next_player_id;
                             next_player_id += 1;
-                            let session_token = token_rng.next_u64();
+                            let session_token = fresh_token();
                             sim::player_joined(&mut state, player_id, &name);
                             (player_id, session_token, false)
                         };

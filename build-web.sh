@@ -55,6 +55,9 @@ build_variant() {
 build_variant webgpu "--features webgpu"
 build_variant webgl ""
 
+# Shared (not per-variant) files also get a gzip_static-ready copy.
+gzip -9 -kf web/boot.js web/index.html
+
 echo
 echo "Web build ready: web/pkg-webgpu and web/pkg-webgl."
 echo "Serve it with the game server itself:"
