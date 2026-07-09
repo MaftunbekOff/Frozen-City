@@ -22,7 +22,7 @@ const COL_COAL: Color = Color::srgb(0.62, 0.66, 0.75);
 const COL_FOOD: Color = Color::srgb(0.55, 0.82, 0.48);
 
 const DEFAULT_HINT: &str =
-    "LMB place/select   RMB cancel   1-4 quick build   WASD pan   Q/E rotate   MMB tilt   wheel zoom";
+    "LMB place/select   RMB cancel   1-4 quick build   WASD pan   Q/E rotate   wheel zoom   Enter chat   Alt+click ping";
 
 #[derive(Component, Clone, Copy, PartialEq)]
 pub enum HudField {

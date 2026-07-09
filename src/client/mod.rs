@@ -13,12 +13,15 @@ use frozen_city::net::protocol::ClientMsg;
 #[cfg(not(target_arch = "wasm32"))]
 use frozen_city::net::server::ServerHandle;
 
+pub mod chat;
 pub mod input;
 #[cfg(target_arch = "wasm32")]
 pub mod local_server;
 pub mod menu;
+pub mod minimap;
 pub mod net_sync;
 pub mod render;
+pub mod roles;
 pub mod touch;
 pub mod ui;
 
@@ -103,12 +106,29 @@ pub struct GameView {
     /// Last tile grid received (tiles only ride along periodically).
     pub tiles: Vec<Tile>,
     pub player_id: Option<u64>,
+    /// Session token from the last `Welcome`, replayed on reconnect.
+    pub token: Option<u64>,
     /// Bumped on every received snapshot.
     pub version: u64,
     /// Bumped whenever the tile grid is refreshed.
     pub tiles_version: u64,
     pub disconnected: bool,
     pub error: Option<String>,
+}
+
+/// What is needed to transparently re-join the same world after a dropped
+/// connection. Only meaningful for the `Join` path (a remote server we can
+/// dial again); host/singleplayer worlds live in-process and cannot reconnect.
+#[derive(Resource, Default)]
+pub struct Session {
+    pub join_addr: String,
+    pub name: String,
+    /// Latest session token (updated on every `Welcome`).
+    pub token: Option<u64>,
+    /// True only for a `Join` game — enables auto-reconnect on disconnect.
+    pub reconnectable: bool,
+    /// Reconnect attempts already spent for the current outage.
+    pub attempts: u32,
 }
 
 impl GameView {
@@ -226,6 +246,8 @@ impl Plugin for ClientPlugin {
             .init_resource::<NetConn>()
             .init_resource::<ServerRes>()
             .init_resource::<GameView>()
+            .init_resource::<Session>()
+            .init_resource::<net_sync::Reconnecting>()
             .init_resource::<BuildMode>()
             .init_resource::<Selection>()
             .init_resource::<UiHover>()
@@ -233,6 +255,7 @@ impl Plugin for ClientPlugin {
             .init_resource::<render::BuildingViz>()
             .init_resource::<render::SurvivorViz>()
             .init_resource::<render::CursorViz>()
+            .init_resource::<render::PingViz>()
             .add_systems(Startup, render::setup_camera_and_assets)
             // Menu.
             .add_systems(OnEnter(Screen::Menu), menu::spawn_menu)
@@ -270,6 +293,7 @@ impl Plugin for ClientPlugin {
                     render::animate_survivors,
                     render::sync_player_cursors,
                     render::update_cursor_labels,
+                    render::sync_pings,
                     render::snow_fall,
                 )
                     .run_if(in_state(Screen::Game)),
@@ -306,6 +330,9 @@ impl Plugin for ClientPlugin {
                     .run_if(in_state(Screen::Game)),
             )
             .add_systems(Update, smoke_exit);
+        app.add_plugins(chat::plugin);
+        app.add_plugins(minimap::plugin);
+        app.add_plugins(roles::plugin);
         #[cfg(target_arch = "wasm32")]
         app.add_plugins(local_server::plugin);
     }
@@ -313,6 +340,7 @@ impl Plugin for ClientPlugin {
 
 /// Leaving the game: close the connection, stop a locally hosted server and
 /// reset per-session resources. Entities die via `DespawnOnExit`.
+#[allow(clippy::too_many_arguments)]
 fn teardown_game(
     mut net: ResMut<NetConn>,
     mut server: ResMut<ServerRes>,
@@ -323,6 +351,9 @@ fn teardown_game(
     mut buildings: ResMut<render::BuildingViz>,
     mut survivors: ResMut<render::SurvivorViz>,
     mut cursors: ResMut<render::CursorViz>,
+    mut pings: ResMut<render::PingViz>,
+    mut chat: ResMut<chat::ChatState>,
+    mut reconnecting: ResMut<net_sync::Reconnecting>,
 ) {
     net.0 = None;
     #[cfg(not(target_arch = "wasm32"))]
@@ -348,6 +379,13 @@ fn teardown_game(
     *buildings = Default::default();
     *survivors = Default::default();
     *cursors = Default::default();
+    *pings = Default::default();
+    // Close any half-composed chat box so a new game doesn't start with the
+    // input open (which would silently swallow world/camera input).
+    *chat = Default::default();
+    // Cancel any in-flight reconnect dial so its (stale) result can never be
+    // installed into the next game.
+    *reconnecting = Default::default();
 }
 
 /// In `--smoke` mode, exit automatically after a few seconds of rendering.

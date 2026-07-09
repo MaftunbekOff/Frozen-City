@@ -7,6 +7,7 @@ use bevy::window::PrimaryWindow;
 use frozen_city::game::types::{BuildingKind, GamePhase, PlayerCommand};
 use frozen_city::net::protocol::ClientMsg;
 
+use super::chat::ChatState;
 use super::render::GhostMarker;
 use super::*;
 
@@ -55,9 +56,14 @@ pub fn camera_control(
     motion: Res<AccumulatedMouseMotion>,
     scroll: Res<AccumulatedMouseScroll>,
     ui_hover: Res<UiHover>,
+    chat: Res<ChatState>,
     mut rig: ResMut<CamRig>,
     mut cam: Query<&mut Transform, With<Camera3d>>,
 ) {
+    // While typing in chat, keyboard belongs to the chat box.
+    if chat.active {
+        return;
+    }
     // Zoom (mouse wheel), unless the cursor is parked on the UI.
     if !ui_hover.0 && scroll.delta.y.abs() > 0.0 {
         let lines = match scroll.unit {
@@ -149,7 +155,13 @@ pub fn build_input(
     window: Query<&Window, With<PrimaryWindow>>,
     camera: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     mut ghost: Query<(&mut Transform, &GhostMarker, &mut Visibility)>,
+    chat: Res<ChatState>,
 ) {
+    // While typing in chat, digit/Escape keys edit the message, not the world.
+    if chat.active {
+        hide_ghost(&mut ghost);
+        return;
+    }
     // Quick-build hotkeys.
     let hotkeys = [
         (KeyCode::Digit1, BuildingKind::Tent),
@@ -183,6 +195,19 @@ pub fn build_input(
         .next()
         .zip(camera.iter().next())
         .and_then(|(w, (c, gt))| cursor_ground(w, c, gt));
+
+    // Alt+click drops a co-op map ping for the whole team to see.
+    if buttons.just_pressed(MouseButton::Left)
+        && !ui_hover.0
+        && keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight])
+    {
+        if let Some(world) = cursor {
+            let (px, py) = world_to_tilef(world);
+            net.send(ClientMsg::Ping { x: px, y: py });
+        }
+        hide_ghost(&mut ghost);
+        return;
+    }
 
     // Placement ghost.
     let mut ghost_tile: Option<(u8, u8)> = None;

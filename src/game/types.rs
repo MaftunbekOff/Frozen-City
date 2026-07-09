@@ -26,6 +26,18 @@ pub const WOOD_FUEL_PENALTY: f32 = 1.5;
 pub const DEMOLISH_REFUND: f32 = 0.4;
 pub const TENT_CAPACITY: usize = 4;
 
+/// Rolling chat log length kept in the snapshot.
+pub const MAX_CHAT: usize = 40;
+/// Longest chat message accepted (characters, after sanitizing).
+pub const MAX_CHAT_LEN: usize = 200;
+/// Maximum simultaneous map pings kept in the snapshot (global cap).
+pub const MAX_PINGS: usize = 12;
+/// Maximum live pings a single player may hold, so one spammer can't evict
+/// everyone else's markers before they naturally expire.
+pub const MAX_PINGS_PER_PLAYER: usize = 4;
+/// A map ping fades and is dropped after this many ticks (~5 s at 5 Hz).
+pub const PING_TTL_TICKS: u64 = 25;
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Terrain {
     Snow,
@@ -137,6 +149,8 @@ pub struct Building {
     pub workers: u8,
     /// Fractional extraction progress (sawmill / coal mine).
     pub progress: f32,
+    /// Player id that placed this building; `None` for the starting furnace.
+    pub owner: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -164,6 +178,35 @@ pub struct PlayerInfo {
     pub color: u8,
     /// Last known cursor position in world tile coordinates.
     pub cursor: Option<(f32, f32)>,
+    /// Buildings this player has placed (kept across reconnects).
+    pub built: u32,
+    /// Buildings this player has demolished (kept across reconnects).
+    pub demolished: u32,
+    /// Authority in this world (owner vs guest); kept across reconnects.
+    pub role: Role,
+}
+
+/// One line of co-op text chat, attributed to its author.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ChatLine {
+    /// Author's player id; `0` marks a system message.
+    pub player_id: u64,
+    pub name: String,
+    /// Player palette index for coloring (ignored for system lines).
+    pub color: u8,
+    pub text: String,
+}
+
+/// A transient map marker a player drops to draw attention (Alt+click).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct Ping {
+    pub player_id: u64,
+    pub color: u8,
+    /// World tile coordinates.
+    pub x: f32,
+    pub y: f32,
+    /// Tick the ping was created; used for TTL expiry.
+    pub tick: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -173,10 +216,33 @@ pub enum GamePhase {
     Lost,
 }
 
+/// A player's authority in the world. The first to join owns it; everyone else
+/// is a guest, bounded by the world's [`GuestPermission`].
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Role {
+    Owner,
+    Guest,
+}
+
+/// What guests are allowed to do, chosen by the owner. The owner always has
+/// full authority; a world with no connected owner behaves as `Full`.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GuestPermission {
+    /// Chat, ping and move the cursor only — no world changes.
+    ViewOnly,
+    /// Place buildings, assign workers, and demolish their OWN buildings.
+    Build,
+    /// Everything the owner can do (except owner-only admin: set policy, kick).
+    Full,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct GameEvent {
     pub day: u32,
     pub text: String,
+    /// True for world/system events (deaths, weather, arrivals, victory) that
+    /// must not be evicted from the capped log by cosmetic player-action spam.
+    pub system: bool,
 }
 
 /// Commands a player may issue; the server validates every one of them.
@@ -208,6 +274,14 @@ pub struct GameState {
     pub events: Vec<GameEvent>,
     /// Monotonic counter of all events ever pushed (events itself is capped).
     pub total_events: u64,
+    /// Rolling co-op chat log (capped at [`MAX_CHAT`]).
+    pub chat: Vec<ChatLine>,
+    /// Monotonic counter of all chat lines ever pushed (chat itself is capped).
+    pub total_chat: u64,
+    /// Active map pings; expired each tick after [`PING_TTL_TICKS`].
+    pub pings: Vec<Ping>,
+    /// What guests may do in this world, set by the owner.
+    pub guest_perm: GuestPermission,
     pub next_id: u32,
     /// SplitMix64 RNG state.
     pub rng: u64,
@@ -273,6 +347,47 @@ impl GameState {
 
     pub fn find_building(&self, id: u32) -> Option<&Building> {
         self.buildings.iter().find(|b| b.id == id)
+    }
+
+    /// Look up a connected player by id.
+    pub fn player(&self, id: u64) -> Option<&PlayerInfo> {
+        self.players.iter().find(|p| p.id == id)
+    }
+
+    pub fn is_owner(&self, id: u64) -> bool {
+        self.player(id).map(|p| p.role == Role::Owner).unwrap_or(false)
+    }
+
+    /// Whether any connected player currently owns the world.
+    pub fn owner_present(&self) -> bool {
+        self.players.iter().any(|p| p.role == Role::Owner)
+    }
+
+    /// The single source of truth for command authority, shared by the server
+    /// (enforcement), the sim (`apply_command`) and the client (UI greying).
+    /// Unknown players (unit tests, trusted local calls) and owner-less worlds
+    /// are unrestricted so co-op never dead-ends when the owner leaves.
+    pub fn can_issue(&self, pid: u64, cmd: &PlayerCommand) -> bool {
+        let Some(p) = self.player(pid) else {
+            return true;
+        };
+        if p.role == Role::Owner || !self.owner_present() {
+            return true;
+        }
+        match self.guest_perm {
+            GuestPermission::Full => true,
+            GuestPermission::ViewOnly => false,
+            GuestPermission::Build => match cmd {
+                PlayerCommand::Place { .. } | PlayerCommand::AdjustWorkers { .. } => true,
+                // Guests may only tear down their own buildings, never touch the
+                // furnace, under the Build policy.
+                PlayerCommand::Demolish { building } => self
+                    .find_building(*building)
+                    .map(|b| b.owner == Some(pid))
+                    .unwrap_or(false),
+                PlayerCommand::SetFurnaceLevel { .. } => false,
+            },
+        }
     }
 
     pub fn total_workers(&self) -> u32 {

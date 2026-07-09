@@ -18,17 +18,30 @@ pub const TILES_EVERY_N_TICKS: u64 = 5;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum ClientMsg {
-    /// Must be the first message on every connection.
-    Hello { name: String },
+    /// Must be the first message on every connection. `token` carries a session
+    /// token from a previous `Welcome` to resume the same identity (reconnect);
+    /// `None` for a fresh join.
+    Hello { name: String, token: Option<u64> },
     Cmd(PlayerCommand),
     /// Cursor position in world tile coordinates, for co-op presence.
     Cursor { x: f32, y: f32 },
+    /// A line of co-op text chat.
+    Chat { text: String },
+    /// Drop a transient map marker at world tile coordinates (Alt+click).
+    Ping { x: f32, y: f32 },
+    /// Owner-only: change what guests are allowed to do. Ignored from guests.
+    SetGuestPermission { perm: crate::game::types::GuestPermission },
+    /// Owner-only: remove a guest from the world by player id. Ignored from guests.
+    Kick { target: u64 },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum ServerMsg {
     Welcome {
         player_id: u64,
+        /// Session token to send back in a future `Hello` to reconnect as the
+        /// same player (preserving id, color and contribution stats).
+        token: u64,
         state: GameState,
     },
     State {

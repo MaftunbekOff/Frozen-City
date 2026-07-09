@@ -64,6 +64,7 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
         y: FURNACE_Y,
         workers: 0,
         progress: 0.0,
+        owner: None,
     };
 
     let mut state = GameState {
@@ -85,6 +86,10 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
         phase: GamePhase::Running,
         events: Vec::new(),
         total_events: 0,
+        chat: Vec::new(),
+        total_chat: 0,
+        pings: Vec::new(),
+        guest_perm: GuestPermission::Build,
         next_id,
         rng: rng.0,
     };
@@ -152,25 +157,60 @@ fn new_survivor(rng: &mut Rng, next_id: &mut u32) -> Survivor {
     }
 }
 
-pub fn push_event(state: &mut GameState, text: impl Into<String>) {
+/// Shared push path for both event kinds: appends the event, bumps the
+/// monotonic counter, then evicts if the capped log overflowed.
+fn push_event_inner(state: &mut GameState, text: String, system: bool) {
     let day = state.day();
-    state.events.push(GameEvent {
-        day,
-        text: text.into(),
-    });
+    state.events.push(GameEvent { day, text, system });
     state.total_events += 1;
     if state.events.len() > 12 {
-        state.events.remove(0);
+        // Prefer evicting the oldest cosmetic (non-system) event first, so a
+        // burst of "built a Tent" spam can't push a death or victory line out
+        // of the log; only fall back to the oldest overall once every event
+        // in the log is a system event.
+        let evict = state
+            .events
+            .iter()
+            .position(|e| !e.system)
+            .unwrap_or(0);
+        state.events.remove(evict);
     }
 }
 
+/// Push a world/system event (deaths, weather, arrivals, joins, victory,
+/// defeat) — protected from eviction by cosmetic player-action spam.
+pub fn push_event(state: &mut GameState, text: impl Into<String>) {
+    push_event_inner(state, text.into(), true);
+}
+
+/// Push a cosmetic player-action event (build/demolish attribution) — the
+/// first to be evicted once the capped log overflows.
+pub fn push_action_event(state: &mut GameState, text: impl Into<String>) {
+    push_event_inner(state, text.into(), false);
+}
+
 pub fn player_joined(state: &mut GameState, id: u64, name: &str) {
-    let color = (state.players.len() % 8) as u8;
+    // The first player to join a fresh world owns it; everyone after is a
+    // guest, bounded by `state.guest_perm`.
+    let role = if state.players.is_empty() {
+        Role::Owner
+    } else {
+        Role::Guest
+    };
+    // Pick the lowest palette slot not currently in use so simultaneously
+    // connected players stay visually distinct (chat tint, cursor, ping color);
+    // only fall back to reuse once all 8 colors are taken.
+    let color = (0u8..8)
+        .find(|c| !state.players.iter().any(|p| p.color == *c))
+        .unwrap_or((state.players.len() % 8) as u8);
     state.players.push(PlayerInfo {
         id,
         name: name.to_string(),
         color,
         cursor: None,
+        built: 0,
+        demolished: 0,
+        role,
     });
     push_event(state, format!("{} joined the city.", name));
 }
@@ -183,16 +223,145 @@ pub fn player_left(state: &mut GameState, id: u64) {
     state.players.retain(|p| p.id != id);
 }
 
+/// Owner-only: change what guests in this world are allowed to do.
+pub fn set_guest_permission(state: &mut GameState, perm: GuestPermission) {
+    state.guest_perm = perm;
+    let label = match perm {
+        GuestPermission::ViewOnly => "view only",
+        GuestPermission::Build => "build",
+        GuestPermission::Full => "full",
+    };
+    push_event(state, format!("Guests can now: {}.", label));
+}
+
+/// Owner-only: remove `target` from the roster. No-op if they're not present
+/// (already disconnected, or the id never joined).
+pub fn kick_player(state: &mut GameState, target: u64) {
+    if let Some(pos) = state.players.iter().position(|p| p.id == target) {
+        let name = state.players.remove(pos).name;
+        push_event(state, format!("{} was removed by the owner.", name));
+    }
+}
+
+/// Restore a previously-connected player's roster entry (reconnect flow).
+/// Preserves their id/name/color/stats but resets the transient cursor.
+pub fn player_rejoined(state: &mut GameState, saved: PlayerInfo) {
+    let name = saved.name.clone();
+    state.players.push(PlayerInfo {
+        cursor: None,
+        ..saved
+    });
+    push_event(state, format!("{} reconnected.", name));
+}
+
 pub fn set_cursor(state: &mut GameState, id: u64, x: f32, y: f32) {
     if let Some(p) = state.players.iter_mut().find(|p| p.id == id) {
         p.cursor = Some((x, y));
     }
 }
 
+/// Append a chat line from `player_id`, sanitizing and length-capping the text.
+/// Silently dropped if the player isn't connected or the text is empty after sanitizing.
+pub fn push_chat(state: &mut GameState, player_id: u64, text: &str) {
+    let Some(p) = state.player(player_id) else {
+        return;
+    };
+    let name = p.name.clone();
+    let color = p.color;
+
+    // Strip control chars AND invisible format/bidi characters: a bare
+    // `is_control()` misses U+202E (RIGHT-TO-LEFT OVERRIDE), zero-width joiners
+    // and friends, which would let a chat line reorder or hide text for every
+    // viewer on the shared server.
+    let is_bad = |c: char| {
+        c.is_control()
+            || matches!(c,
+                '\u{200B}'..='\u{200F}'   // zero-width space/joiners, LRM/RLM
+                | '\u{202A}'..='\u{202E}' // bidi embeddings & overrides
+                | '\u{2060}'..='\u{2069}' // word-joiner, bidi isolates
+                | '\u{061C}'              // arabic letter mark
+                | '\u{FEFF}'              // zero-width no-break space (BOM)
+            )
+    };
+    // Cap stacked combining marks ("zalgo" text): a handful of accents on one
+    // base character is normal typing/IME behavior, but dozens turn a single
+    // line into multi-row visual noise for every viewer on the shared server.
+    let is_combining = |c: char| {
+        matches!(c,
+            '\u{0300}'..='\u{036F}'  // combining diacritical marks
+            | '\u{1AB0}'..='\u{1AFF}' // combining diacritical marks extended
+            | '\u{1DC0}'..='\u{1DFF}' // combining diacritical marks supplement
+            | '\u{20D0}'..='\u{20FF}' // combining diacritical marks for symbols
+            | '\u{FE20}'..='\u{FE2F}' // combining half marks
+        )
+    };
+    let sanitized: String = text
+        .trim()
+        .chars()
+        .filter(|c| !is_bad(*c))
+        .take(MAX_CHAT_LEN)
+        .scan(0u32, |run, c| {
+            *run = if is_combining(c) { *run + 1 } else { 0 };
+            Some((c, *run))
+        })
+        .filter(|(_, run)| *run <= 2)
+        .map(|(c, _)| c)
+        .collect();
+    if sanitized.trim().is_empty() {
+        return;
+    }
+
+    state.chat.push(ChatLine {
+        player_id,
+        name,
+        color,
+        text: sanitized,
+    });
+    while state.chat.len() > MAX_CHAT {
+        state.chat.remove(0);
+    }
+    state.total_chat += 1;
+}
+
+/// Drop a transient map ping from `player_id` at world tile coordinates `(x, y)`.
+/// Silently ignored if the player isn't connected or the game is over (a frozen
+/// world never advances its tick, so a post-game ping could never expire).
+pub fn add_ping(state: &mut GameState, player_id: u64, x: f32, y: f32) {
+    if state.phase != GamePhase::Running {
+        return;
+    }
+    let Some(p) = state.player(player_id) else {
+        return;
+    };
+    let color = p.color;
+
+    state.pings.push(Ping {
+        player_id,
+        color,
+        x,
+        y,
+        tick: state.tick,
+    });
+    // Per-player cap first (evict this player's own oldest), then the global cap.
+    while state.pings.iter().filter(|q| q.player_id == player_id).count() > MAX_PINGS_PER_PLAYER {
+        if let Some(pos) = state.pings.iter().position(|q| q.player_id == player_id) {
+            state.pings.remove(pos);
+        } else {
+            break;
+        }
+    }
+    while state.pings.len() > MAX_PINGS {
+        state.pings.remove(0);
+    }
+}
+
 /// Validate and apply a player command. Invalid commands are silently ignored
 /// (the client pre-validates, so this only happens on races or tampering).
-pub fn apply_command(state: &mut GameState, _player: u64, cmd: &PlayerCommand) {
+pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
     if state.phase != GamePhase::Running {
+        return;
+    }
+    if !state.can_issue(player, cmd) {
         return;
     }
     match cmd {
@@ -208,7 +377,16 @@ pub fn apply_command(state: &mut GameState, _player: u64, cmd: &PlayerCommand) {
                     y: *y,
                     workers: 0,
                     progress: 0.0,
+                    owner: Some(player),
                 });
+                // Attribute the placement to the player, if they're in the roster.
+                let name = state.player(player).map(|p| p.name.clone());
+                if let Some(p) = state.players.iter_mut().find(|p| p.id == player) {
+                    p.built += 1;
+                }
+                if let Some(name) = name {
+                    push_action_event(state, format!("{} built a {}.", name, kind.name()));
+                }
             }
         }
         PlayerCommand::Demolish { building } => {
@@ -219,6 +397,14 @@ pub fn apply_command(state: &mut GameState, _player: u64, cmd: &PlayerCommand) {
             {
                 let b = state.buildings.remove(i);
                 state.stock.wood += b.kind.cost_wood() as f32 * DEMOLISH_REFUND;
+                // Attribute the demolition to the player, if they're in the roster.
+                let name = state.player(player).map(|p| p.name.clone());
+                if let Some(p) = state.players.iter_mut().find(|p| p.id == player) {
+                    p.demolished += 1;
+                }
+                if let Some(name) = name {
+                    push_action_event(state, format!("{} demolished a {}.", name, b.kind.name()));
+                }
             }
         }
         PlayerCommand::AdjustWorkers { building, delta } => {
@@ -249,11 +435,18 @@ pub fn tick(state: &mut GameState) {
     let mut rng = Rng(state.rng);
     state.tick += 1;
 
+    // --- Expire stale map pings ---
+    let tick = state.tick;
+    state
+        .pings
+        .retain(|p| tick.saturating_sub(p.tick) < PING_TTL_TICKS);
+
     // --- Midnight: day rollover ---
     if state.tick % TICKS_PER_DAY == 0 {
         let day = state.day();
         if day > state.win_days {
             state.phase = GamePhase::Won;
+            state.pings.clear();
             push_event(
                 state,
                 format!("The city has survived {} days. Victory!", state.win_days),
@@ -416,6 +609,7 @@ pub fn tick(state: &mut GameState) {
     // --- Defeat ---
     if state.survivors.is_empty() {
         state.phase = GamePhase::Lost;
+        state.pings.clear();
         push_event(state, "The last survivor has perished. The city falls silent.");
     }
 

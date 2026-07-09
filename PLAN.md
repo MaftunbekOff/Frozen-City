@@ -140,6 +140,8 @@ to'q bo'lsa tiklanadi. Har 1–2 kunda yangi omon qolganlar keladi (sig'im bo'ls
 
 ## 9. Kelajak yo'l xaritasi (MVP'dan keyin)
 
+> Dolzarb va batafsil versiya: [ROADMAP.md](ROADMAP.md). Quyidagi ro'yxat tarixiy eskiz.
+
 - WASM (WebSocket transport + sim inline), Android/iOS (touch).
 - Chat, pauza (yakka o'yinda), saqlash/yuklash (GameState allaqachon serde).
 - Ko'proq binolar: kasalxona, oshxona, issiqxona, devor; texnologiya daraxti.

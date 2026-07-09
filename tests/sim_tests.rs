@@ -224,7 +224,7 @@ fn commands_after_game_end_are_ignored() {
 fn protocol_frames_roundtrip() {
     let state = sim::new_game(77, 12);
     let msgs = vec![
-        ServerMsg::Welcome { player_id: 3, state: state.clone() },
+        ServerMsg::Welcome { player_id: 3, token: 3, state: state.clone() },
         ServerMsg::State { state, tiles_included: true },
     ];
     let mut buf = Vec::new();
@@ -235,8 +235,12 @@ fn protocol_frames_roundtrip() {
     for m in &msgs {
         let back: ServerMsg = read_frame(&mut cur).unwrap();
         match (m, &back) {
-            (ServerMsg::Welcome { player_id: a, state: sa }, ServerMsg::Welcome { player_id: b, state: sb }) => {
+            (
+                ServerMsg::Welcome { player_id: a, token: ta, state: sa },
+                ServerMsg::Welcome { player_id: b, token: tb, state: sb },
+            ) => {
                 assert_eq!(a, b);
+                assert_eq!(ta, tb);
                 assert_eq!(sa, sb);
             }
             (ServerMsg::State { state: sa, .. }, ServerMsg::State { state: sb, .. }) => {
@@ -257,6 +261,235 @@ fn protocol_frames_roundtrip() {
         }
         _ => panic!("wrong message"),
     }
+}
+
+#[test]
+fn frame_reader_never_panics_on_garbage() {
+    use frozen_city::game::rng::Rng;
+
+    let mut rng = Rng::new(0xC0FFEE);
+    for _ in 0..5000 {
+        let len = rng.below(513) as usize; // 0..=512 bytes, keeps this fast
+        let mut buf = Vec::with_capacity(len);
+        for _ in 0..len {
+            buf.push(rng.below(256) as u8);
+        }
+        // Never panics: malformed/short/garbage input must come back as Err.
+        let _ = read_frame::<_, ClientMsg>(&mut Cursor::new(buf.clone()));
+        let _ = read_frame::<_, ServerMsg>(&mut Cursor::new(buf));
+    }
+}
+
+#[test]
+fn attribution_on_place_credits_the_player() {
+    let mut state = sim::new_game(5, 12);
+    sim::player_joined(&mut state, 7, "Zara");
+    let (x, y) = find_spot(&state, BuildingKind::Tent);
+
+    sim::apply_command(&mut state, 7, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
+
+    let built = state.buildings.last().unwrap();
+    assert_eq!(built.owner, Some(7));
+    assert_eq!(state.player(7).unwrap().built, 1);
+    assert!(
+        state.events.last().unwrap().text.contains("Zara"),
+        "event should attribute the build to Zara: {:?}",
+        state.events.last()
+    );
+}
+
+#[test]
+fn attribution_on_demolish_credits_the_player() {
+    let mut state = sim::new_game(5, 12);
+    sim::player_joined(&mut state, 7, "Zara");
+    let (x, y) = find_spot(&state, BuildingKind::Tent);
+    sim::apply_command(&mut state, 7, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
+    let id = state.buildings.last().unwrap().id;
+
+    sim::apply_command(&mut state, 7, &PlayerCommand::Demolish { building: id });
+
+    assert_eq!(state.player(7).unwrap().demolished, 1);
+    assert!(
+        state.events.last().unwrap().text.contains("Zara"),
+        "event should attribute the demolition to Zara: {:?}",
+        state.events.last()
+    );
+}
+
+#[test]
+fn push_chat_appends_a_line_for_a_known_player() {
+    let mut state = sim::new_game(5, 12);
+    sim::player_joined(&mut state, 7, "Zara");
+
+    sim::push_chat(&mut state, 7, "hello team");
+
+    assert_eq!(state.chat.len(), 1);
+    assert_eq!(state.chat[0].player_id, 7);
+    assert_eq!(state.chat[0].name, "Zara");
+    assert_eq!(state.chat[0].text, "hello team");
+    assert_eq!(state.total_chat, 1);
+}
+
+#[test]
+fn push_chat_ignores_an_unregistered_player() {
+    let mut state = sim::new_game(5, 12);
+    sim::push_chat(&mut state, 999, "ghost message");
+    assert!(state.chat.is_empty());
+    assert_eq!(state.total_chat, 0);
+}
+
+#[test]
+fn push_chat_drops_whitespace_only_text() {
+    let mut state = sim::new_game(5, 12);
+    sim::player_joined(&mut state, 7, "Zara");
+    sim::push_chat(&mut state, 7, "   \t   ");
+    assert!(state.chat.is_empty());
+    assert_eq!(state.total_chat, 0);
+}
+
+#[test]
+fn push_chat_caps_overlong_text() {
+    let mut state = sim::new_game(5, 12);
+    sim::player_joined(&mut state, 7, "Zara");
+    let long_text = "x".repeat(MAX_CHAT_LEN * 2);
+
+    sim::push_chat(&mut state, 7, &long_text);
+
+    assert_eq!(state.chat.len(), 1);
+    assert!(state.chat[0].text.chars().count() <= MAX_CHAT_LEN);
+}
+
+#[test]
+fn push_chat_rolls_the_log_but_keeps_counting_total() {
+    let mut state = sim::new_game(5, 12);
+    sim::player_joined(&mut state, 7, "Zara");
+
+    let sent = MAX_CHAT + 10;
+    for i in 0..sent {
+        sim::push_chat(&mut state, 7, &format!("line {i}"));
+    }
+
+    assert_eq!(state.chat.len(), MAX_CHAT, "log stays capped");
+    assert_eq!(state.total_chat, sent as u64, "counter keeps growing");
+}
+
+#[test]
+fn add_ping_is_recorded_and_expires_after_ttl() {
+    let mut state = sim::new_game(5, 12);
+    sim::player_joined(&mut state, 7, "Zara");
+
+    sim::add_ping(&mut state, 7, 10.0, 20.0);
+    assert_eq!(state.pings.len(), 1);
+    assert_eq!(state.pings[0].player_id, 7);
+
+    for _ in 0..(PING_TTL_TICKS as usize + 1) {
+        sim::tick(&mut state);
+    }
+    assert!(state.pings.is_empty(), "ping should have expired");
+}
+
+#[test]
+fn add_ping_caps_per_player_and_globally() {
+    let mut state = sim::new_game(5, 12);
+    sim::player_joined(&mut state, 7, "Zara");
+
+    // A single spammer is bounded to their own per-player cap, so they cannot
+    // fill the whole shared ping list and evict everyone else's markers.
+    for i in 0..(MAX_PINGS + 5) {
+        sim::add_ping(&mut state, 7, i as f32, i as f32);
+    }
+    assert_eq!(
+        state.pings.iter().filter(|p| p.player_id == 7).count(),
+        MAX_PINGS_PER_PLAYER
+    );
+    assert!(state.pings.len() <= MAX_PINGS);
+
+    // Many players together are still bounded by the global cap.
+    for pid in 10..20u64 {
+        sim::player_joined(&mut state, pid, "P");
+        for _ in 0..MAX_PINGS_PER_PLAYER {
+            sim::add_ping(&mut state, pid, pid as f32, pid as f32);
+        }
+    }
+    assert_eq!(state.pings.len(), MAX_PINGS);
+}
+
+#[test]
+fn add_ping_is_ignored_after_game_over() {
+    let mut state = sim::new_game(5, 12);
+    sim::player_joined(&mut state, 7, "Zara");
+    state.phase = GamePhase::Lost;
+    sim::add_ping(&mut state, 7, 5.0, 5.0);
+    assert!(state.pings.is_empty(), "no pings on a frozen, game-over world");
+}
+
+#[test]
+fn push_chat_strips_bidi_override() {
+    let mut state = sim::new_game(5, 12);
+    sim::player_joined(&mut state, 7, "Zara");
+    // U+202E RIGHT-TO-LEFT OVERRIDE and a zero-width joiner must be stripped.
+    sim::push_chat(&mut state, 7, "hi\u{202E}evil\u{200D}there");
+    assert_eq!(state.chat.len(), 1);
+    let line = &state.chat[0];
+    assert!(!line.text.contains('\u{202E}'), "bidi override survived");
+    assert!(!line.text.contains('\u{200D}'), "zero-width joiner survived");
+    assert_eq!(line.text, "hievilthere");
+}
+
+#[test]
+fn player_color_reuses_a_freed_slot() {
+    let mut state = sim::new_game(5, 12);
+    sim::player_joined(&mut state, 1, "A"); // color 0
+    sim::player_joined(&mut state, 2, "B"); // color 1
+    sim::player_joined(&mut state, 3, "C"); // color 2
+    sim::player_left(&mut state, 2); // frees color 1
+    sim::player_joined(&mut state, 4, "D"); // should take freed color 1
+    let c = state.player(3).unwrap().color;
+    let d = state.player(4).unwrap().color;
+    assert_ne!(c, d, "a new player must not reuse a still-connected player's color");
+    assert_eq!(d, 1, "lowest free slot");
+}
+
+#[test]
+fn player_rejoined_restores_identity_and_stats() {
+    let mut state = sim::new_game(5, 12);
+    let saved = PlayerInfo {
+        id: 5,
+        name: "Ivo".into(),
+        color: 2,
+        cursor: Some((3.0, 4.0)),
+        built: 3,
+        demolished: 1,
+        role: Role::Guest,
+    };
+
+    sim::player_rejoined(&mut state, saved);
+
+    let p = state.player(5).expect("player restored to the roster");
+    assert_eq!(p.name, "Ivo");
+    assert_eq!(p.color, 2);
+    assert_eq!(p.built, 3);
+    assert_eq!(p.demolished, 1);
+    assert!(p.cursor.is_none(), "cursor resets on rejoin");
+    assert!(
+        state.events.last().unwrap().text.contains("reconnected"),
+        "expected a reconnect event: {:?}",
+        state.events.last()
+    );
+}
+
+/// The co-op additions (chat/pings/attribution) must not touch the sim RNG:
+/// two fresh worlds ticked identically with no chat/ping traffic must stay
+/// byte-identical, exactly as before these features existed.
+#[test]
+fn coop_additions_do_not_break_determinism() {
+    let mut a = sim::new_game(4242, 12);
+    let mut b = sim::new_game(4242, 12);
+    for _ in 0..2000 {
+        sim::tick(&mut a);
+        sim::tick(&mut b);
+    }
+    assert_eq!(a, b);
 }
 
 // --- helpers ---

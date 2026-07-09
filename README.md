@@ -69,7 +69,7 @@ ulanish orqali.
 | Ko'mir koni (Coal Mine) | 30 yog'och | 3 | 15 ko'mir/kun/ishchi (kon ustiga quriladi) |
 | Ovchi kulbasi (Hunter's Hut) | 25 yog'och | 2 | 10 oziq/kun/ishchi |
 
-**Boshqaruv:** LMB — qurish/tanlash · RMB — bekor · 1–4 — tez qurish · WASD/strelkalar — kamera · Q/E — aylantirish · MMB — aylantirish/qiyalik · g'ildirak — zoom · Esc — bekor
+**Boshqaruv:** LMB — qurish/tanlash · RMB — bekor · 1–4 — tez qurish · WASD/strelkalar — kamera · Q/E — aylantirish · MMB — aylantirish/qiyalik · g'ildirak — zoom · Esc — bekor · **Enter — chat** · **Alt+klik — xaritaga ping**
 
 O'yin **3D** (low-poly, protsedural): qiya 2.5D ko'rinish standart, lekin kamerani erkin aylantirish/egish mumkin. Kecha-kunduz haqiqiy yorug'lik bilan, pech esa atrofni yoritadi.
 
@@ -79,16 +79,23 @@ O'yin **3D** (low-poly, protsedural): qiya 2.5D ko'rinish standart, lekin kamera
 src/game/   sof deterministik simulyatsiya (Bevy'siz) — testlanadi, WASM'da ham ishlaydi
 src/net/    TCP + WebSocket + in-memory kanallar; server thread 5 Hz tick, snapshot broadcast
             ws.rs — brauzer WebSocket transporti (wasm)
-src/client/ Bevy 0.19: protsedural render (assetlarsiz), UI, input
+src/client/ Bevy 0.19: protsedural render (assetlarsiz), UI, input, chat, minimap
+            minimap.rs — butun xaritaning burchakdagi ko'rinishi (teren+binolar+kamera)
             local_server.rs — brauzerda yakka o'yin (sim Bevy tizimi sifatida, threadsiz)
-tests/      14 sim-invariant testi + 4 e2e test (TCP, WebSocket+TCP aralash, HTTP statik)
+tests/      44 sim-invariant testi + 12 e2e test (TCP, WebSocket, HTTP, chat,
+            attributsiya, reconnect, rollar) — protokol fuzz testi ham
 ```
 
 - **Server-avtoritativ:** mijozlar faqat buyruq yuboradi (`Place`, `Demolish`,
-  `AdjustWorkers`, `SetFurnaceLevel`); server validatsiya qilib, holatni tarqatadi.
+  `AdjustWorkers`, `SetFurnaceLevel`, `Chat`, `Ping`); server validatsiya qilib, holatni tarqatadi.
 - **Yakka o'yin = xuddi shu server** in-process thread'da — alohida kod yo'li yo'q.
 - Snapshot ~6 KB (teren 1 Hz'da to'liq keladi) — LAN va internet co-op uchun yetarli.
 - Boshqa o'yinchilarning kursorlari va ismlari real vaqtda ko'rinadi.
+- **Co-op (V0.2):** matnli chat, xaritaga ping (Alt+klik), «kim nima qurdi»
+  attributsiyasi (`Building.owner` + hissa statistikasi), sessiya tokeni bilan
+  avtomatik (fon-thread'da) qayta-ulanish, **rollar/egalik** (egasi mehmon
+  huquqlarini belgilaydi: ko'rish / qurish / to'liq; mehmonni chiqarib yuboradi),
+  va butun xaritaning burchakdagi **mini-xaritasi** (bosib borish mumkin).
 
 ## Cross-platform build
 
@@ -104,10 +111,12 @@ Binar: `target/release/frozen_city(.exe)`. Multiplayer uchun hostning 4595/TCP p
 ## Testlar
 
 ```bash
-cargo test          # 18 test: determinizm, invariantlar, protokol, TCP/WS/HTTP e2e
+cargo test          # 56 test: determinizm, invariantlar, protokol+fuzz, TCP/WS/HTTP e2e, chat/attributsiya/reconnect/rollar
 cargo run -- --smoke  # render smoke-test (avtomatik yopiladi)
 ```
 
 ## Yo'l xaritasi
 
-Android/iOS (touch) · akkauntlar + persistensiya (PostgreSQL) · ko'p region — bitta olam (gateway + region serverlar) · delta-snapshot + interest management · chat · ko'proq binolar va texnologiya daraxti · ovoz. Batafsil: [PLAN.md](PLAN.md).
+**Vizyon:** shaxsiy olam (missiyalar) → **Tunnel** → Global Olam (butun dunyo bitta doimiy olamda) → do'stlarni o'z olamingga taklif qilish.
+
+V0.2 tarmoq poydevori — ✅ chat · ✅ attributsiya · ✅ reconnect · ✅ rate-limit · ✅ rollar/egalik · ✅ minimap; qoldi: delta-snapshot, interpolatsiya · V0.3 missiyalar + Tunnel · V0.4 akkauntlar + doimiy shaxsiy olamlar · V0.5 Global Olam (hub) · V0.6 taklif va mehmon co-op · V1.0 sayqal + tarqatish. Batafsil: [ROADMAP.md](ROADMAP.md).

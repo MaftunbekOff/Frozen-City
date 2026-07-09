@@ -126,11 +126,12 @@ pub fn autostart(
     mut net: ResMut<NetConn>,
     mut server_res: ResMut<ServerRes>,
     mut view: ResMut<GameView>,
+    mut session: ResMut<Session>,
     mut next: ResMut<NextState<Screen>>,
     mut error_text: Query<&mut Text, With<MenuErrorText>>,
 ) {
     let Some(action) = auto.0.take() else { return };
-    let result = start_game(action, &settings, &mut net, &mut server_res, &mut view);
+    let result = start_game(action, &settings, &mut net, &mut server_res, &mut view, &mut session);
     match result {
         Ok(()) => next.set(Screen::Game),
         Err(e) => {
@@ -147,6 +148,7 @@ pub fn menu_buttons(
     mut net: ResMut<NetConn>,
     mut server_res: ResMut<ServerRes>,
     mut view: ResMut<GameView>,
+    mut session: ResMut<Session>,
     mut next: ResMut<NextState<Screen>>,
     mut error_text: Query<&mut Text, With<MenuErrorText>>,
     mut exit: MessageWriter<AppExit>,
@@ -164,7 +166,7 @@ pub fn menu_buttons(
                 return;
             }
         };
-        match start_game(auto, &settings, &mut net, &mut server_res, &mut view) {
+        match start_game(auto, &settings, &mut net, &mut server_res, &mut view, &mut session) {
             Ok(()) => next.set(Screen::Game),
             Err(e) => {
                 if let Ok(mut t) = error_text.single_mut() {
@@ -182,6 +184,7 @@ fn start_game(
     net: &mut NetConn,
     server_res: &mut ServerRes,
     view: &mut GameView,
+    session: &mut Session,
 ) -> Result<(), String> {
     let conn = match action {
         AutoAction::Single | AutoAction::Host => {
@@ -218,13 +221,24 @@ fn start_game(
         }
         AutoAction::Join => {
             #[cfg(not(target_arch = "wasm32"))]
-            let conn = frozen_city::net::client::connect_tcp(&settings.join_addr, &settings.name)
-                .map_err(|e| format!("Could not join {}: {e}", settings.join_addr))?;
+            let conn =
+                frozen_city::net::client::connect_tcp(&settings.join_addr, &settings.name, None)
+                    .map_err(|e| format!("Could not join {}: {e}", settings.join_addr))?;
             #[cfg(target_arch = "wasm32")]
-            let conn = frozen_city::net::ws::connect(&ws_url(&settings.join_addr), &settings.name)
-                .map_err(|e| format!("Could not join {}: {e}", settings.join_addr))?;
+            let conn =
+                frozen_city::net::ws::connect(&ws_url(&settings.join_addr), &settings.name, None)
+                    .map_err(|e| format!("Could not join {}: {e}", settings.join_addr))?;
             conn
         }
+    };
+    // Only a remote join can be transparently re-dialed after a drop; host and
+    // singleplayer worlds live in-process and vanish with the connection.
+    *session = Session {
+        join_addr: settings.join_addr.clone(),
+        name: settings.name.clone(),
+        token: None,
+        reconnectable: action == AutoAction::Join,
+        attempts: 0,
     };
     *view = GameView::default();
     net.0 = Some(Mutex::new(conn));

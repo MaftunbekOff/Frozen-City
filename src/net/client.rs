@@ -85,9 +85,10 @@ impl Drop for ClientConn {
 }
 
 /// Connect to a remote server over raw TCP (native only), send Hello, and
-/// spawn reader/writer threads.
+/// spawn reader/writer threads. Pass `token` from a previous `Welcome` to
+/// resume the same player identity (reconnect); `None` for a fresh join.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn connect_tcp(addr: &str, name: &str) -> std::io::Result<ClientConn> {
+pub fn connect_tcp(addr: &str, name: &str, token: Option<u64>) -> std::io::Result<ClientConn> {
     use std::io;
     use std::net::{Shutdown, TcpStream, ToSocketAddrs};
     use std::sync::mpsc::channel;
@@ -107,6 +108,7 @@ pub fn connect_tcp(addr: &str, name: &str) -> std::io::Result<ClientConn> {
         &mut stream,
         &ClientMsg::Hello {
             name: name.to_string(),
+            token,
         },
     )?;
 

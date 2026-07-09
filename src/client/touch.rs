@@ -58,7 +58,15 @@ pub fn touch_control(
     build: Res<BuildMode>,
     mut selection: ResMut<Selection>,
     camera: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    chat: Res<super::chat::ChatState>,
 ) {
+    // While composing a chat message, touches must not pan/zoom or build,
+    // matching how camera_control and build_input gate on chat.active.
+    if chat.active {
+        ctl.single = None;
+        ctl.pinch = None;
+        return;
+    }
     let active: Vec<_> = touches.iter().collect();
 
     // A fresh first finger starts a (potential tap / pan) gesture.

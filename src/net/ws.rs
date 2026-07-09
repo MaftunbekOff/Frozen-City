@@ -37,8 +37,9 @@ thread_local! {
 }
 
 /// Open a WebSocket to `url`, queue the Hello frame, and return a live
-/// connection. Snapshots arrive on the connection's receiver.
-pub fn connect(url: &str, name: &str) -> Result<ClientConn, String> {
+/// connection. Snapshots arrive on the connection's receiver. Pass `token`
+/// from a previous `Welcome` to reconnect as the same player.
+pub fn connect(url: &str, name: &str, token: Option<u64>) -> Result<ClientConn, String> {
     let ws = WebSocket::new(url).map_err(|_| format!("Invalid server address: {url}"))?;
     ws.set_binary_type(BinaryType::Arraybuffer);
 
@@ -87,6 +88,7 @@ pub fn connect(url: &str, name: &str) -> Result<ClientConn, String> {
 
     let hello = bincode::serialize(&ClientMsg::Hello {
         name: name.to_string(),
+        token,
     })
     .map_err(|e| e.to_string())?;
     shared.pending.borrow_mut().push(hello);

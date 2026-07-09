@@ -32,8 +32,10 @@ pub fn start(seed: u64, win_days: u32, name: &str) -> (LocalServer, ClientConn) 
 
     let mut state = sim::new_game(seed, win_days);
     sim::player_joined(&mut state, LOCAL_PLAYER_ID, name);
+    // Singleplayer never reconnects, so the token can just mirror the id.
     let _ = out_tx.send(ServerMsg::Welcome {
         player_id: LOCAL_PLAYER_ID,
+        token: LOCAL_PLAYER_ID,
         state: state.clone(),
     });
 
@@ -69,7 +71,15 @@ pub fn tick(mut server: ResMut<ServerRes>, time: Res<Time>) {
                     Ok(ClientMsg::Cursor { x, y }) => {
                         sim::set_cursor(&mut srv.state, LOCAL_PLAYER_ID, x, y)
                     }
+                    Ok(ClientMsg::Chat { text }) => {
+                        sim::push_chat(&mut srv.state, LOCAL_PLAYER_ID, &text)
+                    }
+                    Ok(ClientMsg::Ping { x, y }) => {
+                        sim::add_ping(&mut srv.state, LOCAL_PLAYER_ID, x, y)
+                    }
                     Ok(ClientMsg::Hello { .. }) => {}
+                    // Singleplayer is a solo owner: no guests to gate or kick.
+                    Ok(ClientMsg::SetGuestPermission { .. } | ClientMsg::Kick { .. }) => {}
                     Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
                 }
             }

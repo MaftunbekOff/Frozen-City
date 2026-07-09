@@ -8,11 +8,11 @@ use frozen_city::net::client::{self, ClientConn};
 use frozen_city::net::protocol::{ClientMsg, ServerMsg};
 use frozen_city::net::server::{self, ServerConfig};
 
-fn recv_welcome(conn: &ClientConn) -> (u64, GameState) {
+fn recv_welcome(conn: &ClientConn) -> (u64, u64, GameState) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
         match conn.recv_timeout(Duration::from_millis(500)) {
-            Ok(ServerMsg::Welcome { player_id, state }) => return (player_id, state),
+            Ok(ServerMsg::Welcome { player_id, token, state }) => return (player_id, token, state),
             Ok(_) => continue,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
             Err(e) => panic!("connection died before Welcome: {e:?}"),
@@ -51,12 +51,12 @@ fn two_clients_share_one_city() {
     let port = handle.addr.expect("bound addr").port();
     let addr = format!("127.0.0.1:{port}");
 
-    let alice = client::connect_tcp(&addr, "Alice").expect("alice connects");
-    let (alice_id, state) = recv_welcome(&alice);
+    let alice = client::connect_tcp(&addr, "Alice", None).expect("alice connects");
+    let (alice_id, _alice_token, state) = recv_welcome(&alice);
     assert!(state.players.iter().any(|p| p.name == "Alice"));
 
-    let bob = client::connect_tcp(&addr, "Bob").expect("bob connects");
-    let (bob_id, _) = recv_welcome(&bob);
+    let bob = client::connect_tcp(&addr, "Bob", None).expect("bob connects");
+    let (bob_id, _bob_token, _) = recv_welcome(&bob);
     assert_ne!(alice_id, bob_id);
 
     // Bob sees both players.
@@ -103,8 +103,8 @@ fn tiles_are_omitted_but_periodically_included() {
     })
     .expect("server starts");
     let port = handle.addr.expect("addr").port();
-    let conn = client::connect_tcp(&format!("127.0.0.1:{port}"), "Solo").expect("connects");
-    let (_, welcome_state) = recv_welcome(&conn);
+    let conn = client::connect_tcp(&format!("127.0.0.1:{port}"), "Solo", None).expect("connects");
+    let (_, _, welcome_state) = recv_welcome(&conn);
     assert!(
         !welcome_state.tiles.is_empty(),
         "welcome always carries tiles"
@@ -153,6 +153,7 @@ fn websocket_and_tcp_clients_share_one_city() {
     ws.send(Message::Binary(
         bincode::serialize(&ClientMsg::Hello {
             name: "WebPlayer".into(),
+            token: None,
         })
         .unwrap()
         .into(),
@@ -172,7 +173,8 @@ fn websocket_and_tcp_clients_share_one_city() {
     assert!(state.players.iter().any(|p| p.name == "WebPlayer"));
 
     // A native TCP client joins the same world and sees the web player.
-    let tcp = client::connect_tcp(&format!("127.0.0.1:{port}"), "Native").expect("tcp connects");
+    let tcp =
+        client::connect_tcp(&format!("127.0.0.1:{port}"), "Native", None).expect("tcp connects");
     let _ = recv_welcome(&tcp);
     wait_state(&tcp, |s| s.players.len() == 2);
 

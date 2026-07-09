@@ -8,7 +8,7 @@
 //! static web build (index.html + wasm) so a dedicated server is also the web
 //! host.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::path::{Component, Path, PathBuf};
@@ -20,8 +20,9 @@ use std::time::{Duration, Instant};
 
 use tungstenite::Message;
 
+use crate::game::rng::Rng;
 use crate::game::sim;
-use crate::game::types::{GamePhase, PlayerCommand, TICK_MS};
+use crate::game::types::{GamePhase, GameState, PlayerCommand, PlayerInfo, TICK_MS};
 use crate::net::client::ClientConn;
 use crate::net::protocol::{
     read_frame, write_frame, ClientMsg, ServerMsg, TILES_EVERY_N_TICKS,
@@ -48,6 +49,9 @@ const WORLD_RESET_AFTER: Duration = Duration::from_secs(45);
 pub enum ToServer {
     Join {
         name: String,
+        /// Session token from a previous `Welcome`, to resume the same player
+        /// identity (reconnect) instead of joining as a fresh player.
+        token: Option<u64>,
         out: Sender<ServerMsg>,
         id_back: Sender<u64>,
     },
@@ -117,6 +121,8 @@ pub fn connect_local(handle: &ServerHandle, name: String) -> ClientConn {
             if to_server
                 .send(ToServer::Join {
                     name,
+                    // The in-process local player never reconnects.
+                    token: None,
                     out: out_tx,
                     id_back: id_tx,
                 })
@@ -199,13 +205,13 @@ fn peek4(stream: &TcpStream) -> Option<[u8; 4]> {
 /// The native desktop protocol: length-prefixed bincode frames.
 fn handle_native(mut stream: TcpStream, to_server: Sender<ToServer>) {
     // The very first frame must be Hello (the 10 s timeout is already set).
-    let name = match read_frame::<_, ClientMsg>(&mut stream) {
-        Ok(ClientMsg::Hello { name }) => sanitize_name(&name),
+    let (name, token) = match read_frame::<_, ClientMsg>(&mut stream) {
+        Ok(ClientMsg::Hello { name, token }) => (sanitize_name(&name), token),
         _ => return,
     };
     let _ = stream.set_read_timeout(None);
 
-    let Some((id, out_rx)) = join(&to_server, name) else {
+    let Some((id, out_rx)) = join(&to_server, name, token) else {
         return;
     };
 
@@ -216,6 +222,11 @@ fn handle_native(mut stream: TcpStream, to_server: Sender<ToServer>) {
         let _ = to_server.send(ToServer::Leave { client: id });
         return;
     };
+    // A stalled client (e.g. suspended tab, dead NAT) would otherwise let its
+    // outbound channel grow forever since the writer blocks indefinitely.
+    // Bound the write so a stuck send errors out, the writer thread exits and
+    // drops the receiver, and the sim thread reaps the client.
+    let _ = write_stream.set_write_timeout(Some(Duration::from_secs(30)));
     thread::Builder::new()
         .name("fc-conn-writer".into())
         .spawn(move || {
@@ -245,12 +256,17 @@ fn handle_native(mut stream: TcpStream, to_server: Sender<ToServer>) {
 }
 
 /// Register with the sim thread; returns the client id and snapshot receiver.
-fn join(to_server: &Sender<ToServer>, name: String) -> Option<(u64, Receiver<ServerMsg>)> {
+fn join(
+    to_server: &Sender<ToServer>,
+    name: String,
+    token: Option<u64>,
+) -> Option<(u64, Receiver<ServerMsg>)> {
     let (out_tx, out_rx) = channel::<ServerMsg>();
     let (id_tx, id_rx) = channel::<u64>();
     to_server
         .send(ToServer::Join {
             name,
+            token,
             out: out_tx,
             id_back: id_tx,
         })
@@ -329,10 +345,10 @@ fn serve_websocket(stream: TcpStream, head: Vec<u8>, to_server: Sender<ToServer>
     };
 
     // First frame must be Hello (still under the 10 s read timeout).
-    let name = loop {
+    let (name, token) = loop {
         match ws.read() {
             Ok(Message::Binary(b)) => match bincode::deserialize::<ClientMsg>(&b) {
-                Ok(ClientMsg::Hello { name }) => break sanitize_name(&name),
+                Ok(ClientMsg::Hello { name, token }) => break (sanitize_name(&name), token),
                 _ => return,
             },
             Ok(Message::Ping(_) | Message::Pong(_)) => continue,
@@ -340,13 +356,20 @@ fn serve_websocket(stream: TcpStream, head: Vec<u8>, to_server: Sender<ToServer>
         }
     };
 
-    let Some((id, out_rx)) = join(&to_server, name) else {
+    let Some((id, out_rx)) = join(&to_server, name, token) else {
         return;
     };
     let _ = ws
         .get_mut()
         .inner
         .set_read_timeout(Some(Duration::from_millis(20)));
+    // Same write-timeout robustness fix as the native path: a stalled
+    // WebSocket write should error out instead of letting the outbound queue
+    // grow unbounded.
+    let _ = ws
+        .get_mut()
+        .inner
+        .set_write_timeout(Some(Duration::from_secs(30)));
 
     'session: loop {
         match ws.read() {
@@ -444,13 +467,142 @@ fn sanitize_name(name: &str) -> String {
     }
 }
 
+/// Disconnected-player sessions (kept for reconnect) are capped at this many
+/// entries, oldest evicted first, to bound memory on a long-running public
+/// server.
+const MAX_SESSIONS: usize = 128;
+
+/// Upper bound on client/control messages processed per sim-loop pass before
+/// yielding to the tick check, so no single flooding connection can starve
+/// simulation for the whole shared world by keeping the drain loop busy.
+const MAX_DRAIN_PER_PASS: u32 = 4096;
+
+/// Per-connection message-rate limiter: a 1 s sliding window with generous
+/// caps so normal play (and the e2e tests) are unaffected, while a
+/// misbehaving or malicious client can't flood the sim thread.
+struct RateLimiter {
+    window_start: Instant,
+    cmd: u32,
+    chat: u32,
+    ping: u32,
+    cursor: u32,
+}
+
+impl RateLimiter {
+    fn new(now: Instant) -> Self {
+        RateLimiter {
+            window_start: now,
+            cmd: 0,
+            chat: 0,
+            ping: 0,
+            cursor: 0,
+        }
+    }
+
+    fn reset_if_elapsed(&mut self, now: Instant) {
+        if now.duration_since(self.window_start) >= Duration::from_secs(1) {
+            self.window_start = now;
+            self.cmd = 0;
+            self.chat = 0;
+            self.ping = 0;
+            self.cursor = 0;
+        }
+    }
+
+    fn allow_cmd(&mut self, now: Instant) -> bool {
+        self.reset_if_elapsed(now);
+        self.cmd += 1;
+        self.cmd <= 30
+    }
+
+    fn allow_chat(&mut self, now: Instant) -> bool {
+        self.reset_if_elapsed(now);
+        self.chat += 1;
+        self.chat <= 4
+    }
+
+    fn allow_ping(&mut self, now: Instant) -> bool {
+        self.reset_if_elapsed(now);
+        self.ping += 1;
+        self.ping <= 6
+    }
+
+    /// Cursor presence is high-frequency but still bounded well above the
+    /// client's own ~8/s cadence, so a flood can't monopolise the sim thread.
+    fn allow_cursor(&mut self, now: Instant) -> bool {
+        self.reset_if_elapsed(now);
+        self.cursor += 1;
+        self.cursor <= 60
+    }
+}
+
+/// Common client-departure bookkeeping, shared by an explicit `Leave` and the
+/// broadcast dead-client cleanup. Drops the connection, stashes the
+/// departing player's stats (name/color/built/demolished) under their
+/// session token so a later `Hello` carrying that token can reconnect as the
+/// same player, then removes them from the live roster. No-op if the
+/// connection id is unknown (already cleaned up).
+#[allow(clippy::too_many_arguments)]
+fn disconnect(
+    client_id: u64,
+    clients: &mut HashMap<u64, Sender<ServerMsg>>,
+    player_of: &mut HashMap<u64, u64>,
+    token_of: &mut HashMap<u64, u64>,
+    sessions: &mut HashMap<u64, PlayerInfo>,
+    session_order: &mut VecDeque<u64>,
+    limiters: &mut HashMap<u64, RateLimiter>,
+    state: &mut GameState,
+) {
+    clients.remove(&client_id);
+    limiters.remove(&client_id);
+    let Some(player_id) = player_of.remove(&client_id) else {
+        return;
+    };
+    let token = token_of.remove(&client_id);
+    let saved_info = state.player(player_id).cloned();
+    if let (Some(token), Some(info)) = (token, saved_info) {
+        if !sessions.contains_key(&token) {
+            session_order.push_back(token);
+        }
+        sessions.insert(token, info);
+        while sessions.len() > MAX_SESSIONS {
+            let Some(oldest) = session_order.pop_front() else {
+                break;
+            };
+            sessions.remove(&oldest);
+        }
+    }
+    sim::player_left(state, player_id);
+}
+
 fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBool>) {
     let mut state = sim::new_game(config.seed, config.win_days);
     let mut clients: HashMap<u64, Sender<ServerMsg>> = HashMap::new();
+    // Connection id (key of `clients`, the `client` field on `ToServer`) is
+    // decoupled from player id: a connection is a socket, a player is a
+    // persistent identity that can outlive one and survive a reconnect.
     let mut next_client_id: u64 = 1;
+    let mut next_player_id: u64 = 1;
+    // Session tokens must be unguessable: a sequential counter would let anyone
+    // hijack a disconnected player by trying Hello{token: 1, 2, 3, ...}. Seed a
+    // private SplitMix64 stream from wall-clock entropy (kept separate from the
+    // deterministic game RNG in GameState) and draw a full 64-bit token each join.
+    let mut token_rng = Rng::new(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0x9E37_79B9_7F4A_7C15)
+            ^ config.seed.rotate_left(32),
+    );
+    let mut player_of: HashMap<u64, u64> = HashMap::new(); // connection id -> player id
+    let mut token_of: HashMap<u64, u64> = HashMap::new(); // connection id -> session token
+    let mut sessions: HashMap<u64, PlayerInfo> = HashMap::new(); // session token -> saved info of a disconnected player
+    let mut session_order: VecDeque<u64> = VecDeque::new(); // insertion order of `sessions`, for eviction
+    let mut limiters: HashMap<u64, RateLimiter> = HashMap::new(); // connection id -> rate limiter
     let mut pending: Vec<(u64, PlayerCommand)> = Vec::new();
     let mut ever_joined = false;
     let mut printed_events: u64 = 0;
+    let mut printed_chat: u64 = 0;
     let mut game_over_since: Option<Instant> = None;
 
     let tick_dur = Duration::from_millis(TICK_MS);
@@ -466,32 +618,154 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
     }
 
     'outer: loop {
-        // Drain control/client messages.
+        // Drain control/client messages, but never more than a bounded batch
+        // per pass so a flood can't postpone the tick indefinitely.
+        let mut drained = 0u32;
         loop {
-            match rx.try_recv() {
-                Ok(ToServer::Join { name, out, id_back }) => {
-                    let id = next_client_id;
+            if drained >= MAX_DRAIN_PER_PASS {
+                break;
+            }
+            let recv = rx.try_recv();
+            if recv.is_ok() {
+                drained += 1;
+            }
+            match recv {
+                Ok(ToServer::Join { name, token, out, id_back }) => {
+                    let client_id = next_client_id;
                     next_client_id += 1;
-                    sim::player_joined(&mut state, id, &name);
+
+                    // A token that still points at a stashed, disconnected
+                    // player's info is a reconnect: resume that identity
+                    // (and its built/demolished stats) instead of joining
+                    // fresh.
+                    let reconnect = token.and_then(|t| sessions.remove(&t).map(|info| (t, info)));
+                    let (player_id, session_token, reconnected) =
+                        if let Some((t, saved)) = reconnect {
+                            let player_id = saved.id;
+                            session_order.retain(|&tok| tok != t);
+                            sim::player_rejoined(&mut state, saved);
+                            (player_id, t, true)
+                        } else {
+                            let player_id = next_player_id;
+                            next_player_id += 1;
+                            let session_token = token_rng.next_u64();
+                            sim::player_joined(&mut state, player_id, &name);
+                            (player_id, session_token, false)
+                        };
+
+                    player_of.insert(client_id, player_id);
+                    token_of.insert(client_id, session_token);
+                    limiters.insert(client_id, RateLimiter::new(Instant::now()));
+
                     let _ = out.send(ServerMsg::Welcome {
-                        player_id: id,
+                        player_id,
+                        token: session_token,
                         state: state.clone(),
                     });
-                    clients.insert(id, out);
-                    let _ = id_back.send(id);
+                    clients.insert(client_id, out);
+                    let _ = id_back.send(client_id);
                     ever_joined = true;
                     if config.verbose {
-                        println!("[server] {} connected (#{})", name, id);
+                        if reconnected {
+                            println!(
+                                "[server] {} reconnected (#{} as player {})",
+                                name, client_id, player_id
+                            );
+                        } else {
+                            println!(
+                                "[server] {} connected (#{} as player {})",
+                                name, client_id, player_id
+                            );
+                        }
                     }
                 }
-                Ok(ToServer::Msg { client, msg }) => match msg {
-                    ClientMsg::Cmd(cmd) => pending.push((client, cmd)),
-                    ClientMsg::Cursor { x, y } => sim::set_cursor(&mut state, client, x, y),
-                    ClientMsg::Hello { .. } => {}
-                },
+                Ok(ToServer::Msg { client, msg }) => {
+                    // A message for a connection we've already torn down (an
+                    // in-flight frame that raced the disconnect) must be dropped,
+                    // never attributed to a fabricated player id.
+                    let Some(&pid) = player_of.get(&client) else {
+                        continue;
+                    };
+                    let now = Instant::now();
+                    // A missing limiter denies (fail closed); every live
+                    // connection has one, inserted on Join.
+                    let allowed = match &msg {
+                        ClientMsg::Cmd(_) => limiters
+                            .get_mut(&client)
+                            .is_some_and(|l| l.allow_cmd(now)),
+                        ClientMsg::Chat { .. } => limiters
+                            .get_mut(&client)
+                            .is_some_and(|l| l.allow_chat(now)),
+                        ClientMsg::Ping { .. } => limiters
+                            .get_mut(&client)
+                            .is_some_and(|l| l.allow_ping(now)),
+                        ClientMsg::Cursor { .. } => limiters
+                            .get_mut(&client)
+                            .is_some_and(|l| l.allow_cursor(now)),
+                        ClientMsg::Hello { .. } => false,
+                        // Low-frequency owner-only admin actions: never rate
+                        // limited (they're structurally rare — one click each
+                        // — and gating them behind the cmd/chat/ping caps
+                        // would let a flood on those channels starve a kick).
+                        ClientMsg::SetGuestPermission { .. } | ClientMsg::Kick { .. } => true,
+                    };
+                    if allowed {
+                        match msg {
+                            ClientMsg::Cmd(cmd) => pending.push((pid, cmd)),
+                            ClientMsg::Cursor { x, y } => sim::set_cursor(&mut state, pid, x, y),
+                            ClientMsg::Chat { text } => sim::push_chat(&mut state, pid, &text),
+                            ClientMsg::Ping { x, y } => sim::add_ping(&mut state, pid, x, y),
+                            ClientMsg::Hello { .. } => {}
+                            ClientMsg::SetGuestPermission { perm } => {
+                                if state.is_owner(pid) {
+                                    sim::set_guest_permission(&mut state, perm);
+                                }
+                            }
+                            ClientMsg::Kick { target } => {
+                                if state.is_owner(pid) && target != pid {
+                                    // Reverse-lookup the connection serving
+                                    // this player, if it's still live.
+                                    let kc = player_of
+                                        .iter()
+                                        .find(|(_, &p)| p == target)
+                                        .map(|(&c, _)| c);
+                                    if let Some(kc) = kc {
+                                        // Drop the connection directly rather
+                                        // than via `disconnect()`: a kicked
+                                        // player must not get a saved
+                                        // reconnect session (which would let
+                                        // them silently rejoin) or a "left"
+                                        // event (kick_player below pushes its
+                                        // own "removed by the owner" event).
+                                        // Dropping the Sender here ends the
+                                        // writer thread, which shuts the
+                                        // socket down and unblocks the
+                                        // reader thread to clean up its own
+                                        // `Leave` (a no-op by then since the
+                                        // connection id is already gone).
+                                        clients.remove(&kc);
+                                        player_of.remove(&kc);
+                                        token_of.remove(&kc);
+                                        limiters.remove(&kc);
+                                    }
+                                    sim::kick_player(&mut state, target);
+                                }
+                            }
+                        }
+                    }
+                }
                 Ok(ToServer::Leave { client }) => {
-                    if clients.remove(&client).is_some() {
-                        sim::player_left(&mut state, client);
+                    if clients.contains_key(&client) {
+                        disconnect(
+                            client,
+                            &mut clients,
+                            &mut player_of,
+                            &mut token_of,
+                            &mut sessions,
+                            &mut session_order,
+                            &mut limiters,
+                            &mut state,
+                        );
                         if config.verbose {
                             println!("[server] client #{} disconnected", client);
                         }
@@ -531,6 +805,7 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
                         state = sim::new_game(seed, config.win_days);
                         state.players = players;
                         printed_events = 0;
+                        printed_chat = 0;
                         sim::push_event(
                             &mut state,
                             "A new expedition arrives - the city rises again.",
@@ -562,6 +837,14 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
                     }
                     printed_events = state.total_events;
                 }
+                while printed_chat < state.total_chat {
+                    let missed = (state.total_chat - printed_chat) as usize;
+                    let start = state.chat.len().saturating_sub(missed);
+                    for line in &state.chat[start..] {
+                        println!("[server] chat {}: {}", line.name, line.text);
+                    }
+                    printed_chat = state.total_chat;
+                }
             }
 
             // Broadcast the snapshot; tiles ride along every Nth tick only.
@@ -581,8 +864,16 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
                 }
             }
             for id in dead {
-                clients.remove(&id);
-                sim::player_left(&mut state, id);
+                disconnect(
+                    id,
+                    &mut clients,
+                    &mut player_of,
+                    &mut token_of,
+                    &mut sessions,
+                    &mut session_order,
+                    &mut limiters,
+                    &mut state,
+                );
             }
 
             next_tick += tick_dur;

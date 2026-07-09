@@ -40,6 +40,9 @@ pub struct GameAssets {
     /// animated with the time of day (warm at night, dead by day).
     pub window_mat: Handle<StandardMaterial>,
     pub smoke_mat: Handle<StandardMaterial>,
+    /// One emissive material per player-palette color, shared by all map
+    /// pings so transient pings never leak fresh materials.
+    pub ping_mats: [Handle<StandardMaterial>; 8],
 }
 
 #[derive(Resource, Default)]
@@ -60,6 +63,11 @@ pub struct SurvivorViz(pub HashMap<u32, Entity>);
 /// Remote player cursors: world marker + screen-space name label.
 #[derive(Resource, Default)]
 pub struct CursorViz(pub HashMap<u64, (Entity, Entity)>);
+
+/// Live map pings, keyed by (player id, creation tick, x-bits, y-bits) so two
+/// pings a player drops within the same tick stay distinct.
+#[derive(Resource, Default)]
+pub struct PingViz(pub HashMap<(u64, u64, u32, u32), Entity>);
 
 // --------------------------------------------------------------- components
 
@@ -101,6 +109,10 @@ pub struct Wander {
 pub struct CursorMarker {
     pub player: u64,
 }
+
+/// Tags the root of a co-op map ping (identity is tracked in [`PingViz`]).
+#[derive(Component)]
+pub struct PingMarker;
 
 /// UI text node that follows a remote player's cursor on screen.
 #[derive(Component)]
@@ -240,6 +252,14 @@ pub fn setup_camera_and_assets(
             base_color: Color::srgb(0.52, 0.54, 0.58),
             unlit: true,
             ..default()
+        }),
+        ping_mats: std::array::from_fn(|i| {
+            let c = player_color(i as u8);
+            materials.add(StandardMaterial {
+                base_color: c,
+                emissive: c.to_linear() * 3.0,
+                ..default()
+            })
         }),
     };
     commands.insert_resource(assets);
@@ -1220,6 +1240,81 @@ pub fn update_cursor_labels(
             }
             None => *vis = Visibility::Hidden,
         }
+    }
+}
+
+// -------------------------------------------------------------------- pings
+
+/// Co-op map markers: a bright ground ring plus a floating downward cone in
+/// the pinging player's color. Pings live in the snapshot and expire in the
+/// sim, so this system only mirrors `state.pings` and animates a gentle pulse.
+pub fn sync_pings(
+    mut commands: Commands,
+    time: Res<Time>,
+    view: Res<GameView>,
+    assets: Res<GameAssets>,
+    mut viz: ResMut<PingViz>,
+    mut q: Query<&mut Transform, With<PingMarker>>,
+) {
+    let Some(state) = view.state.as_ref() else { return };
+
+    let mut present: HashMap<(u64, u64, u32, u32), &frozen_city::game::types::Ping> =
+        HashMap::new();
+    for p in &state.pings {
+        present.insert((p.player_id, p.tick, p.x.to_bits(), p.y.to_bits()), p);
+    }
+
+    // Spawn markers for newly arrived pings.
+    for (&key, p) in &present {
+        if viz.0.contains_key(&key) {
+            continue;
+        }
+        let mat = assets.ping_mats[(p.color as usize) % assets.ping_mats.len()].clone();
+        let world = tilef_to_world((p.x, p.y));
+        let root = commands
+            .spawn((
+                Transform::from_translation(world),
+                Visibility::Visible,
+                PingMarker,
+                DespawnOnExit(Screen::Game),
+            ))
+            .id();
+        commands.entity(root).with_children(|c| {
+            c.spawn((
+                Mesh3d(assets.ring.clone()),
+                MeshMaterial3d(mat.clone()),
+                Transform::from_xyz(0.0, 0.06, 0.0)
+                    .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))
+                    .with_scale(Vec3::splat(1.3)),
+            ));
+            c.spawn((
+                Mesh3d(assets.cone.clone()),
+                MeshMaterial3d(mat),
+                Transform::from_xyz(0.0, 1.7, 0.0)
+                    .with_rotation(Quat::from_rotation_x(std::f32::consts::PI))
+                    .with_scale(Vec3::new(0.4, 0.7, 0.4)),
+            ));
+        });
+        viz.0.insert(key, root);
+    }
+
+    // Despawn markers whose ping has expired.
+    let gone: Vec<(u64, u64, u32, u32)> = viz
+        .0
+        .keys()
+        .filter(|k| !present.contains_key(k))
+        .copied()
+        .collect();
+    for k in gone {
+        if let Some(e) = viz.0.remove(&k) {
+            commands.entity(e).despawn();
+        }
+    }
+
+    // A gentle attention-grabbing pulse.
+    let pulse = 1.0 + 0.15 * (time.elapsed_secs() * 6.0).sin();
+    for mut tr in &mut q {
+        tr.scale = Vec3::splat(pulse);
     }
 }
 
