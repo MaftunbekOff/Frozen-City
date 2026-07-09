@@ -13,14 +13,20 @@ M0–M7 bosqichlar yakunlangan:
 - ✅ HUD, qurish/bino/pech panellari, menyu, voqealar lentasi, game-over
 - ✅ Brauzer (WASM), URL parametrlari, inline singleplayer
 - ✅ Mobil touch boshqaruv va grafika sifat darajalari
-- ✅ 87 test: sim invariantlari + attributsiya/chat/reconnect/rollar/missiya/bino/texnologiya/voqea + fuzz
+- ✅ 88 test: sim invariantlari + attributsiya/chat/reconnect/rollar/missiya/bino/texnologiya/voqea + fuzz
 - ✅ Mini-xarita (minimap): butun xaritaning burchakdagi ko'rinishi + bosib borish + pinglar
 - ✅ V0.3: **missiyalar**, **Tunnel** (graduatsiya), 3 yangi **bino**,
   **texnologiya daraxti** (5 tech), **voqealar tizimi** (kasallik/bo'ron/karvon-tanlov)
-- ✅ **Mobil-web unumdorlik** (V1.0 poydevori): **WebGPU** backend (WebGL2 o'rniga —
-  Bevy'ning GPU-driven tez yo'li), server **gzip** beradi (wasm 66MB→15MB, 4.4×) +
-  cache header, DPR cap + geometriya/yorug'lik kamaytirish, **umumiy bino materiallari**
-  (har bino turi bitta material = kamroq draw-call), FPS diagnostika HUD'da
+- ✅ **Mobil-web unumdorlik** (V1.0 poydevori): server **gzip** beradi (wasm
+  66MB→15MB, 4.4×) + cache header, DPR cap + geometriya/yorug'lik kamaytirish,
+  **umumiy bino materiallari** (har bino turi bitta material = kamroq
+  draw-call), FPS diagnostika HUD'da
+- ✅ **WebGPU + WebGL2 fallback (ikkalasi ham quriladi)**: `build-web.sh` ikkita
+  bundle chiqaradi (`pkg-webgpu`, `pkg-webgl`); `boot.js` sahifa ochilganda
+  **haqiqiy** `navigator.gpu.requestAdapter()` sinovi bilan mosini tanlaydi —
+  `navigator.gpu` obyekti borligi hali adapter ishlashini kafolatlamaydi
+  (GPU drayversiz qurilmalar shu tuzoqqa tushib qulab tushardi — production'da
+  jonli tasdiqlangan va tuzatilgan). HUD FPS qatorida joriy backend ko'rinadi.
 - ✅ **Graduatsiya g'alabasi ajratildi**: Tunnel bitgani (Global Olamga chiqish)
   endi kun-omon-qolish g'alabasidan alohida ekranda ko'rsatiladi (`graduated` bayrog'i)
 - ✅ **Arxitektura auditi** (55 tekshirilgan topilma): WebGL2'dan tashqari cheklovlar
@@ -60,8 +66,8 @@ zalgo tartibi/diapazonlari; mini-xarita per-frame GPU yuklamasi.
   per-IP cheklov/ban ishlamaydi, akkaunt-identity (V0.4) kerak.
 - **Xavfsizlik (transport):** **TLS/wss** origin'da yo'q — hozir cloudflared tunnel
   HTTPS/WSS'ni chekkada beradi (tunnel deploy uchun yetarli), to'g'ridan-to'g'ri ochiqda emas.
-- **Web hajmi:** **bevy feature-trim** · release `opt-level="z"` (wasm) · **WebGL2 fallback**
-  build (eski brauzerlar; hozir WebGPU-only + boot.js aniqlash xabari).
+- **Web hajmi:** **bevy feature-trim** · release `opt-level="z"` (wasm) — WebGL2
+  fallback build ✅ bajarildi (yuqoriga qarang), qolgani hajm optimizatsiyasi.
 - **Kichik:** bincode **varint** · terrain **indexed mesh** · temperature() `cos`
   cross-platform seed-repro · MIN_WIN_DAYS'ni `new_game`da ham clamp qilish.
 

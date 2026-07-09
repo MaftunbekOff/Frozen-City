@@ -1,12 +1,18 @@
 # Frozen City
 
-Muzlagan dunyoda omon qolish haqidagi **co-op shahar quruvchi o'yin** — Rust + [Bevy 0.19](https://bevy.org) da yozilgan, cross-platform (Windows / Linux / macOS) va multiplayer (TCP, server-avtoritativ).
+Muzlagan dunyoda omon qolish haqidagi **co-op shahar quruvchi o'yin** — Rust +
+[Bevy 0.19](https://bevy.org) da yozilgan. **Desktop** (Windows / Linux /
+macOS, native binary) + **brauzer** (WASM, WebGPU avtomatik WebGL2'ga
+tushadigan zaxira bilan) + **mobil** (telefon brauzerida, touch boshqaruv va
+past-quvvat grafika darajasi bilan) — hammasi **bitta umumiy olamda**
+multiplayer (server-avtoritativ).
 
-A cooperative survival city-builder in the endless winter. Keep the furnace burning, feed your people, survive 12 days — alone or with up to 8 friends in one shared city.
+A cooperative survival city-builder in the endless winter. Keep the furnace burning, feed your people, survive 12 days — alone or with up to 8 friends in one shared city. Runs natively on desktop, in any browser (WebGPU with an automatic WebGL2 fallback), and on phones (touch controls).
 
 ![Genre](https://img.shields.io/badge/genre-survival%20city--builder-blue)
 ![Engine](https://img.shields.io/badge/engine-Bevy%200.19-orange)
 ![Multiplayer](https://img.shields.io/badge/multiplayer-co--op%20TCP-green)
+![Platforms](https://img.shields.io/badge/platforms-Desktop%20%7C%20Web%20%7C%20Mobile-blueviolet)
 
 ## Ishga tushirish / Quick start
 
@@ -29,20 +35,37 @@ cargo run --release -- --server 4595
 
 **Parametrlar:** `--name <ism>` · `--seed <n>` · `--days <n>` (standart 12) · `--host [port]` · `--join <ip[:port]>` · `--server [port]` · `--smoke`
 
-## Brauzerda o'ynash (WASM)
+## Brauzerda va mobilda o'ynash (WASM)
 
 ```bash
 rustup target add wasm32-unknown-unknown
 cargo install wasm-bindgen-cli --version <Cargo.lock'dagi wasm-bindgen versiyasi>
-./build-web.sh                       # web/pkg ichiga yig'adi
+./build-web.sh                       # web/pkg-webgpu VA web/pkg-webgl ikkalasini quradi
 
 cargo run --release -- --server 4595 # o'sha server web sahifani ham beradi
 # Brauzerda: http://localhost:4595/
 ```
 
+`build-web.sh` **ikkita** wasm bundle quradi:
+
+- `pkg-webgpu` — Bevy'ning tez, GPU-driven backend'i (zamonaviy brauzer + ishlaydigan GPU kerak)
+- `pkg-webgl` — WebGL2, deyarli hamma qurilma/brauzerda ishlaydi (zaxira)
+
+`web/boot.js` sahifa ochilganda **haqiqiy sinov** o'tkazadi
+(`navigator.gpu.requestAdapter()` chaqirib) va mos bundle'ni yuklaydi.
+Muhim: `navigator.gpu` obyektining borligi WebGPU ishlashini kafolatlamaydi
+(GPU drayveri yo'q qurilmalar ham shu API'ni ko'rsatishi mumkin) — shuning
+uchun faqat "feature bor-yo'qligini" emas, balki **haqiqiy adapterni** so'rab
+ko'rish shart, aks holda mos kelmagan qurilmalarda o'yin sokin qulab tushadi.
+
 Dedicated server bitta 4595-portda uch xil trafikni gaplashadi: native TCP
-mijozlar, brauzer WebSocket'lari va web-buildning statik fayllari (HTTP GET).
-Brauzer va desktop o'yinchilar **bitta olamda** o'ynaydi.
+mijozlar, brauzer WebSocket'lari va web-buildning statik fayllari (HTTP GET,
+ikkala bundle ham). Brauzer, mobil va desktop o'yinchilar **bitta olamda** o'ynaydi.
+
+**Mobil (telefon):** alohida ilova/build shart emas — xuddi shu web sahifa,
+lekin: touch boshqaruv (1 barmoq — pan/tanlash, 2 barmoq — zoom/aylantirish/
+qiyalik), past-quvvat qurilmalar uchun grafika darajasi avtomatik pasayadi
+(soyasiz, bloomsiz, piksel zichligi cheklangan — yuqori FPS uchun).
 
 **URL parametrlari (web):** `?name=Aziz` · `?server=wss://host/ws` · `?seed=7`
 · `?days=20` · `?join` (menyusiz darhol serverga qo'shiladi). Sahifa qaysi
@@ -86,8 +109,9 @@ src/client/ Bevy 0.19: protsedural render (assetlarsiz), UI, input, chat, minima
             minimap.rs — butun xaritaning burchakdagi ko'rinishi (teren+binolar+kamera)
             audio.rs — protsedural WAV effektlari (qurish/voqea/bo'ron shamoli), assetsiz
             local_server.rs — brauzerda yakka o'yin (sim Bevy tizimi sifatida, threadsiz)
-tests/      75 sim-invariant testi + 12 e2e test (TCP, WebSocket, HTTP, chat,
-            attributsiya, reconnect, rollar, missiya/tunnel, binolar, texnologiya, voqealar) — fuzz ham
+tests/      88 test, 9 faylda: sim (29) + rollar (17) + voqealar (10) + missiya (8)
+            + texnologiya (8) + bino (4) + TCP/WS/HTTP e2e (4) + co-op e2e (4)
+            + rollar e2e (4) — chat/attributsiya/reconnect/fuzz ham shular ichida
 ```
 
 - **Server-avtoritativ:** mijozlar faqat buyruq yuboradi (`Place`, `Demolish`,
@@ -108,14 +132,19 @@ tests/      75 sim-invariant testi + 12 e2e test (TCP, WebSocket, HTTP, chat,
 | Windows | `cargo build --release` | tayyor |
 | Linux | `cargo build --release` | `sudo apt install libasound2-dev libudev-dev libwayland-dev` |
 | macOS | `cargo build --release` | Xcode CLT kifoya |
-| Web | `./build-web.sh` | wasm32 target + wasm-bindgen-cli (+ ixtiyoriy binaryen) |
+| Web (desktop brauzer) | `./build-web.sh` | wasm32 target + wasm-bindgen-cli (+ ixtiyoriy binaryen); WebGPU + WebGL2 ikkalasi ham quriladi |
+| Mobil (telefon brauzeri) | `./build-web.sh` | alohida build shart emas — xuddi shu web build; touch boshqaruv va past-quvvat grafika darajasi avtomatik |
 
-Binar: `target/release/frozen_city(.exe)`. Multiplayer uchun hostning 4595/TCP porti ochiq bo'lsin.
+Native binar: `target/release/frozen_city(.exe)`. Multiplayer uchun hostning
+4595/TCP porti ochiq bo'lsin. Rasmiy native mobil ilova (Android/iOS,
+`cargo build --target ...`) hali reja bosqichida — hozircha mobil qo'llab-
+quvvatlash **mobil brauzer** orqali (native ilovaga teng darajadagi
+boshqaruv/unumdorlik bilan).
 
 ## Testlar
 
 ```bash
-cargo test          # 87 test: determinizm, invariantlar, protokol+fuzz, e2e, rollar/missiya/binolar/texnologiya/voqealar
+cargo test          # 88 test: determinizm, invariantlar, protokol+fuzz, e2e, rollar/missiya/binolar/texnologiya/voqealar
 cargo run -- --smoke  # render smoke-test (avtomatik yopiladi)
 ```
 

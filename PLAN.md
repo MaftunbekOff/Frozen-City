@@ -1,8 +1,10 @@
 # FROZEN CITY — To'liq ishlab chiqish rejasi
 
 **Janr:** Co-op survival city-builder (Frostpunk / Frozen City uslubida)
-**Dvigatel:** Bevy 0.19 (Rust) — cross-platform: Windows, Linux, macOS
-**Multiplayer:** Server-avtoritativ co-op (TCP), 1–8 o'yinchi bitta shaharni birga boshqaradi
+**Dvigatel:** Bevy 0.19 (Rust) — desktop (Windows, Linux, macOS) + brauzer
+(WASM, WebGPU/WebGL2) + mobil brauzer (touch). Boshlang'ich reja faqat
+desktopni ko'zda tutgan edi; web/mobil M7 bosqichida qo'shildi (pastga qarang).
+**Multiplayer:** Server-avtoritativ co-op (TCP + WebSocket), 1–8 o'yinchi bitta shaharni birga boshqaradi
 
 ---
 
@@ -23,7 +25,7 @@ shahar quradi. Harorat kun sayin pasayadi. O'yinchilar (yakka yoki birgalikda):
 
 | Qatlam | Tanlov | Sabab |
 |---|---|---|
-| Dvigatel | Bevy 0.19 | Zamonaviy ECS, 2D/UI, barcha desktop platformalar |
+| Dvigatel | Bevy 0.19 | Zamonaviy ECS, 2D/UI, desktop + WASM (brauzer/mobil) |
 | Serializatsiya | serde + bincode | Ixcham binary snapshot'lar |
 | Tarmoq | std TCP + length-prefixed frames | Shahar quruvchi uchun ideal: ishonchli, tartibli, qo'shimcha dependency yo'q, versiya-mustaqil |
 | RNG | O'zimizning SplitMix64 | Deterministik simulyatsiya, dependency'siz |
