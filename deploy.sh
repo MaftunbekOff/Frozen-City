@@ -103,7 +103,29 @@ Live server untouched."
     exit 1
 fi
 
-notify "🧊 native build done ✓ — building the web package now (longest step, ~5-9 min)…"
+notify "🧊 native build done ✓ — smoke-testing the client…"
+
+# `cargo test` only exercises `src/game`/`src/net` pure logic — it never boots
+# the actual Bevy client, so a runtime-only failure (e.g. an ECS system query
+# conflict, which Bevy only detects once the schedule actually *runs*) can
+# pass every test and still crash the instant a player opens the page. Catch
+# that class of bug here, before the slow web build, by actually running the
+# game for a few seconds under a virtual display and failing loudly if it
+# panics or exits non-zero.
+log "smoke-testing the client (native, headless via Xvfb)..."
+SMOKE_LOG=$(mktemp)
+if ! xvfb-run -a timeout 150 target/release/frozen_city --smoke >"$SMOKE_LOG" 2>&1 || grep -qi "panicked" "$SMOKE_LOG"; then
+    log "ERROR: client smoke test failed/panicked — deploy aborted, live service untouched. Output:"
+    cat "$SMOKE_LOG" | sudo tee -a "$LOG" >/dev/null
+    notify "🧊❌ <b>Frozen City</b>: deploy failed (client smoke test — it boots but crashes)
+${HEADER}
+Live server untouched."
+    rm -f "$SMOKE_LOG"
+    exit 1
+fi
+rm -f "$SMOKE_LOG"
+
+notify "🧊 smoke test passed ✓ — building the web package now (longest step, ~5-9 min)…"
 
 log "building web package..."
 if ! ./build-web.sh >>"$LOG" 2>&1; then

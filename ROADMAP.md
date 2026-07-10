@@ -348,6 +348,18 @@ tasdiqlash, va region-mahalliylik nuance'i (pastga qarang).
    faqat hub umumiy, qolgan hamma narsa izolyatsiyalangan.
 5. **Har feature test bilan keladi** — sim-invariant yoki e2e.
 6. **Bitta port printsipi** — TCP + WS + HTTP birgalikda; deploy sodda qolsin.
+7. **`src/client/`ga tegadigan har o'zgarish smoke-test bilan tasdiqlanadi** —
+   `cargo test` faqat `src/game`/`src/net` sof mantiqni tekshiradi, Bevy client
+   (ECS/render) hech qachon haqiqatda ishga tushirilmaydi. Runtime-only xatolar
+   (masalan ECS query-conflict — ikkita so'rov bir komponentga mos kelmagan
+   holda murojaat qilishi, faqat schedule ishga tushganda paydo bo'ladi)
+   testlardan sizib o'tadi va o'yin sahifasi ochilgan zahoti qulaydi (2026-07-10
+   incident: roster.rs'dagi shunday xato production'ga tushib ketgan edi).
+   Shu sabab `deploy.sh`ga majburiy bosqich qo'shilgan: `xvfb-run -a timeout 150
+   target/release/frozen_city --smoke`, muvaffaqiyatsiz (panik yoki
+   non-zero exit) bo'lsa deploy to'xtaydi, web build va servis almashtirish
+   bosqichigacha yetib bormaydi. Qo'lda deploy qilganda ham shu buyruqni
+   ishga tushirish shart.
 
 ## Tavsiya etilgan tartib va taxminiy hajm
 

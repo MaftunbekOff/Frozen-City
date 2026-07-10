@@ -209,7 +209,11 @@ fn update_roster(
     mut statuses: Query<(&RosterStatus, &mut Text), Without<RosterName>>,
     mut row_btns: Query<(&mut RosterRowBtn, &mut BackgroundColor)>,
     mut unassign_btns: Query<&mut UnassignBtn>,
-    mut more: Query<(&mut Text, &mut Node), (With<MoreText>, Without<RosterRow>)>,
+    #[allow(clippy::type_complexity)]
+    mut more: Query<
+        (&mut Text, &mut Node),
+        (With<MoreText>, Without<RosterRoot>, Without<RosterRow>, Without<RosterName>, Without<RosterStatus>),
+    >,
 ) {
     let display = if open.0 { Display::Flex } else { Display::None };
     for mut node in &mut root {
