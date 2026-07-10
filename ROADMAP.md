@@ -1,9 +1,9 @@
 # FROZEN CITY — Yo'l xaritasi (Roadmap)
 
 > Dolzarb rivojlanish rejasi. Dastlabki dizayn-hujjat: [PLAN.md](PLAN.md).
-> Yangilangan: 2026-07-09.
+> Yangilangan: 2026-07-10.
 
-## Hozirgi holat (v0.1 — MVP tayyor)
+## Hozirgi holat (V0.1 MVP + V0.2 + V0.3 — barchasi tayyor)
 
 M0–M7 bosqichlar yakunlangan:
 
@@ -13,7 +13,7 @@ M0–M7 bosqichlar yakunlangan:
 - ✅ HUD, qurish/bino/pech panellari, menyu, voqealar lentasi, game-over
 - ✅ Brauzer (WASM), URL parametrlari, inline singleplayer
 - ✅ Mobil touch boshqaruv va grafika sifat darajalari
-- ✅ 88 test: sim invariantlari + attributsiya/chat/reconnect/rollar/missiya/bino/texnologiya/voqea + fuzz
+- ✅ 101 test: sim invariantlari + attributsiya/chat/reconnect/rollar/missiya/bino/texnologiya/voqea/akkaunt + fuzz
 - ✅ Mini-xarita (minimap): butun xaritaning burchakdagi ko'rinishi + bosib borish + pinglar
 - ✅ V0.3: **missiyalar**, **Tunnel** (graduatsiya), 3 yangi **bino**,
   **texnologiya daraxti** (5 tech), **voqealar tizimi** (kasallik/bo'ron/karvon-tanlov)
@@ -41,8 +41,24 @@ M0–M7 bosqichlar yakunlangan:
   umumiy kursor materiallari, furnace ishlatilmagan handle, HUD/FPS o'zgarishda-yangilash,
   minimap pixel-kvantlangan re-upload; **rust-toolchain pin** + gzip qamrovi kengaytirildi
 
-**V0.2 (jarayonda):** chat, attributsiya, reconnect, rate-limit va **rollar/egalik**
-yakunlandi; qoldi: **delta-snapshot** va **interpolatsiya**.
+**V0.2 — ✅ to'liq bajarildi:** chat, attributsiya, reconnect, rate-limit, rollar/egalik,
+delta-snapshot + siqish va interpolatsiya — barchasi yakunlandi (batafsili pastda, "V0.2" bo'limida).
+
+**V0.3 — ✅ to'liq bajarildi:** missiyalar, texnologiya daraxti, voqealar tizimi, Tunnel
+(graduatsiya g'alabasi), 4 → 8 bino (batafsili pastda, "V0.3" bo'limida); ochiq qolgani
+faqat balans-regressiya testlari sonini oshirish.
+
+**Rasmiy rejadan tashqari, allaqachon qurilgan va production'da ishlayotgan** (V0.4/V0.5'ning
+zaminini tashkil qiladi, lekin ularning to'liq ko'zlangan shaklidan hali farq qiladi —
+tafsilotlar "V0.4" bo'limida):
+- **Akkaunt + login**: Telegram bot orqali ro'yxatdan o'tish (`bot/register_bot.py`,
+  bcrypt), server `ClientMsg::Login`/`AuthFailed` bilan tekshiradi, reconnect akkaunt
+  bilan kirganda `Login`ni qayta jo'natadi.
+- **Dunyo persistensiyasi**: `world.bin` (bincode), har 20s avtosaqlash + SIGTERM handler —
+  lekin bitta umumiy olam, har akkauntga alohida emas (haqiqiy V0.4 shundan farq qiladi).
+- **Ko'p-region infratuzilmasi**: 3ta mustaqil static olam (asosiy + region2 + region3,
+  alohida systemd xizmat va portlarda), brauzerda region tanlash menyusi, PWA
+  (manifest+service worker), yuk-test vositasi (`examples/loadtest.rs`).
 
 **Hal qilingan follow-up'lar (avvalgi review'dan):**
 - ✅ Async reconnect — fon thread'ida dial, ilova muzlamaydi.
@@ -62,10 +78,12 @@ zalgo tartibi/diapazonlari; mini-xarita per-frame GPU yuklamasi.
   V0.2'ga qarang) · **bounded** chiquvchi/kiruvchi navbat qoldi (hozir 30s
   write-timeout + drain-cap qisman himoya).
 - **Moderatsiya/egalik:** **ban ro'yxati** (kicked mehmon qaytadi) · **owner-transfer**
-  (egasi butunlay ketsa). Eslatma: cloudflared tunnel ortida barcha ulanish bitta IP —
-  per-IP cheklov/ban ishlamaydi, akkaunt-identity (V0.4) kerak.
-- **Xavfsizlik (transport):** **TLS/wss** origin'da yo'q — hozir cloudflared tunnel
-  HTTPS/WSS'ni chekkada beradi (tunnel deploy uchun yetarli), to'g'ridan-to'g'ri ochiqda emas.
+  (egasi butunlay ketsa). Eslatma: barcha ulanishlar nginx orqali proxy qilingani
+  uchun kelib chiqish IP `X-Forwarded-For`'da bor, lekin serverning o'zi hali undan
+  foydalanmaydi — per-IP cheklov/ban ishlamaydi, akkaunt-identity (V0.4) kerak.
+- **Xavfsizlik (transport):** ✅ TLS/wss — nginx `game.twelfth.uz` uchun Let's Encrypt
+  sertifikat bilan HTTPS/WSS beradi (avto-yangilanadi, `certbot`), `/ws` → `127.0.0.1:4595`
+  proxy; origin (4595-port) tashqariga ochilmagan.
 - **Web hajmi:** **bevy feature-trim** · release `opt-level="z"` (wasm) — WebGL2
   fallback build ✅ bajarildi (yuqoriga qarang), qolgani hajm optimizatsiyasi.
 - **Kichik:** bincode **varint** · terrain **indexed mesh** · temperature() `cos`
@@ -162,10 +180,6 @@ Tunnelgacha yetaklasin.
       bayrog'i simda faqat Tunnel bitgan tarmoqda o'rnatiladi; game-over ekrani ikki
       g'alabani alohida ko'rsatadi («THE TUNNEL IS OPEN» vs «VICTORY»).
       To'liq endless rejim (kun-g'alabani olib tashlash) keyingi qadam.
-- [x] **Yangi binolar** (4 → 8): Kasalxona, Oshxona, Issiqxona, Ombor — barchasi
-      qurilgan (hozircha erkin quriladi, missiya/texnologiya orqali ochish emas).
-- [ ] **Texnologiya daraxti**: Tadqiqot punkti + 6–10 texnologiya.
-- [ ] **Voqealar tizimi**: kasallik, qochoqlar karvoni (tanlov), qor bo'roni.
 - [x] **TUNNEL**: ko'p bosqichli megaloyiha — barcha missiyalar bitgach ochiladi,
       `InvestTunnel` buyrug'i bilan bosqichma-bosqich qaziladi (3 bosqich), bitgach
       graduatsiya g'alabasi (Global Olamga chiqish signali). Client'da Tunnel paneli.
@@ -186,9 +200,10 @@ Tunnelgacha yetaklasin.
 
 ### Natija mezonlari
 
-- Yangi o'yinchi birinchi missiyalar orqali yordamisiz o'rganadi (playtest).
+- Yangi o'yinchi birinchi missiyalar orqali yordamisiz o'rganadi (playtest — hali qilinmagan).
 - Tunnelgacha kamida 2–3 soat mazmunli kontent bor.
-- Sim testlar 18 → 35+; endless rejimda 30+ kun barqaror.
+- ✅ Sim testlar 18 → 101 (29 tasi missiya/tunnel/bino/texnologiya/voqea uchun); endless
+  rejim uzoq muddatli barqarorlik testi hali alohida yozilmagan.
 
 ---
 
@@ -197,21 +212,41 @@ Tunnelgacha yetaklasin.
 **Maqsad:** shaxsiy olam serverda yashaydi — istalgan qurilmadan kirsa bo'ladi,
 hech qachon yo'qolmaydi.
 
+**Holat:** qisman boshlangan — ro'yxatdan o'tish va oddiy persistensiya bor, lekin
+har ikkalasi ham "bitta umumiy olam" modeliga qurilgan, "har akkauntga alohida
+shaxsiy olam" modeliga emas. Pastdagi vazifalar shu farqni aniq ko'rsatadi.
+
 ### Vazifalar
 
-- [ ] **Akkauntlar**: Tunnel ochilganda (yoki xohlaganda) ro'yxatdan o'tish;
-      sessiya tokenlari V0.2 reconnect ustiga quriladi.
-- [ ] **Server tomonida persistensiya**: shaxsiy olamlar bazada (boshlanishiga
-      SQLite, keyin PostgreSQL) — avtomatik saqlanadi, restart'dan omon qoladi.
-- [ ] **Cross-device**: desktop / brauzer / telefon — bitta akkaunt, o'sha shahar.
-- [ ] **Olam menejeri**: server ko'p shaxsiy olamni parallel yuritadi
-      (har biri arzon sim; uxlayotgan olamlar diskda, kirganda uyg'onadi).
+- [~] **Akkauntlar**: rejadagidek Tunnel-bog'liq emas, Telegram bot
+      (`bot/register_bot.py`) orqali istalgan vaqt ro'yxatdan o'tiladi — bcrypt bilan
+      SQLite'da (`/var/lib/frozen-city-accounts/accounts.db`) saqlanadi, server
+      `ClientMsg::Login`/`AuthFailed` bilan tekshiradi, sessiya V0.2 reconnect
+      tokeni ustiga quriladi (`src/net/accounts.rs`). Qoldi: ro'yxatdan o'tish
+      to'g'ridan-to'g'ri client ichidan (Telegram'siz).
+- [~] **Server tomonida persistensiya**: bor — `src/net/persist.rs`, `world.bin`
+      (bincode, atomik tmp+rename), har 20s avtosaqlash + SIGTERM handler, restart'dan
+      omon qoladi. Lekin **bitta umumiy `GameState`**, har akkaunt uchun alohida
+      baza-yozuv emas — bu haqiqiy shaxsiy-olam persistensiyasi emas, balki hozirgi
+      bitta doimiy olamni saqlab turish. Qoldi: har akkaunt uchun alohida olam
+      (SQLite/Postgres'da, akkaunt-id bo'yicha).
+- [ ] **Cross-device**: hozircha ma'nosiz — olam bitta bo'lgani uchun har kim allaqachon
+      "o'sha shahar"ga kiradi, lekin bu shaxsiylashtirilgan emas. Haqiqiy cross-device
+      yuqoridagi shaxsiy-olam persistensiyasidan keyin ma'no kasb etadi.
+- [ ] **Olam menejeri**: yo'q. O'rniga vaqtinchalik yechim qurilgan — 3ta **mustaqil,
+      qo'lda ishga tushirilgan** static olam (asosiy + region2 + region3, alohida
+      systemd xizmat/port, brauzerda region tanlash menyusi). Bu ko'p-olamlilikni
+      taqlid qiladi, lekin "uxlayotgan olamlar diskda, kirganda uyg'onadi" degan
+      dinamik menejer emas — sig'im qo'lda qo'shiladi, avtomatik emas.
 
 ### Natija mezonlari
 
-- Server restart → barcha olamlar tiklanadi (avtomatlashgan test).
-- Brauzerda boshlagan o'yinchi desktopdan o'sha shahriga kiradi.
-- 50+ shaxsiy olam bitta serverda parallel (yuk testi).
+- [ ] Server restart → barcha olamlar tiklanadi (avtomatlashgan test) — hozir faqat
+      bitta olam uchun qo'lda tasdiqlangan (production'da, `journalctl` orqali).
+- [ ] Brauzerda boshlagan o'yinchi desktopdan o'sha shahriga kiradi — akkaunt bor,
+      lekin "o'sha shahar" tushunchasi hali shaxsiylashtirilmagan.
+- [ ] 50+ shaxsiy olam bitta serverda parallel (yuk testi) — `examples/loadtest.rs`
+      bor, lekin ko'p-region sig'imini o'lchash uchun, shaxsiy-olam skalasi uchun emas.
 
 ---
 
@@ -227,7 +262,9 @@ hech qachon yo'qolmaydi.
 - [ ] **Tunnel o'tish oqimi**: shaxsiy olam ↔ hub bitta klient ichida silliq
       almashadi (ulanishni almashtirish, yuklash ekrani).
 - [ ] **Interest management**: mijoz faqat atrofidagi zonani oladi; kerak
-      bo'lganda gateway + region serverlar.
+      bo'lganda gateway + region serverlar. Zaminiy infratuzilma qisman bor —
+      3ta mustaqil region-server (V0.4'da tasvirlangan) — lekin bu hub/avatar
+      shardlash emas, qo'lda ochilgan qo'shimcha statik olamlar.
 - [ ] **Hub mashg'ulotlari (v1)**: boshqa shaharlarning vitrinasi (statistika,
       «tashrif»), e'lonlar taxtasi; keyinroq savdo/almashuv — dizayn ochiq.
 
@@ -274,12 +311,13 @@ hech qachon yo'qolmaydi.
       (qalin qor + whiteout osmon/tuman + sovuq tint), tunda aurora. Qoldi: tutun sayqal, o'tishlar.
 - [~] **Unumdorlik va deploy**: ✅ WebGPU, gzip serving + cache header, umumiy bino
       materiallari (draw-call kamaytirish), release `strip`, Cargo.lock tracked,
-      build-web.sh wasm o'lchamini ko'rsatadi. Qoldi: wasm-opt (binaryen) o'rnatish,
-      bevy feature-trim, delta-snapshot tarmoq.
+      build-web.sh wasm o'lchamini ko'rsatadi, ✅ wasm-opt (binaryen), ✅ delta-snapshot
+      + freym siqish (V0.2'da). Qoldi: bevy feature-trim.
 - [ ] **Lokalizatsiya**: uz / en / ru; accessibility (rang-ko'r palitra, shrift).
 - [ ] **Sozlamalar menyusi**: grafika darajasi, ovoz, til.
 - [ ] **CI/CD**: GitHub Actions — test + Windows/Linux/macOS/wasm artefaktlari.
-- [ ] **PWA** (bosh ekranga o'rnatish) + **Android**, keyin iOS.
+- [~] **PWA**: ✅ bosh ekranga o'rnatish (manifest + service worker + ikonkalar,
+      network-first strategiya). Qoldi: Android, keyin iOS (native qadoqlash).
 - [ ] **itch.io sahifasi**: skrinshotlar, gif-treyler, web-versiya embed.
 
 ### Natija mezonlari
@@ -302,19 +340,23 @@ hech qachon yo'qolmaydi.
 
 ## Tavsiya etilgan tartib va taxminiy hajm
 
-| Faza | Taxminiy hajm | Nega shu tartibda |
+| Faza | Holat | Nega shu tartibda |
 |---|---|---|
-| V0.2 Tarmoq poydevori | 1–2 hafta | Attributsiya, rollar, reconnect — hamma ijtimoiy narsaning asosi |
-| V0.3 Missiyalar + Tunnel | 2–3 hafta | Shaxsiy olam kontenti — o'yinchini hub'gacha yetaklaydi |
-| V0.4 Akkauntlar + doimiy olamlar | 2–3 hafta | Taklif va hub uchun identity + persistensiya shart |
-| V0.5 Global Olam (hub) | 3–4 hafta | Eng katta yangi ish: avatar rejimi + masshtab |
-| V0.6 Taklif + mehmon co-op | 1–2 hafta | Vizyon halqasini yopadi; hammasi tayyor bo'lgach arzon |
-| V1.0 Sayqal + tarqatish | 2–3 hafta | Keng auditoriyadan oldin oxirgi qatlam |
+| V0.2 Tarmoq poydevori | ✅ bajarildi | Attributsiya, rollar, reconnect — hamma ijtimoiy narsaning asosi |
+| V0.3 Missiyalar + Tunnel | ✅ bajarildi | Shaxsiy olam kontenti — o'yinchini hub'gacha yetaklaydi |
+| V0.4 Akkauntlar + doimiy olamlar | 🔶 qisman (yuqoriga qarang) | Taklif va hub uchun identity + persistensiya shart |
+| V0.5 Global Olam (hub) | boshlanmagan (region infra zaminiy) | Eng katta yangi ish: avatar rejimi + masshtab |
+| V0.6 Taklif + mehmon co-op | boshlanmagan | Vizyon halqasini yopadi; hammasi tayyor bo'lgach arzon |
+| V1.0 Sayqal + tarqatish | qisman (yuqoriga qarang) | Keng auditoriyadan oldin oxirgi qatlam |
 
-**Birinchi uchta konkret qadam (hozirdan boshlasa bo'ladi):**
+**Keyingi uchta konkret qadam (V0.4'ning haqiqatda ochiq qolgan qismi):**
 
-1. **Attributsiya + chat** — `apply_command`da player id ishlatish, «kim qurdi»
-   voqealari va matnli chat: co-op darhol jonlanadi.
-2. **Reconnect (sessiya tokeni)** — kelajakdagi akkauntlar shu yerdan boshlanadi.
-3. **Missiya tizimining skeleti** — 5–6 ta oddiy quest + mukofot: progressiya
-   tuyg'usi paydo bo'ladi, Tunnel sari birinchi qadam.
+1. **Har akkaunt uchun alohida shaxsiy olam** — `persist.rs`ni bitta global
+   `world.bin`dan akkaunt-id bo'yicha ko'p faylga (yoki SQLite BLOB ustuniga)
+   o'tkazish; login bo'lganda o'sha akkauntning olami yuklanadi/yaratiladi.
+2. **Olam menejeri (minimal)** — serverda bir nechta `GameState` parallel
+   simulyatsiya qilinadi (har biri akkauntga bog'liq), faol bo'lmaganlari
+   diskka yozilib xotiradan bo'shatiladi.
+3. **Cross-device tasdiqlash** — e2e test: bir akkaunt bilan brauzerdan kirib
+   qurish, uzilib, boshqa qurilma/klientdan o'sha login bilan kirib xuddi shu
+   shaharni ko'rish.
