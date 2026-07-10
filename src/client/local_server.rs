@@ -11,7 +11,7 @@ use bevy::prelude::*;
 use frozen_city::game::sim;
 use frozen_city::game::types::{GameState, TICK_MS};
 use frozen_city::net::client::ClientConn;
-use frozen_city::net::protocol::{ClientMsg, ServerMsg, TILES_EVERY_N_TICKS};
+use frozen_city::net::protocol::{ClientMsg, Included, ServerMsg, TILES_EVERY_N_TICKS};
 
 use super::{ServerRes, Screen};
 
@@ -89,6 +89,10 @@ pub fn tick(mut server: ResMut<ServerRes>, time: Res<Time>) {
 
         sim::tick(&mut srv.state);
 
+        // In-memory and free of network cost, so unlike the real server there's
+        // no point tracking what changed — just send everything every tick
+        // (tiles keep the same throttle cadence purely so both server
+        // implementations agree on the tile/no-tile pattern, per the module doc).
         let include_tiles = srv.state.tick % TILES_EVERY_N_TICKS == 0;
         let mut wire = srv.state.clone();
         if !include_tiles {
@@ -96,7 +100,14 @@ pub fn tick(mut server: ResMut<ServerRes>, time: Res<Time>) {
         }
         let _ = srv.to_client.send(ServerMsg::State {
             state: wire,
-            tiles_included: include_tiles,
+            included: Included {
+                tiles: include_tiles,
+                events: true,
+                chat: true,
+                pings: true,
+                missions: true,
+                techs: true,
+            },
         });
     }
 }

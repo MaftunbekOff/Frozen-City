@@ -44,6 +44,23 @@ pub enum ClientMsg {
     },
 }
 
+/// Which of `GameState`'s pricier collection fields actually ride along on a
+/// given `State` message. A field flagged `false` is empty on the wire (same
+/// trick the original tiles throttle used) and the client keeps its last
+/// known copy instead. Only collections that are genuinely quiet most ticks
+/// are worth this — `buildings`/`survivors`/`stock` drift essentially every
+/// tick from continuous production/hunger/decay, so skip-when-unchanged
+/// would almost never trigger for them and isn't applied there.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default)]
+pub struct Included {
+    pub tiles: bool,
+    pub events: bool,
+    pub chat: bool,
+    pub pings: bool,
+    pub missions: bool,
+    pub techs: bool,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum ServerMsg {
     Welcome {
@@ -53,20 +70,39 @@ pub enum ServerMsg {
         token: u64,
         state: GameState,
     },
-    State {
-        state: GameState,
-        /// When false, `state.tiles` is empty and the client should keep the
-        /// tile grid from the last snapshot that included it.
-        tiles_included: bool,
-    },
+    State { state: GameState, included: Included },
     /// Sent instead of `Welcome` when a `Login` first message had a bad
     /// login/password; the connection is closed right after.
     AuthFailed { reason: String },
 }
 
+/// Deflate level: fast enough to run every tick on a shared box, still gets
+/// most of the win on the repetitive tile/struct data that dominates a
+/// snapshot (see `encode`'s doc comment). Levels above ~6 buy little extra
+/// ratio here for a lot more CPU.
+const COMPRESSION_LEVEL: u8 = 6;
+
+/// Bincode-serializes then deflates `msg`. Snapshots are dominated by
+/// repetitive data (the tile grid, near-identical `Building`/`Survivor`
+/// entries) that deflate shrinks a lot; tiny messages (a `Cmd`, a cursor
+/// update) still round-trip correctly, just with a few bytes of fixed
+/// deflate overhead.
+pub fn encode<T: Serialize>(msg: &T) -> io::Result<Vec<u8>> {
+    let bytes =
+        bincode::serialize(msg).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    Ok(miniz_oxide::deflate::compress_to_vec(&bytes, COMPRESSION_LEVEL))
+}
+
+/// Inverse of [`encode`]. `max_decompressed` bounds the inflated size so a
+/// malicious/corrupt peer can't zip-bomb the other side into exhausting memory.
+pub fn decode<T: DeserializeOwned>(bytes: &[u8], max_decompressed: usize) -> io::Result<T> {
+    let raw = miniz_oxide::inflate::decompress_to_vec_with_limit(bytes, max_decompressed)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "decompress failed"))?;
+    bincode::deserialize(&raw).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
 pub fn write_frame<W: Write, T: Serialize>(w: &mut W, msg: &T) -> io::Result<()> {
-    let bytes = bincode::serialize(msg)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let bytes = encode(msg)?;
     if bytes.len() as u64 > MAX_FRAME as u64 {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "frame too large"));
     }
@@ -84,5 +120,8 @@ pub fn read_frame<R: Read, T: DeserializeOwned>(r: &mut R) -> io::Result<T> {
     }
     let mut buf = vec![0u8; len as usize];
     r.read_exact(&mut buf)?;
-    bincode::deserialize(&buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    // Decompressed size is unbounded by the wire length (that's the whole
+    // point of compression), so bound it independently at MAX_FRAME — a
+    // legitimate snapshot decompresses to well under that.
+    decode(&buf, MAX_FRAME as usize)
 }

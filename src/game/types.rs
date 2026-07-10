@@ -28,6 +28,9 @@ pub const FURNACE_COAL_PER_DAY_PER_LEVEL: f32 = 12.0;
 pub const HOSPITAL_CARE_PER_WORKER_DAY: f32 = 2.0;
 /// Food-consumption multiplier while any kitchen is staffed (lower = thriftier).
 pub const KITCHEN_FOOD_EFFICIENCY: f32 = 0.75;
+/// Construction wood-cost multiplier while any warehouse is staffed — salvaged
+/// and well-organized materials mean less goes to waste on a new build.
+pub const WAREHOUSE_BUILD_DISCOUNT: f32 = 0.80;
 /// Wood burns less efficiently than coal.
 pub const WOOD_FUEL_PENALTY: f32 = 1.5;
 pub const DEMOLISH_REFUND: f32 = 0.4;
@@ -71,10 +74,11 @@ pub enum BuildingKind {
     Greenhouse,
     Hospital,
     Kitchen,
+    Warehouse,
 }
 
 impl BuildingKind {
-    pub const BUILDABLE: [BuildingKind; 7] = [
+    pub const BUILDABLE: [BuildingKind; 8] = [
         BuildingKind::Tent,
         BuildingKind::Sawmill,
         BuildingKind::CoalMine,
@@ -82,6 +86,7 @@ impl BuildingKind {
         BuildingKind::Greenhouse,
         BuildingKind::Hospital,
         BuildingKind::Kitchen,
+        BuildingKind::Warehouse,
     ];
 
     pub fn name(self) -> &'static str {
@@ -94,6 +99,7 @@ impl BuildingKind {
             BuildingKind::Greenhouse => "Greenhouse",
             BuildingKind::Hospital => "Hospital",
             BuildingKind::Kitchen => "Kitchen",
+            BuildingKind::Warehouse => "Warehouse",
         }
     }
 
@@ -107,6 +113,7 @@ impl BuildingKind {
             BuildingKind::Greenhouse => "G",
             BuildingKind::Hospital => "+",
             BuildingKind::Kitchen => "K",
+            BuildingKind::Warehouse => "W",
         }
     }
 
@@ -120,6 +127,7 @@ impl BuildingKind {
             BuildingKind::Greenhouse => 35,
             BuildingKind::Hospital => 35,
             BuildingKind::Kitchen => 25,
+            BuildingKind::Warehouse => 30,
         }
     }
 
@@ -132,6 +140,7 @@ impl BuildingKind {
             BuildingKind::Greenhouse => 2,
             BuildingKind::Hospital => 2,
             BuildingKind::Kitchen => 1,
+            BuildingKind::Warehouse => 1,
         }
     }
 
@@ -170,6 +179,7 @@ impl BuildingKind {
             BuildingKind::Greenhouse => "A high-output indoor farm (more food/worker).",
             BuildingKind::Hospital => "Staffed: heals survivors faster.",
             BuildingKind::Kitchen => "Staffed: the city eats more efficiently.",
+            BuildingKind::Warehouse => "Staffed: new construction wastes less wood.",
         }
     }
 }

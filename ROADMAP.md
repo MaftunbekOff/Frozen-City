@@ -58,9 +58,9 @@ ustuvorlik; reconnect token-rotatsiyasi (sniffing himoyasi); guest_perm reset-om
 zalgo tartibi/diapazonlari; mini-xarita per-frame GPU yuklamasi.
 
 **Qolgan ochiq ishlar (auditdan, kelajakdagi bosqichlar):**
-- **Tarmoq (arxitekturaviy):** to'liq **delta-snapshot** (hozir faqat tiles throttle,
-  qolgani har tick to'liq) · WS/TCP kadr **siqilishi** · **bounded** chiquvchi/kiruvchi
-  navbat (hozir 30s write-timeout + drain-cap qisman himoya).
+- **Tarmoq (arxitekturaviy):** ✅ delta-snapshot + WS/TCP kadr siqilishi (2026-07-10,
+  V0.2'ga qarang) · **bounded** chiquvchi/kiruvchi navbat qoldi (hozir 30s
+  write-timeout + drain-cap qisman himoya).
 - **Moderatsiya/egalik:** **ban ro'yxati** (kicked mehmon qaytadi) · **owner-transfer**
   (egasi butunlay ketsa). Eslatma: cloudflared tunnel ortida barcha ulanish bitta IP —
   per-IP cheklov/ban ishlamaydi, akkaunt-identity (V0.4) kerak.
@@ -124,8 +124,17 @@ Butun ijtimoiy tsikl (mehmonlar, hub) shu poydevorga quriladi.
       ulanish-id'ni o'yinchi-id'dan ajratadi, uzilgan o'yinchining `PlayerInfo`'sini
       token bo'yicha saqlab, xuddi shu o'yinchi (id + stats) sifatida qaytaradi.
       Mijozda avtomatik qayta-ulanish (Join rejimi).
-- [ ] **Delta-snapshot**: faqat o'zgargan qism + siqish; ~30 KB/s → ~1 KB/s.
-- [ ] **Interpolatsiya**: kursorlar va aholi harakati snapshot orasida silliq.
+- [x] **Delta-snapshot**: 2026-07-10. `tiles`dagi mavjud tashlab-ketish andozasi
+      `events`/`chat`/`pings`/`missions`/`techs`ga ham tarqatildi (`protocol::Included`
+      bayroqlari) — bular ko'pincha o'zgarmay qoladi. `buildings`/`survivors`/`stock`
+      atayin tegilmadi: sim.rs'da har tikda uzluksiz o'zgaradi (progress/hunger/decay),
+      shu sabab "o'zgarganda yubor" ulardan foyda bermas edi. Asosiy tejov —
+      **siqish**: butun bincode freym `miniz_oxide` deflate bilan (TCP va WS
+      ikkalasida ham, `protocol::encode`/`decode`).
+- [x] **Interpolatsiya**: allaqachon bor edi, faqat roadmap belgilanmagan —
+      kursorlar `sync_player_cursors`da eksponensial lerp bilan, aholi esa
+      `animate_survivors`da tezlik-asosli yurish bilan, ikkalasi ham snapshot
+      kelish tezligidan mustaqil, har frame silliqlanadi.
 - [x] **Mustahkamlik**: har-ulanish buyruq rate-limit (Cmd 30/s, Chat 4/s, Ping 6/s),
       frame limiti (mavjud), protokol fuzz testi (5000 random frame → panic yo'q).
 
@@ -153,16 +162,19 @@ Tunnelgacha yetaklasin.
       bayrog'i simda faqat Tunnel bitgan tarmoqda o'rnatiladi; game-over ekrani ikki
       g'alabani alohida ko'rsatadi («THE TUNNEL IS OPEN» vs «VICTORY»).
       To'liq endless rejim (kun-g'alabani olib tashlash) keyingi qadam.
-- [ ] **Yangi binolar** (4 → 8+): Kasalxona, Oshxona, Issiqxona, Ombor — missiya
-      va texnologiyalar orqali ochiladi.
+- [x] **Yangi binolar** (4 → 8): Kasalxona, Oshxona, Issiqxona, Ombor — barchasi
+      qurilgan (hozircha erkin quriladi, missiya/texnologiya orqali ochish emas).
 - [ ] **Texnologiya daraxti**: Tadqiqot punkti + 6–10 texnologiya.
 - [ ] **Voqealar tizimi**: kasallik, qochoqlar karvoni (tanlov), qor bo'roni.
 - [x] **TUNNEL**: ko'p bosqichli megaloyiha — barcha missiyalar bitgach ochiladi,
       `InvestTunnel` buyrug'i bilan bosqichma-bosqich qaziladi (3 bosqich), bitgach
       graduatsiya g'alabasi (Global Olamga chiqish signali). Client'da Tunnel paneli.
       Keyingisi: haqiqiy hub'ga o'tish (V0.5).
-- [~] **Yangi binolar** (4 → 7): ✅ Issiqxona (Greenhouse — yuqori-output oziq),
-      Kasalxona (Hospital — HP tiklash), Oshxona (Kitchen — oziq tejash). Qoldi: Ombor.
+- [x] **Yangi binolar** (4 → 8): Issiqxona (Greenhouse — yuqori-output oziq),
+      Kasalxona (Hospital — HP tiklash), Oshxona (Kitchen — oziq tejash),
+      Ombor (Warehouse — 2026-07-10, staffed bo'lsa qurilish yog'och narxi
+      `WAREHOUSE_BUILD_DISCOUNT` (20%) arzonroq — hozirgi iqtisodiyotda haqiqiy
+      zaxira-sig'imi tushunchasi yo'qligi sababli shu variant tanlandi).
 - [x] **Texnologiya daraxti**: 5 texnologiya (Izolyatsiya, Samarali pech, Asboblar,
       Ratsion, Tibbiyot) — resurs evaziga ochiladi (`Research` buyrug'i), effektlar
       simda qo'llanadi. Client'da modal panel (R bilan ochiladi).

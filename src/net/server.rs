@@ -21,12 +21,15 @@ use std::time::{Duration, Instant};
 use tungstenite::Message;
 
 use crate::game::sim;
-use crate::game::types::{GamePhase, GameState, PlayerCommand, PlayerInfo, TICK_MS};
+use crate::game::types::{
+    GamePhase, GameState, Mission, PlayerCommand, PlayerInfo, Ping, Tech, TICK_MS,
+};
 use crate::net::accounts;
 use crate::net::client::ClientConn;
 use crate::net::persist;
 use crate::net::protocol::{
-    read_frame, write_frame, ClientMsg, ServerMsg, MAX_FRAME, TILES_EVERY_N_TICKS,
+    decode, encode, read_frame, write_frame, ClientMsg, Included, ServerMsg, MAX_FRAME,
+    TILES_EVERY_N_TICKS,
 };
 
 /// Directory the built-in HTTP server serves the web build from.
@@ -443,7 +446,7 @@ fn serve_websocket(stream: TcpStream, head: Vec<u8>, to_server: Sender<ToServer>
     // First frame must be Hello or Login (still under the 10 s read timeout).
     let (name, token) = loop {
         match ws.read() {
-            Ok(Message::Binary(b)) => match bincode::deserialize::<ClientMsg>(&b) {
+            Ok(Message::Binary(b)) => match decode::<ClientMsg>(&b, MAX_FRAME as usize) {
                 Ok(ClientMsg::Hello { name, token }) => break (sanitize_name(&name), token),
                 Ok(ClientMsg::Login {
                     login,
@@ -452,7 +455,7 @@ fn serve_websocket(stream: TcpStream, head: Vec<u8>, to_server: Sender<ToServer>
                 }) => match accounts::authenticate(&login, &password) {
                     Some(display_name) => break (sanitize_name(&display_name), token),
                     None => {
-                        if let Ok(bytes) = bincode::serialize(&ServerMsg::AuthFailed {
+                        if let Ok(bytes) = encode(&ServerMsg::AuthFailed {
                             reason: AUTH_FAILED_REASON.to_string(),
                         }) {
                             let _ = ws.send(Message::Binary(bytes.into()));
@@ -485,7 +488,7 @@ fn serve_websocket(stream: TcpStream, head: Vec<u8>, to_server: Sender<ToServer>
     'session: loop {
         match ws.read() {
             Ok(Message::Binary(b)) => {
-                if let Ok(msg) = bincode::deserialize::<ClientMsg>(&b) {
+                if let Ok(msg) = decode::<ClientMsg>(&b, MAX_FRAME as usize) {
                     if to_server.send(ToServer::Msg { client: id, msg }).is_err() {
                         break 'session;
                     }
@@ -501,7 +504,7 @@ fn serve_websocket(stream: TcpStream, head: Vec<u8>, to_server: Sender<ToServer>
         loop {
             match out_rx.try_recv() {
                 Ok(msg) => {
-                    let Ok(bytes) = bincode::serialize(&msg) else {
+                    let Ok(bytes) = encode(&msg) else {
                         break 'session;
                     };
                     if ws.send(Message::Binary(bytes.into())).is_err() {
@@ -738,6 +741,16 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
     let mut printed_events: u64 = 0;
     let mut printed_chat: u64 = 0;
     let mut game_over_since: Option<Instant> = None;
+    // What the last broadcast tick's `State` message carried, so the next
+    // one can skip these quiet-most-ticks collections when nothing changed
+    // (see `protocol::Included`). `events`/`chat` reuse the monotonic
+    // counters already kept for the verbose console log below instead of
+    // cloning the (capped but text-heavy) logs just to compare them.
+    let mut last_sent_events: u64 = 0;
+    let mut last_sent_chat: u64 = 0;
+    let mut last_sent_pings: Vec<Ping> = Vec::new();
+    let mut last_sent_missions: Vec<Mission> = Vec::new();
+    let mut last_sent_techs: Vec<Tech> = Vec::new();
 
     let tick_dur = Duration::from_millis(TICK_MS);
     let mut next_tick = Instant::now() + tick_dur;
@@ -971,6 +984,13 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
                         state.owner_id = owner_id;
                         printed_events = 0;
                         printed_chat = 0;
+                        // `total_events`/`total_chat` also restart at 0 on a fresh
+                        // `new_game`, so the last-sent counters must follow —
+                        // otherwise a coincidental match after the reset would
+                        // wrongly tell a connected client "no new events/chat"
+                        // while it's still holding the previous world's log.
+                        last_sent_events = 0;
+                        last_sent_chat = 0;
                         sim::push_event(
                             &mut state,
                             "A new expedition arrives - the city rises again.",
@@ -1012,25 +1032,60 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
                 }
             }
 
-            // Broadcast the snapshot; tiles ride along every Nth tick only.
-            // With nobody connected (a persistent, currently-empty region)
-            // there's nothing to send it to, so skip the clone/serialize/send
-            // work entirely — the sim keeps ticking (and autosaving) above
-            // regardless. `include_tiles` still advances off `state.tick` on
-            // its normal cadence, so the moment a client joins mid-cycle it
-            // sees exactly the tile/no-tile pattern it would have if the
-            // broadcast had never stopped.
+            // Broadcast the snapshot; tiles ride along only every Nth tick, and
+            // the other quiet-most-ticks collections (events/chat/pings/
+            // missions/techs) only when they actually changed — see
+            // `protocol::Included`. With nobody connected (a persistent,
+            // currently-empty region) there's nothing to send it to, so skip
+            // the clone/serialize/send work entirely — the sim keeps ticking
+            // (and autosaving) above regardless. `state.tick`'s tile cadence
+            // still advances on its normal schedule either way, so the moment
+            // a client joins mid-cycle it sees exactly the tile/no-tile
+            // pattern it would have if the broadcast had never stopped.
             if !clients.is_empty() {
-                let include_tiles = state.tick % TILES_EVERY_N_TICKS == 0;
+                let included = Included {
+                    tiles: state.tick % TILES_EVERY_N_TICKS == 0,
+                    events: state.total_events != last_sent_events,
+                    chat: state.total_chat != last_sent_chat,
+                    pings: state.pings != last_sent_pings,
+                    missions: state.missions != last_sent_missions,
+                    techs: state.techs != last_sent_techs,
+                };
+                last_sent_events = state.total_events;
+                last_sent_chat = state.total_chat;
+                if included.pings {
+                    last_sent_pings = state.pings.clone();
+                }
+                if included.missions {
+                    last_sent_missions = state.missions.clone();
+                }
+                if included.techs {
+                    last_sent_techs = state.techs.clone();
+                }
                 let mut wire = state.clone();
-                if !include_tiles {
+                if !included.tiles {
                     wire.tiles = Vec::new();
+                }
+                if !included.events {
+                    wire.events = Vec::new();
+                }
+                if !included.chat {
+                    wire.chat = Vec::new();
+                }
+                if !included.pings {
+                    wire.pings = Vec::new();
+                }
+                if !included.missions {
+                    wire.missions = Vec::new();
+                }
+                if !included.techs {
+                    wire.techs = Vec::new();
                 }
                 let mut dead: Vec<u64> = Vec::new();
                 for (id, out) in &clients {
                     let msg = ServerMsg::State {
                         state: wire.clone(),
-                        tiles_included: include_tiles,
+                        included,
                     };
                     if out.send(msg).is_err() {
                         dead.push(*id);

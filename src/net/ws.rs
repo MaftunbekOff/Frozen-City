@@ -15,7 +15,7 @@ use wasm_bindgen::JsCast;
 use web_sys::{BinaryType, MessageEvent, WebSocket};
 
 use crate::net::client::ClientConn;
-use crate::net::protocol::{ClientMsg, ServerMsg};
+use crate::net::protocol::{decode, encode, ClientMsg, ServerMsg, MAX_FRAME};
 
 struct Slot {
     ws: WebSocket,
@@ -65,7 +65,7 @@ pub fn connect_with(url: &str, hello: ClientMsg) -> Result<ClientConn, String> {
         Closure::<dyn FnMut(MessageEvent)>::new(move |ev: MessageEvent| {
             if let Ok(buf) = ev.data().dyn_into::<js_sys::ArrayBuffer>() {
                 let bytes = js_sys::Uint8Array::new(&buf).to_vec();
-                if let Ok(msg) = bincode::deserialize::<ServerMsg>(&bytes) {
+                if let Ok(msg) = decode::<ServerMsg>(&bytes, MAX_FRAME as usize) {
                     let _ = out_tx.send(msg);
                 }
             }
@@ -98,7 +98,7 @@ pub fn connect_with(url: &str, hello: ClientMsg) -> Result<ClientConn, String> {
         callbacks.push(cb);
     }
 
-    let hello = bincode::serialize(&hello).map_err(|e| e.to_string())?;
+    let hello = encode(&hello).map_err(|e| e.to_string())?;
     shared.pending.borrow_mut().push(hello);
 
     let slot = SOCKETS.with(|s| {
@@ -121,7 +121,7 @@ pub fn connect_with(url: &str, hello: ClientMsg) -> Result<ClientConn, String> {
 }
 
 pub(crate) fn send(slot: usize, msg: &ClientMsg) {
-    let Ok(bytes) = bincode::serialize(msg) else {
+    let Ok(bytes) = encode(msg) else {
         return;
     };
     SOCKETS.with(|s| {

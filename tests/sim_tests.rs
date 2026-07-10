@@ -5,7 +5,7 @@ use std::io::Cursor;
 
 use frozen_city::game::sim;
 use frozen_city::game::types::*;
-use frozen_city::net::protocol::{read_frame, write_frame, ClientMsg, ServerMsg};
+use frozen_city::net::protocol::{read_frame, write_frame, ClientMsg, Included, ServerMsg};
 
 #[test]
 fn mapgen_is_deterministic() {
@@ -225,7 +225,17 @@ fn protocol_frames_roundtrip() {
     let state = sim::new_game(77, 12);
     let msgs = vec![
         ServerMsg::Welcome { player_id: 3, token: 3, state: state.clone() },
-        ServerMsg::State { state, tiles_included: true },
+        ServerMsg::State {
+            state,
+            included: Included {
+                tiles: true,
+                events: true,
+                chat: true,
+                pings: true,
+                missions: true,
+                techs: true,
+            },
+        },
     ];
     let mut buf = Vec::new();
     for m in &msgs {

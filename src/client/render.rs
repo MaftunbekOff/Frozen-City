@@ -25,7 +25,7 @@ use super::*;
 
 /// Fixed `BuildingKind` order backing `GameAssets::building_mats` — index
 /// `i` corresponds to `ALL_KINDS[i]`.
-const ALL_KINDS: [BuildingKind; 8] = [
+const ALL_KINDS: [BuildingKind; 9] = [
     BuildingKind::Furnace,
     BuildingKind::Tent,
     BuildingKind::Sawmill,
@@ -34,6 +34,7 @@ const ALL_KINDS: [BuildingKind; 8] = [
     BuildingKind::Greenhouse,
     BuildingKind::Hospital,
     BuildingKind::Kitchen,
+    BuildingKind::Warehouse,
 ];
 
 #[derive(Resource)]
@@ -61,7 +62,7 @@ pub struct GameAssets {
     pub cursor_mats: [Handle<StandardMaterial>; 8],
     /// One body material per `BuildingKind` (see `ALL_KINDS`), shared so
     /// every building of the same kind batches into one draw call.
-    pub building_mats: [Handle<StandardMaterial>; 8],
+    pub building_mats: [Handle<StandardMaterial>; 9],
     /// Furnace base/chimney stone — identical for every furnace.
     pub furnace_stone_mat: Handle<StandardMaterial>,
     pub sawmill_roof_mat: Handle<StandardMaterial>,
@@ -70,6 +71,7 @@ pub struct GameAssets {
     pub greenhouse_glass_mat: Handle<StandardMaterial>,
     pub hospital_cross_mat: Handle<StandardMaterial>,
     pub kitchen_stone_mat: Handle<StandardMaterial>,
+    pub warehouse_plank_mat: Handle<StandardMaterial>,
     /// Roof worker-indicator cube; identical for every building.
     pub worker_mat: Handle<StandardMaterial>,
 }
@@ -356,6 +358,11 @@ pub fn setup_camera_and_assets(
         }),
         kitchen_stone_mat: materials.add(StandardMaterial {
             base_color: Color::srgb(0.40, 0.36, 0.34),
+            ..default()
+        }),
+        warehouse_plank_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.50, 0.38, 0.24),
+            perceptual_roughness: 0.85,
             ..default()
         }),
         worker_mat: materials.add(StandardMaterial {
@@ -984,6 +991,30 @@ fn spawn_building(
                     Transform::from_xyz(0.22, 0.58, 0.0).with_scale(Vec3::new(0.16, 0.5, 0.16)),
                 ));
                 roof_y = 0.9;
+            }
+            BuildingKind::Warehouse => {
+                let body = building_mat(assets, b.kind);
+                p.spawn((
+                    Mesh3d(assets.cube.clone()),
+                    MeshMaterial3d(body),
+                    Transform::from_xyz(0.0, 0.22, 0.0).with_scale(Vec3::new(0.92, 0.40, 0.92)),
+                ));
+                // Flat plank roof cap, plus a couple of stacked crates by the
+                // door — the "storage" tell at a glance.
+                let planks = assets.warehouse_plank_mat.clone();
+                p.spawn((
+                    Mesh3d(assets.cube.clone()),
+                    MeshMaterial3d(planks.clone()),
+                    Transform::from_xyz(0.0, 0.44, 0.0).with_scale(Vec3::new(0.98, 0.06, 0.98)),
+                ));
+                for (dx, dz, h) in [(-0.28, 0.30, 0.16), (-0.10, 0.32, 0.20)] {
+                    p.spawn((
+                        Mesh3d(assets.cube.clone()),
+                        MeshMaterial3d(planks.clone()),
+                        Transform::from_xyz(dx, h * 0.5, dz).with_scale(Vec3::splat(h)),
+                    ));
+                }
+                roof_y = 0.48;
             }
         }
 

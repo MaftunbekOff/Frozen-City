@@ -448,7 +448,16 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
     match cmd {
         PlayerCommand::Place { kind, x, y } => {
             if state.can_place(*kind, *x, *y).is_ok() {
-                state.stock.wood -= kind.cost_wood() as f32;
+                let warehouse_staffed = state
+                    .buildings
+                    .iter()
+                    .any(|b| b.kind == BuildingKind::Warehouse && b.workers > 0);
+                let discount = if warehouse_staffed {
+                    WAREHOUSE_BUILD_DISCOUNT
+                } else {
+                    1.0
+                };
+                state.stock.wood -= kind.cost_wood() as f32 * discount;
                 let id = state.next_id;
                 state.next_id += 1;
                 state.buildings.push(Building {

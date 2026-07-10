@@ -53,15 +53,32 @@ pub fn pump_net(
                 view.state = Some(state);
                 view.version += 1;
             }
-            ServerMsg::State {
-                mut state,
-                tiles_included,
-            } => {
-                if tiles_included {
+            ServerMsg::State { mut state, included } => {
+                if included.tiles {
                     view.tiles = state.tiles.clone();
                     view.tiles_version += 1;
                 } else {
                     state.tiles = view.tiles.clone();
+                }
+                // Collections the server left empty because they haven't
+                // changed since the last snapshot it sent us — carry over
+                // whatever we already have instead of wiping them out.
+                if let Some(prev) = &view.state {
+                    if !included.events {
+                        state.events = prev.events.clone();
+                    }
+                    if !included.chat {
+                        state.chat = prev.chat.clone();
+                    }
+                    if !included.pings {
+                        state.pings = prev.pings.clone();
+                    }
+                    if !included.missions {
+                        state.missions = prev.missions.clone();
+                    }
+                    if !included.techs {
+                        state.techs = prev.techs.clone();
+                    }
                 }
                 view.state = Some(state);
                 view.version += 1;

@@ -1,6 +1,7 @@
-//! Pure-simulation tests for the three new production/effect buildings:
-//! Greenhouse (food producer), Hospital (heals survivors when staffed), and
-//! Kitchen (reduces food consumption when staffed).
+//! Pure-simulation tests for the new production/effect buildings: Greenhouse
+//! (food producer), Hospital (heals survivors when staffed), Kitchen (reduces
+//! food consumption when staffed), and Warehouse (discounts construction wood
+//! cost when staffed).
 //!
 //! Style mirrors `sim_tests.rs`: build a scenario, tick a day (or half a day),
 //! and assert on the resulting `GameState` — comparing a staffed-building run
@@ -134,11 +135,53 @@ fn staffed_kitchen_reduces_food_consumption() {
 }
 
 #[test]
+fn staffed_warehouse_discounts_construction() {
+    let mut control = sim::new_game(SEED, 12);
+    let mut experiment = sim::new_game(SEED, 12);
+
+    control.stock.wood = 500.0;
+    experiment.stock.wood = 500.0;
+
+    let (wx, wy) = find_spot(&experiment, BuildingKind::Warehouse);
+    let id = place_and_staff(&mut experiment, BuildingKind::Warehouse, wx, wy, 1);
+    assert_eq!(
+        experiment.find_building(id).unwrap().workers,
+        1,
+        "the warehouse's single slot should have been staffed"
+    );
+
+    let control_wood_before = control.stock.wood;
+    let experiment_wood_before = experiment.stock.wood;
+
+    let (tx, ty) = find_spot(&control, BuildingKind::Tent);
+    sim::apply_command(
+        &mut control,
+        1,
+        &PlayerCommand::Place { kind: BuildingKind::Tent, x: tx, y: ty },
+    );
+    let (tx2, ty2) = find_spot(&experiment, BuildingKind::Tent);
+    sim::apply_command(
+        &mut experiment,
+        1,
+        &PlayerCommand::Place { kind: BuildingKind::Tent, x: tx2, y: ty2 },
+    );
+
+    let control_cost = control_wood_before - control.stock.wood;
+    let experiment_cost = experiment_wood_before - experiment.stock.wood;
+    assert!(
+        (experiment_cost - control_cost * WAREHOUSE_BUILD_DISCOUNT).abs() < 0.01,
+        "a staffed warehouse should discount the next build by exactly \
+         WAREHOUSE_BUILD_DISCOUNT: control_cost={control_cost}, experiment_cost={experiment_cost}"
+    );
+}
+
+#[test]
 fn new_buildings_cost_wood_and_need_clear_ground() {
     let cases = [
         (BuildingKind::Greenhouse, 35u32),
         (BuildingKind::Hospital, 35u32),
         (BuildingKind::Kitchen, 25u32),
+        (BuildingKind::Warehouse, 30u32),
     ];
 
     for (kind, wood_cost) in cases {

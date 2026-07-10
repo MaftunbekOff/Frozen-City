@@ -22,7 +22,7 @@ const COL_COAL: Color = Color::srgb(0.62, 0.66, 0.75);
 const COL_FOOD: Color = Color::srgb(0.55, 0.82, 0.48);
 
 const DEFAULT_HINT: &str =
-    "LMB place/select   RMB cancel   1-7 build   WASD pan   Q/E rotate   wheel zoom   R research   Enter chat   Alt+click ping";
+    "LMB place/select   RMB cancel   1-8 build   WASD pan   Q/E rotate   wheel zoom   R research   Enter chat   Alt+click ping";
 
 #[derive(Component, Clone, Copy, PartialEq)]
 pub enum HudField {
@@ -723,6 +723,14 @@ pub fn selection_panel_update(
                 format!("Staffed: the city eats {cut:.0}% less food.")
             } else {
                 format!("Unstaffed. Staff it to cut food use by {cut:.0}%.")
+            }
+        }
+        BuildingKind::Warehouse => {
+            let cut = (1.0 - frozen_city::game::types::WAREHOUSE_BUILD_DISCOUNT) * 100.0;
+            if b.workers > 0 {
+                format!("Staffed: new buildings cost {cut:.0}% less wood.")
+            } else {
+                format!("Unstaffed. Staff it to cut build costs by {cut:.0}%.")
             }
         }
     };

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use frozen_city::game::types::{BuildingKind, GameState, PlayerCommand};
 use frozen_city::net::client::{self, ClientConn};
-use frozen_city::net::protocol::{ClientMsg, ServerMsg};
+use frozen_city::net::protocol::{decode, encode, ClientMsg, ServerMsg, MAX_FRAME};
 use frozen_city::net::server::{self, ServerConfig};
 
 fn recv_welcome(conn: &ClientConn) -> (u64, u64, GameState) {
@@ -114,10 +114,10 @@ fn tiles_are_omitted_but_periodically_included() {
     let mut without_tiles = 0;
     let deadline = Instant::now() + Duration::from_secs(8);
     while Instant::now() < deadline && (with_tiles == 0 || without_tiles == 0) {
-        if let Ok(ServerMsg::State { state, tiles_included }) =
+        if let Ok(ServerMsg::State { state, included }) =
             conn.recv_timeout(Duration::from_millis(500))
         {
-            if tiles_included {
+            if included.tiles {
                 assert!(!state.tiles.is_empty());
                 with_tiles += 1;
             } else {
@@ -151,7 +151,7 @@ fn websocket_and_tcp_clients_share_one_city() {
     let (mut ws, _resp) =
         tungstenite::connect(format!("ws://127.0.0.1:{port}/")).expect("ws handshake");
     ws.send(Message::Binary(
-        bincode::serialize(&ClientMsg::Hello {
+        encode(&ClientMsg::Hello {
             name: "WebPlayer".into(),
             token: None,
         })
@@ -163,7 +163,7 @@ fn websocket_and_tcp_clients_share_one_city() {
     // The first binary frame is the Welcome snapshot.
     let state = loop {
         match ws.read().expect("ws read") {
-            Message::Binary(b) => match bincode::deserialize::<ServerMsg>(&b).expect("decode") {
+            Message::Binary(b) => match decode::<ServerMsg>(&b, MAX_FRAME as usize).expect("decode") {
                 ServerMsg::Welcome { state, .. } => break state,
                 _ => continue,
             },
@@ -184,7 +184,7 @@ fn websocket_and_tcp_clients_share_one_city() {
         .find(|&(x, y)| state.can_place(BuildingKind::Tent, x, y).is_ok())
         .expect("some valid tent spot");
     ws.send(Message::Binary(
-        bincode::serialize(&ClientMsg::Cmd(PlayerCommand::Place {
+        encode(&ClientMsg::Cmd(PlayerCommand::Place {
             kind: BuildingKind::Tent,
             x: spot.0,
             y: spot.1,
@@ -202,7 +202,8 @@ fn websocket_and_tcp_clients_share_one_city() {
     let mut ws_saw_tent = false;
     while Instant::now() < deadline && !ws_saw_tent {
         if let Message::Binary(b) = ws.read().expect("ws read") {
-            if let Ok(ServerMsg::State { state, .. }) = bincode::deserialize::<ServerMsg>(&b) {
+            if let Ok(ServerMsg::State { state, .. }) = decode::<ServerMsg>(&b, MAX_FRAME as usize)
+            {
                 ws_saw_tent = state.buildings.iter().any(|b| b.kind == BuildingKind::Tent);
             }
         }

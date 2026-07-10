@@ -216,6 +216,7 @@ pub fn kind_color(k: BuildingKind) -> Color {
         BuildingKind::Greenhouse => Color::srgb(0.40, 0.68, 0.45),
         BuildingKind::Hospital => Color::srgb(0.86, 0.88, 0.92),
         BuildingKind::Kitchen => Color::srgb(0.78, 0.52, 0.30),
+        BuildingKind::Warehouse => Color::srgb(0.58, 0.46, 0.32),
     }
 }
 

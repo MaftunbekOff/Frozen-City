@@ -173,6 +173,7 @@ pub fn build_input(
         (KeyCode::Digit5, BuildingKind::Greenhouse),
         (KeyCode::Digit6, BuildingKind::Hospital),
         (KeyCode::Digit7, BuildingKind::Kitchen),
+        (KeyCode::Digit8, BuildingKind::Warehouse),
     ];
     for (key, kind) in hotkeys {
         if keys.just_pressed(key) {
