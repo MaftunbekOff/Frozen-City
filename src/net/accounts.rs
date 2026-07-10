@@ -1,8 +1,9 @@
 //! Reads the accounts DB the registration Telegram bot maintains (native
 //! server only). Authenticates a login/password against the bcrypt hash the
-//! bot stored and, on success, hands back the account's in-game display name
-//! — an authenticated player is otherwise treated exactly like a guest whose
-//! name came from the DB instead of the wire (see `server.rs`).
+//! bot stored and, on success, hands back the account's stable id and
+//! in-game display name. The id routes the connection to that account's own
+//! persistent world (see `world_manager.rs`); the display name is otherwise
+//! all a guest connection would have supplied on the wire.
 
 use std::path::Path;
 
@@ -14,31 +15,31 @@ use rusqlite::{Connection, OpenFlags};
 /// tests can point at a throwaway DB instead of the real one.
 pub const DEFAULT_DB_PATH: &str = "/var/lib/frozen-city-accounts/accounts.db";
 
-/// Verifies `login`/`password` and returns the display name to join as.
-/// Every failure mode — missing DB, unknown login, wrong password — collapses
-/// to `None` alike, so a connecting client can't distinguish "no such
-/// account" from "wrong password" by response shape.
-pub fn authenticate(login: &str, password: &str) -> Option<String> {
+/// Verifies `login`/`password` and returns the account id to join as plus the
+/// display name to join with. Every failure mode — missing DB, unknown
+/// login, wrong password — collapses to `None` alike, so a connecting client
+/// can't distinguish "no such account" from "wrong password" by response shape.
+pub fn authenticate(login: &str, password: &str) -> Option<(i64, String)> {
     let db_path = std::env::var("FC_ACCOUNTS_DB").unwrap_or_else(|_| DEFAULT_DB_PATH.to_string());
     authenticate_at(&db_path, login, password)
 }
 
-fn authenticate_at(db_path: &str, login: &str, password: &str) -> Option<String> {
+fn authenticate_at(db_path: &str, login: &str, password: &str) -> Option<(i64, String)> {
     if !Path::new(db_path).exists() {
         return None;
     }
     let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
-    let (display_username, password_hash): (String, String) = conn
+    let (id, display_username, password_hash): (i64, String, String) = conn
         .query_row(
-            "SELECT display_username, password_hash FROM accounts WHERE login = ?1",
+            "SELECT id, display_username, password_hash FROM accounts WHERE login = ?1",
             [login],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .ok()?;
     bcrypt::verify(password, &password_hash)
         .ok()
         .filter(|&ok| ok)
-        .map(|_| display_username)
+        .map(|_| (id, display_username))
 }
 
 #[cfg(test)]
@@ -93,7 +94,7 @@ mod tests {
         with_seeded_db("ok", |db| {
             assert_eq!(
                 authenticate_at(db, "fc000001", "correct-horse"),
-                Some("Aziz".to_string())
+                Some((1, "Aziz".to_string()))
             );
         });
     }
@@ -129,7 +130,7 @@ mod tests {
             .unwrap();
             assert_eq!(
                 authenticate_at(db, "fc700928", "Jgorguis9a"),
-                Some("Aziz".to_string())
+                Some((1, "Aziz".to_string()))
             );
         });
     }

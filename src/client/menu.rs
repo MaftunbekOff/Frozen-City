@@ -388,6 +388,8 @@ fn start_game(
                     win_days: settings.win_days,
                     persistent: false,
                     verbose: false,
+                    save_path: None,
+                    idle_shutdown: None,
                 };
                 let handle = server::start(config)
                     .map_err(|e| format!("Could not start the server: {e}"))?;

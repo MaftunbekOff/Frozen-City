@@ -8,3 +8,5 @@ pub mod protocol;
 pub mod server;
 #[cfg(target_arch = "wasm32")]
 pub mod ws;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod world_manager;

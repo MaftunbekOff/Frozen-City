@@ -33,7 +33,9 @@ pub fn load() -> Option<GameState> {
     load_at(&resolve_path())
 }
 
-fn save_at(state: &GameState, path: &str) -> io::Result<()> {
+/// Exposed to `world_manager` so it can save/load each account's world at
+/// its own path, independent of the single shared-world path above.
+pub(crate) fn save_at(state: &GameState, path: &str) -> io::Result<()> {
     if let Some(dir) = Path::new(path).parent() {
         fs::create_dir_all(dir)?;
     }
@@ -49,7 +51,7 @@ fn save_at(state: &GameState, path: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn load_at(path: &str) -> Option<GameState> {
+pub(crate) fn load_at(path: &str) -> Option<GameState> {
     let bytes = fs::read(path).ok()?;
     bincode::deserialize(&bytes).ok()
 }

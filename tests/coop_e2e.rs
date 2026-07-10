@@ -49,6 +49,8 @@ fn start_server(seed: u64) -> server::ServerHandle {
         win_days: 12,
         persistent: false,
         verbose: false,
+        save_path: None,
+        idle_shutdown: None,
     })
     .expect("server starts")
 }

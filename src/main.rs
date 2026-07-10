@@ -225,6 +225,7 @@ fn main() {
 #[cfg(not(target_arch = "wasm32"))]
 fn run_dedicated(cli: &Cli) {
     use frozen_city::net::server::{self, ServerConfig};
+    use frozen_city::net::world_manager::WorldManager;
 
     let seed = cli.seed.unwrap_or_else(|| {
         std::time::SystemTime::now()
@@ -232,13 +233,23 @@ fn run_dedicated(cli: &Cli) {
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(1)
     });
-    let handle = match server::start(ServerConfig {
-        port: Some(cli.host_port),
-        seed,
-        win_days: cli.win_days,
-        persistent: true,
-        verbose: true,
-    }) {
+    // Logged-in accounts get their own persistent world (spawned lazily,
+    // evicted when idle) instead of joining this shared one — see
+    // `world_manager.rs`. Guest connections (`Hello`, no account) are
+    // unaffected and keep joining the shared world below exactly as before.
+    let world_manager = WorldManager::new(seed, cli.win_days, true);
+    let handle = match server::start_with_accounts(
+        ServerConfig {
+            port: Some(cli.host_port),
+            seed,
+            win_days: cli.win_days,
+            persistent: true,
+            verbose: true,
+            save_path: None,
+            idle_shutdown: None,
+        },
+        world_manager.clone(),
+    ) {
         Ok(h) => h,
         Err(e) => {
             eprintln!("Failed to start server on port {}: {e}", cli.host_port);
@@ -247,9 +258,16 @@ fn run_dedicated(cli: &Cli) {
     };
     // SIGTERM is what `systemctl stop` (and a `deploy.sh` swap) sends; without
     // a handler it kills the process on the spot, before the sim thread gets a
-    // chance to save. Ctrl+C (SIGINT) is covered the same way.
+    // chance to save. Ctrl+C (SIGINT) is covered the same way. `stop_all` only
+    // flags every currently-running account world to save and exit (mirrors
+    // `ServerHandle::stop`); this process doesn't return from `main` until
+    // `world_manager.join_all()` below confirms they actually have.
     let stop_handle = handle.clone();
-    if let Err(e) = ctrlc::set_handler(move || stop_handle.stop()) {
+    let wm_for_stop = world_manager.clone();
+    if let Err(e) = ctrlc::set_handler(move || {
+        stop_handle.stop();
+        wm_for_stop.stop_all();
+    }) {
         eprintln!("Failed to install shutdown handler: {e} (world save on stop won't work)");
     }
     println!(
@@ -262,8 +280,10 @@ fn run_dedicated(cli: &Cli) {
     }
     // The flag above just tells the sim thread to stop; wait for it to
     // actually finish (and write its final save) before this process exits —
-    // an un-joined thread is simply killed the moment main() returns.
+    // an un-joined thread is simply killed the moment main() returns. Every
+    // spawned account-world thread gets the same courtesy.
     handle.join();
+    world_manager.join_all();
 }
 
 /// Phones get the Low tier; anything else in a browser gets Medium.

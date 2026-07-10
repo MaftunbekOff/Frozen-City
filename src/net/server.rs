@@ -40,6 +40,12 @@ const WEB_ROOT: &str = "web";
 /// password") so it can't be used to enumerate registered logins.
 const AUTH_FAILED_REASON: &str = "Noto'g'ri login yoki parol.";
 
+/// Sent back as `ServerMsg::AuthFailed` when `Login` is otherwise valid but
+/// `WorldManager` is already at `MAX_ACCOUNT_WORLDS` and this account has no
+/// world running yet — a distinct reason from `AUTH_FAILED_REASON` is safe
+/// here (unlike login/password, capacity isn't enumerable).
+const SERVER_FULL_REASON: &str = "Server hozircha to'la, birozdan so'ng qayta urinib ko'ring.";
+
 /// Mint a fresh, unguessable 64-bit token from the OS CSPRNG. Used for
 /// session/reconnect tokens: unlike a seeded PRNG stream (which can be
 /// inverted from a single observed output), each draw here is independent
@@ -59,6 +65,17 @@ pub struct ServerConfig {
     pub persistent: bool,
     /// Print events and day changes to stdout (dedicated server mode).
     pub verbose: bool,
+    /// Where to load/save this world when `persistent`. `None` uses the
+    /// single shared-world default (`persist::load`/`save`, i.e.
+    /// `FC_WORLD_SAVE`); `Some(path)` is a per-account world spawned by
+    /// `WorldManager`, one file per account.
+    pub save_path: Option<String>,
+    /// When set, a world with zero connected clients saves and exits once
+    /// this much time has passed since it last had any — instead of running
+    /// forever. `None` for the single shared world (always stays up);
+    /// `Some(_)` for per-account worlds, so an abandoned account's thread
+    /// doesn't run forever.
+    pub idle_shutdown: Option<Duration>,
 }
 
 /// On a persistent server, a finished world (won or lost) restarts with a
@@ -115,6 +132,26 @@ impl ServerHandle {
 }
 
 pub fn start(config: ServerConfig) -> io::Result<ServerHandle> {
+    start_inner(config, None)
+}
+
+/// Like `start`, but a successful `Login` on this listener routes to that
+/// account's own persistent world via `world_manager` instead of the shared
+/// one — used only by the dedicated production server (`main.rs`). Every
+/// other caller (co-op host/join, all tests) keeps using `start`, where
+/// `Login` still just authenticates and joins the single shared world,
+/// unchanged.
+pub fn start_with_accounts(
+    config: ServerConfig,
+    world_manager: Arc<crate::net::world_manager::WorldManager>,
+) -> io::Result<ServerHandle> {
+    start_inner(config, Some(world_manager))
+}
+
+fn start_inner(
+    config: ServerConfig,
+    world_manager: Option<Arc<crate::net::world_manager::WorldManager>>,
+) -> io::Result<ServerHandle> {
     let (to_server_tx, to_server_rx) = channel::<ToServer>();
     let shutdown = Arc::new(AtomicBool::new(false));
 
@@ -124,9 +161,10 @@ pub fn start(config: ServerConfig) -> io::Result<ServerHandle> {
         let addr = listener.local_addr()?;
         let tx = to_server_tx.clone();
         let flag = shutdown.clone();
+        let wm = world_manager.clone();
         thread::Builder::new()
             .name("fc-acceptor".into())
-            .spawn(move || accept_loop(listener, tx, flag))
+            .spawn(move || accept_loop(listener, tx, flag, wm))
             .expect("spawn acceptor");
         Some(addr)
     } else {
@@ -200,7 +238,12 @@ impl Drop for ConnGuard {
     }
 }
 
-fn accept_loop(listener: TcpListener, to_server: Sender<ToServer>, shutdown: Arc<AtomicBool>) {
+fn accept_loop(
+    listener: TcpListener,
+    to_server: Sender<ToServer>,
+    shutdown: Arc<AtomicBool>,
+    world_manager: Option<Arc<crate::net::world_manager::WorldManager>>,
+) {
     let active = Arc::new(AtomicUsize::new(0));
     loop {
         if shutdown.load(Ordering::SeqCst) {
@@ -216,12 +259,13 @@ fn accept_loop(listener: TcpListener, to_server: Sender<ToServer>, shutdown: Arc
                 }
                 active.fetch_add(1, Ordering::Relaxed);
                 let tx = to_server.clone();
+                let wm = world_manager.clone();
                 let counted = active.clone();
                 let spawned = thread::Builder::new()
                     .name("fc-conn".into())
                     .spawn(move || {
                         let _guard = ConnGuard(counted);
-                        handle_socket(stream, tx)
+                        handle_socket(stream, tx, wm)
                     });
                 if spawned.is_err() {
                     // Thread failed to spawn, so no guard exists to release
@@ -237,7 +281,11 @@ fn accept_loop(listener: TcpListener, to_server: Sender<ToServer>, shutdown: Arc
     }
 }
 
-fn handle_socket(stream: TcpStream, to_server: Sender<ToServer>) {
+fn handle_socket(
+    stream: TcpStream,
+    to_server: Sender<ToServer>,
+    world_manager: Option<Arc<crate::net::world_manager::WorldManager>>,
+) {
     // Sockets accepted from a non-blocking listener inherit non-blocking mode
     // on Windows; everything below expects a blocking socket.
     if stream.set_nonblocking(false).is_err() {
@@ -248,9 +296,9 @@ fn handle_socket(stream: TcpStream, to_server: Sender<ToServer>) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
     let Some(probe) = peek4(&stream) else { return };
     if &probe == b"GET " {
-        handle_http(stream, to_server);
+        handle_http(stream, to_server, world_manager);
     } else {
-        handle_native(stream, to_server);
+        handle_native(stream, to_server, world_manager);
     }
 }
 
@@ -274,17 +322,45 @@ fn peek4(stream: &TcpStream) -> Option<[u8; 4]> {
 }
 
 /// The native desktop protocol: length-prefixed bincode frames.
-fn handle_native(mut stream: TcpStream, to_server: Sender<ToServer>) {
+fn handle_native(
+    mut stream: TcpStream,
+    to_server: Sender<ToServer>,
+    world_manager: Option<Arc<crate::net::world_manager::WorldManager>>,
+) {
     // The very first frame must be Hello or Login (the 10 s timeout is
-    // already set).
-    let (name, token) = match read_frame::<_, ClientMsg>(&mut stream) {
-        Ok(ClientMsg::Hello { name, token }) => (sanitize_name(&name), token),
+    // already set). `target` is whichever world this connection ends up
+    // in — the shared world for a guest `Hello`, or (when authenticated and
+    // a `world_manager` is wired up) that account's own world — and is
+    // reused for every message this connection sends afterward, not just
+    // the initial join.
+    let (target, joined) = match read_frame::<_, ClientMsg>(&mut stream) {
+        Ok(ClientMsg::Hello { name, token }) => {
+            let name = sanitize_name(&name);
+            (to_server.clone(), join(&to_server, name, token))
+        }
         Ok(ClientMsg::Login {
             login,
             password,
             token,
         }) => match accounts::authenticate(&login, &password) {
-            Some(display_name) => (sanitize_name(&display_name), token),
+            Some((account_id, display_name)) => {
+                let name = sanitize_name(&display_name);
+                match &world_manager {
+                    Some(wm) => match wm.join_account(account_id, name, token) {
+                        Some((target, id, out_rx)) => (target, Some((id, out_rx))),
+                        None => {
+                            let _ = write_frame(
+                                &mut stream,
+                                &ServerMsg::AuthFailed {
+                                    reason: SERVER_FULL_REASON.to_string(),
+                                },
+                            );
+                            return;
+                        }
+                    },
+                    None => (to_server.clone(), join(&to_server, name, token)),
+                }
+            }
             None => {
                 let _ = write_frame(
                     &mut stream,
@@ -299,7 +375,7 @@ fn handle_native(mut stream: TcpStream, to_server: Sender<ToServer>) {
     };
     let _ = stream.set_read_timeout(None);
 
-    let Some((id, out_rx)) = join(&to_server, name, token) else {
+    let Some((id, out_rx)) = joined else {
         return;
     };
 
@@ -307,7 +383,7 @@ fn handle_native(mut stream: TcpStream, to_server: Sender<ToServer>) {
     // server drops this client's sender, shut the socket down so the blocking
     // reader below unblocks and cleans up.
     let Ok(write_stream) = stream.try_clone() else {
-        let _ = to_server.send(ToServer::Leave { client: id });
+        let _ = target.send(ToServer::Leave { client: id });
         return;
     };
     // A stalled client (e.g. suspended tab, dead NAT) would otherwise let its
@@ -331,15 +407,17 @@ fn handle_native(mut stream: TcpStream, to_server: Sender<ToServer>) {
         .ok();
 
     while let Ok(msg) = read_frame::<_, ClientMsg>(&mut stream) {
-        if to_server.send(ToServer::Msg { client: id, msg }).is_err() {
+        if target.send(ToServer::Msg { client: id, msg }).is_err() {
             break;
         }
     }
-    let _ = to_server.send(ToServer::Leave { client: id });
+    let _ = target.send(ToServer::Leave { client: id });
 }
 
 /// Register with the sim thread; returns the client id and snapshot receiver.
-fn join(
+/// `pub(crate)` so `world_manager` can join a connection onto a per-account
+/// world's channel the same way this module joins one onto the shared world.
+pub(crate) fn join(
     to_server: &Sender<ToServer>,
     name: String,
     token: Option<u64>,
@@ -360,7 +438,11 @@ fn join(
 
 /// A browser said "GET ": read the request head, then either upgrade to a
 /// WebSocket or serve the static web build.
-fn handle_http(mut stream: TcpStream, to_server: Sender<ToServer>) {
+fn handle_http(
+    mut stream: TcpStream,
+    to_server: Sender<ToServer>,
+    world_manager: Option<Arc<crate::net::world_manager::WorldManager>>,
+) {
     // Read byte-by-byte so nothing past the head is consumed (the bytes that
     // follow the upgrade response are WebSocket frames).
     let mut head = Vec::with_capacity(512);
@@ -381,7 +463,7 @@ fn handle_http(mut stream: TcpStream, to_server: Sender<ToServer>) {
     let lower = text.to_ascii_lowercase();
     let is_upgrade = lower.contains("upgrade: websocket");
     if is_upgrade {
-        serve_websocket(stream, head, to_server);
+        serve_websocket(stream, head, to_server, world_manager);
     } else {
         // Serve the precompressed .gz sibling when the client accepts gzip —
         // the assetless wasm is ~66 MB raw vs ~15 MB gzipped, which matters a
@@ -424,7 +506,12 @@ impl Write for PrefixedStream {
 
 /// WebSocket clients get a single service thread (this one): reads use a
 /// short timeout so queued snapshots can be written between frames.
-fn serve_websocket(stream: TcpStream, head: Vec<u8>, to_server: Sender<ToServer>) {
+fn serve_websocket(
+    stream: TcpStream,
+    head: Vec<u8>,
+    to_server: Sender<ToServer>,
+    world_manager: Option<Arc<crate::net::world_manager::WorldManager>>,
+) {
     let prefixed = PrefixedStream {
         prefix: head,
         pos: 0,
@@ -444,16 +531,38 @@ fn serve_websocket(stream: TcpStream, head: Vec<u8>, to_server: Sender<ToServer>
     };
 
     // First frame must be Hello or Login (still under the 10 s read timeout).
-    let (name, token) = loop {
+    // `target` is whichever world this connection ends up in — see the same
+    // split in `handle_native` above — and is reused for every message this
+    // connection sends afterward, not just the initial join.
+    let (target, joined) = loop {
         match ws.read() {
             Ok(Message::Binary(b)) => match decode::<ClientMsg>(&b, MAX_FRAME as usize) {
-                Ok(ClientMsg::Hello { name, token }) => break (sanitize_name(&name), token),
+                Ok(ClientMsg::Hello { name, token }) => {
+                    let name = sanitize_name(&name);
+                    break (to_server.clone(), join(&to_server, name, token));
+                }
                 Ok(ClientMsg::Login {
                     login,
                     password,
                     token,
                 }) => match accounts::authenticate(&login, &password) {
-                    Some(display_name) => break (sanitize_name(&display_name), token),
+                    Some((account_id, display_name)) => {
+                        let name = sanitize_name(&display_name);
+                        match &world_manager {
+                            Some(wm) => match wm.join_account(account_id, name, token) {
+                                Some((target, id, out_rx)) => break (target, Some((id, out_rx))),
+                                None => {
+                                    if let Ok(bytes) = encode(&ServerMsg::AuthFailed {
+                                        reason: SERVER_FULL_REASON.to_string(),
+                                    }) {
+                                        let _ = ws.send(Message::Binary(bytes.into()));
+                                    }
+                                    return;
+                                }
+                            },
+                            None => break (to_server.clone(), join(&to_server, name, token)),
+                        }
+                    }
                     None => {
                         if let Ok(bytes) = encode(&ServerMsg::AuthFailed {
                             reason: AUTH_FAILED_REASON.to_string(),
@@ -470,7 +579,7 @@ fn serve_websocket(stream: TcpStream, head: Vec<u8>, to_server: Sender<ToServer>
         }
     };
 
-    let Some((id, out_rx)) = join(&to_server, name, token) else {
+    let Some((id, out_rx)) = joined else {
         return;
     };
     let _ = ws
@@ -489,7 +598,7 @@ fn serve_websocket(stream: TcpStream, head: Vec<u8>, to_server: Sender<ToServer>
         match ws.read() {
             Ok(Message::Binary(b)) => {
                 if let Ok(msg) = decode::<ClientMsg>(&b, MAX_FRAME as usize) {
-                    if to_server.send(ToServer::Msg { client: id, msg }).is_err() {
+                    if target.send(ToServer::Msg { client: id, msg }).is_err() {
                         break 'session;
                     }
                 }
@@ -517,7 +626,7 @@ fn serve_websocket(stream: TcpStream, head: Vec<u8>, to_server: Sender<ToServer>
         }
     }
     let _ = ws.close(None);
-    let _ = to_server.send(ToServer::Leave { client: id });
+    let _ = target.send(ToServer::Leave { client: id });
 }
 
 /// Minimal static file server for the web build (`web/` next to the binary).
@@ -709,13 +818,20 @@ fn disconnect(
     sim::player_left(state, player_id);
 }
 
-fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBool>) {
+/// `pub(crate)` so `world_manager` can spawn one `sim_loop` per account world,
+/// reusing the exact same tick/persistence/session logic as the single
+/// shared world instead of duplicating it.
+pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBool>) {
     // A persistent (dedicated) server resumes its last save instead of
     // starting fresh, so the periodic systemd restart and a deploy's
     // stop/start don't wipe every player's city. Anything else (singleplayer,
     // host/join) is a throwaway in-memory world, same as before.
     let mut state = if config.persistent {
-        persist::load().unwrap_or_else(|| sim::new_game(config.seed, config.win_days))
+        match &config.save_path {
+            Some(path) => persist::load_at(path),
+            None => persist::load(),
+        }
+        .unwrap_or_else(|| sim::new_game(config.seed, config.win_days))
     } else {
         sim::new_game(config.seed, config.win_days)
     };
@@ -738,6 +854,9 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
     let mut limiters: HashMap<u64, RateLimiter> = HashMap::new(); // connection id -> rate limiter
     let mut pending: Vec<(u64, PlayerCommand)> = Vec::new();
     let mut ever_joined = false;
+    // When `config.idle_shutdown` is set, tracks how long `clients` has been
+    // continuously empty — reset to `None` the moment anyone joins.
+    let mut idle_since: Option<Instant> = None;
     let mut printed_events: u64 = 0;
     let mut printed_chat: u64 = 0;
     let mut game_over_since: Option<Instant> = None;
@@ -814,6 +933,7 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
                     clients.insert(client_id, out);
                     let _ = id_back.send(client_id);
                     ever_joined = true;
+                    idle_since = None;
                     if config.verbose {
                         if reconnected {
                             println!(
@@ -938,12 +1058,34 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
         if ever_joined && clients.is_empty() && !config.persistent {
             break;
         }
+        // Per-account worlds (`idle_shutdown: Some(_)`) save and exit after
+        // sitting with nobody connected for that long, instead of running
+        // forever — `WorldManager::get_or_spawn` respawns them from disk the
+        // next time that account logs in. The single shared world always has
+        // `idle_shutdown: None` and is unaffected.
+        if let Some(idle_dur) = config.idle_shutdown {
+            if clients.is_empty() {
+                let since = *idle_since.get_or_insert_with(Instant::now);
+                if Instant::now().duration_since(since) >= idle_dur {
+                    if config.persistent {
+                        if let Err(e) = save_world(&config, &state) {
+                            if config.verbose {
+                                eprintln!("[server] idle-eviction save failed: {e}");
+                            }
+                        }
+                    }
+                    break;
+                }
+            } else {
+                idle_since = None;
+            }
+        }
 
         let now = Instant::now();
 
         if config.persistent && now.duration_since(last_save) >= AUTOSAVE_INTERVAL {
             last_save = now;
-            if let Err(e) = persist::save(&state) {
+            if let Err(e) = save_world(&config, &state) {
                 if config.verbose {
                     eprintln!("[server] world autosave failed: {e}");
                 }
@@ -1118,11 +1260,20 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
         }
     }
     if config.persistent {
-        if let Err(e) = persist::save(&state) {
+        if let Err(e) = save_world(&config, &state) {
             if config.verbose {
                 eprintln!("[server] final world save on shutdown failed: {e}");
             }
         }
     }
     shutdown.store(true, Ordering::SeqCst);
+}
+
+/// Saves to this config's world: the per-account path when set, otherwise
+/// the single shared-world default (`persist::save`, i.e. `FC_WORLD_SAVE`).
+fn save_world(config: &ServerConfig, state: &GameState) -> io::Result<()> {
+    match &config.save_path {
+        Some(path) => persist::save_at(state, path),
+        None => persist::save(state),
+    }
 }

@@ -73,6 +73,8 @@ fn account_login_flow() {
         win_days: 12,
         persistent: false,
         verbose: false,
+        save_path: None,
+        idle_shutdown: None,
     })
     .expect("server starts");
     let port = handle.addr.expect("bound addr").port();
