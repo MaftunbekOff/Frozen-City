@@ -54,8 +54,9 @@ tafsilotlar "V0.4" bo'limida):
 - **Akkaunt + login**: Telegram bot orqali ro'yxatdan o'tish (`bot/register_bot.py`,
   bcrypt), server `ClientMsg::Login`/`AuthFailed` bilan tekshiradi, reconnect akkaunt
   bilan kirganda `Login`ni qayta jo'natadi.
-- **Dunyo persistensiyasi**: `world.bin` (bincode), har 20s avtosaqlash + SIGTERM handler —
-  lekin bitta umumiy olam, har akkauntga alohida emas (haqiqiy V0.4 shundan farq qiladi).
+- **Dunyo persistensiyasi**: guest'lar uchun hamon bitta umumiy `world.bin` (bincode),
+  har 20s avtosaqlash + SIGTERM handler. Akkaunt bilan kirganlar uchun endi
+  **har akkauntga alohida** olam va fayl (`world_manager.rs`, "V0.4" bo'limida).
 - **Ko'p-region infratuzilmasi**: 3ta mustaqil static olam (asosiy + region2 + region3,
   alohida systemd xizmat va portlarda), brauzerda region tanlash menyusi, PWA
   (manifest+service worker), yuk-test vositasi (`examples/loadtest.rs`).
@@ -212,9 +213,10 @@ Tunnelgacha yetaklasin.
 **Maqsad:** shaxsiy olam serverda yashaydi — istalgan qurilmadan kirsa bo'ladi,
 hech qachon yo'qolmaydi.
 
-**Holat:** qisman boshlangan — ro'yxatdan o'tish va oddiy persistensiya bor, lekin
-har ikkalasi ham "bitta umumiy olam" modeliga qurilgan, "har akkauntga alohida
-shaxsiy olam" modeliga emas. Pastdagi vazifalar shu farqni aniq ko'rsatadi.
+**Holat:** asosiy qism bajarildi (2026-07-10, `world_manager.rs` — quyida) — login
+qilgan akkaunt endi umumiy olam emas, o'zining alohida saqlanadigan olamiga tushadi.
+Ochiq qolgani: client-ichidan ro'yxatdan o'tish, cross-device'ni aniq testda
+tasdiqlash, va region-mahalliylik nuance'i (pastga qarang).
 
 ### Vazifalar
 
@@ -224,27 +226,36 @@ shaxsiy olam" modeliga emas. Pastdagi vazifalar shu farqni aniq ko'rsatadi.
       `ClientMsg::Login`/`AuthFailed` bilan tekshiradi, sessiya V0.2 reconnect
       tokeni ustiga quriladi (`src/net/accounts.rs`). Qoldi: ro'yxatdan o'tish
       to'g'ridan-to'g'ri client ichidan (Telegram'siz).
-- [~] **Server tomonida persistensiya**: bor — `src/net/persist.rs`, `world.bin`
-      (bincode, atomik tmp+rename), har 20s avtosaqlash + SIGTERM handler, restart'dan
-      omon qoladi. Lekin **bitta umumiy `GameState`**, har akkaunt uchun alohida
-      baza-yozuv emas — bu haqiqiy shaxsiy-olam persistensiyasi emas, balki hozirgi
-      bitta doimiy olamni saqlab turish. Qoldi: har akkaunt uchun alohida olam
-      (SQLite/Postgres'da, akkaunt-id bo'yicha).
-- [ ] **Cross-device**: hozircha ma'nosiz — olam bitta bo'lgani uchun har kim allaqachon
-      "o'sha shahar"ga kiradi, lekin bu shaxsiylashtirilgan emas. Haqiqiy cross-device
-      yuqoridagi shaxsiy-olam persistensiyasidan keyin ma'no kasb etadi.
-- [ ] **Olam menejeri**: yo'q. O'rniga vaqtinchalik yechim qurilgan — 3ta **mustaqil,
-      qo'lda ishga tushirilgan** static olam (asosiy + region2 + region3, alohida
-      systemd xizmat/port, brauzerda region tanlash menyusi). Bu ko'p-olamlilikni
-      taqlid qiladi, lekin "uxlayotgan olamlar diskda, kirganda uyg'onadi" degan
-      dinamik menejer emas — sig'im qo'lda qo'shiladi, avtomatik emas.
+- [x] **Server tomonida persistensiya, har akkaunt uchun alohida** (2026-07-10):
+      `src/net/world_manager.rs` — login bo'lganda `account_id` bo'yicha alohida
+      sim_loop thread lazy-spawn qilinadi, o'z faylida saqlanadi
+      (`/var/lib/frozen-city/accounts/{id}.bin`, `persist.rs`ning save_at/load_at'i
+      qayta ishlatilgan), 300s faolsizlikdan keyin avto-evict+save, 200 olamgacha
+      cap. Guest (`Hello`, akkauntsiz) hamon umumiy olamga kiradi, o'zgarmagan.
+      SQLite/Postgres emas, oddiy fayl-per-akkaunt — hozirgi masshtabda yetarli,
+      kelajakda kerak bo'lsa almashtiriladi.
+- [~] **Cross-device**: endi ma'noli — akkaunt bilan kirgan har qanday klient
+      (brauzer/desktop) `account_id` orqali xuddi shu olamga marshrutlanadi
+      (`WorldManager::join_account`). `tests/account_world_e2e.rs` ikki
+      AKKAUNT orasidagi izolyatsiya va restart'dan omon qolishni tasdiqlaydi, lekin
+      **bitta akkauntning ikkita turli klientdan ketma-ket kirishi** ("brauzerda
+      qurib, uzilib, keyin desktopdan o'sha shaharni ko'rish") hali alohida testda
+      aniq isbotlanmagan. Nuance: har region (asosiy/region2/region3) — mustaqil
+      process, demak har birining **o'z** WorldManager'i bor — bitta akkauntning
+      olami hozircha region-mahalliy, regionlar aro yagona emas.
+- [ ] **Olam menejeri (ko'p-region miqyosida)**: uchta region hamon 3ta **mustaqil,
+      qo'lda ishga tushirilgan** static process (alohida systemd xizmat/port,
+      brauzerda region tanlash menyusi) — bu qatlamda hali dinamik emas. E'tibor
+      bering: per-akkaunt qatlamda esa dinamik menejer (lazy-spawn/idle-evict)
+      endi bor — `world_manager.rs` shu naqshni allaqachon namoyish etadi, faqat
+      regionlar darajasida emas.
 
 ### Natija mezonlari
 
-- [ ] Server restart → barcha olamlar tiklanadi (avtomatlashgan test) — hozir faqat
-      bitta olam uchun qo'lda tasdiqlangan (production'da, `journalctl` orqali).
-- [ ] Brauzerda boshlagan o'yinchi desktopdan o'sha shahriga kiradi — akkaunt bor,
-      lekin "o'sha shahar" tushunchasi hali shaxsiylashtirilmagan.
+- [x] Server restart → akkaunt olami tiklanadi (avtomatlashgan test,
+      `tests/account_world_e2e.rs`) + production'da ham qo'lda tasdiqlangan.
+- [ ] Brauzerda boshlagan o'yinchi desktopdan o'sha shahriga kiradi — marshrutlash
+      logikasi buni ta'minlashi kerak, lekin aniq e2e test/qo'lda tekshiruv qoldi.
 - [ ] 50+ shaxsiy olam bitta serverda parallel (yuk testi) — `examples/loadtest.rs`
       bor, lekin ko'p-region sig'imini o'lchash uchun, shaxsiy-olam skalasi uchun emas.
 
@@ -351,12 +362,13 @@ shaxsiy olam" modeliga emas. Pastdagi vazifalar shu farqni aniq ko'rsatadi.
 
 **Keyingi uchta konkret qadam (V0.4'ning haqiqatda ochiq qolgan qismi):**
 
-1. **Har akkaunt uchun alohida shaxsiy olam** — `persist.rs`ni bitta global
-   `world.bin`dan akkaunt-id bo'yicha ko'p faylga (yoki SQLite BLOB ustuniga)
-   o'tkazish; login bo'lganda o'sha akkauntning olami yuklanadi/yaratiladi.
-2. **Olam menejeri (minimal)** — serverda bir nechta `GameState` parallel
-   simulyatsiya qilinadi (har biri akkauntga bog'liq), faol bo'lmaganlari
-   diskka yozilib xotiradan bo'shatiladi.
-3. **Cross-device tasdiqlash** — e2e test: bir akkaunt bilan brauzerdan kirib
-   qurish, uzilib, boshqa qurilma/klientdan o'sha login bilan kirib xuddi shu
-   shaharni ko'rish.
+1. ✅ ~~Har akkaunt uchun alohida shaxsiy olam~~ — bajarildi, `world_manager.rs`
+   (2026-07-10, yuqoriga qarang).
+2. ✅ ~~Olam menejeri (minimal)~~ — bajarildi, per-akkaunt lazy-spawn/idle-evict
+   `world_manager.rs`da (2026-07-10). Ko'p-region qatlamidagi menejer hamon ochiq
+   (yuqoridagi "Olam menejeri (ko'p-region miqyosida)"ga qarang).
+3. **Cross-device tasdiqlash** — hali ochiq: bitta akkaunt bilan brauzerdan kirib
+   qurish, uzilib, boshqa klient/qurilmadan o'sha login bilan kirib xuddi shu
+   shaharni ko'rish — buni tasdiqlovchi aniq e2e test yoki qo'lda (headless
+   chromium) tekshiruv yozish kerak. Shu bilan birga: akkaunt ro'yxatdan o'tishni
+   Telegram botsiz, client ichidan qilish (V0.4 "Akkauntlar" qoldig'i) ham navbatda.
