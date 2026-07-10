@@ -18,6 +18,9 @@ const TEXT_MAIN: Color = Color::srgb(0.90, 0.93, 0.97);
 const TEXT_DIM: Color = Color::srgb(0.58, 0.65, 0.76);
 const FIELD_BG: Color = Color::srgba(0.02, 0.04, 0.08, 0.92);
 const FIELD_FOCUS_BG: Color = Color::srgb(0.10, 0.16, 0.26);
+/// Highlight for whichever region button matches the live `join_addr` path.
+#[cfg(target_arch = "wasm32")]
+const BTN_ACTIVE: Color = Color::srgb(0.24, 0.36, 0.52);
 /// Anti-runaway-buffer cap on the account fields; the server never trusts
 /// the client anyway (a login/password pair is just looked up against the
 /// accounts DB, whatever their length).
@@ -36,6 +39,13 @@ pub enum MenuAction {
 
 #[derive(Component)]
 pub struct MenuErrorText;
+
+/// One of the region-server picker buttons (browser build only). Holds the
+/// `/ws`-style path this button dials; ops routes each path to an
+/// independent region-server process at the nginx layer.
+#[cfg(target_arch = "wasm32")]
+#[derive(Component, Clone, Copy, PartialEq)]
+pub struct RegionButton(&'static str);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum AccountField {
@@ -136,6 +146,52 @@ pub fn spawn_menu(mut commands: Commands, settings: Res<Settings>, view: Res<Gam
                         TextFont::from_font_size(17.0),
                         TextColor(TEXT_MAIN),
                     ));
+                });
+            }
+
+            // Region picker: which reverse-proxy path (and thus which
+            // independent region-server process) Join/Kirish dial. Native
+            // desktop only ever dials a LAN address directly, so this row
+            // is browser-only.
+            #[cfg(target_arch = "wasm32")]
+            {
+                p.spawn((
+                    Text::new("Mintaqa:"),
+                    TextFont::from_font_size(13.0),
+                    TextColor(TEXT_DIM),
+                ));
+                p.spawn(Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(8.0),
+                    align_items: AlignItems::Center,
+                    ..default()
+                })
+                .with_children(|row| {
+                    for (path, label) in [
+                        ("/ws", "1-mintaqa"),
+                        ("/ws-r2", "2-mintaqa"),
+                        ("/ws-r3", "3-mintaqa"),
+                    ] {
+                        row.spawn((
+                            Button,
+                            Node {
+                                width: Val::Px(90.0),
+                                height: Val::Px(36.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            BackgroundColor(BTN_BG),
+                            RegionButton(path),
+                        ))
+                        .with_children(|b| {
+                            b.spawn((
+                                Text::new(label),
+                                TextFont::from_font_size(14.0),
+                                TextColor(TEXT_MAIN),
+                            ));
+                        });
+                    }
                 });
             }
 
@@ -270,6 +326,47 @@ pub fn menu_buttons(
         }
         return;
     }
+}
+
+/// Click handling and per-frame active-region highlight for the region
+/// picker, combined in one system (same shape as `ui::build_buttons`). A
+/// click rewrites only the path component of `settings.join_addr`, so it
+/// keeps working under a custom `?server=` host and under a `/game/`-style
+/// mount alike.
+#[cfg(target_arch = "wasm32")]
+pub fn region_buttons(
+    clicked: Query<(&Interaction, &RegionButton), Changed<Interaction>>,
+    mut settings: ResMut<Settings>,
+    mut all: Query<(&RegionButton, &mut BackgroundColor)>,
+) {
+    for (interaction, btn) in &clicked {
+        if *interaction == Interaction::Pressed {
+            settings.join_addr = with_path(&settings.join_addr, btn.0);
+        }
+    }
+    for (btn, mut bg) in &mut all {
+        let color = if settings.join_addr.ends_with(btn.0) {
+            BTN_ACTIVE
+        } else {
+            BTN_BG
+        };
+        if bg.0 != color {
+            bg.0 = color;
+        }
+    }
+}
+
+/// Replaces everything after `scheme://host` in `addr` with `path`,
+/// leaving the scheme and host (and thus any custom `?server=` override)
+/// untouched.
+#[cfg(target_arch = "wasm32")]
+fn with_path(addr: &str, path: &str) -> String {
+    let after_scheme = addr.find("://").map(|i| i + 3).unwrap_or(0);
+    let prefix_end = addr[after_scheme..]
+        .find('/')
+        .map(|i| after_scheme + i)
+        .unwrap_or(addr.len());
+    format!("{}{path}", &addr[..prefix_end])
 }
 
 fn start_game(
