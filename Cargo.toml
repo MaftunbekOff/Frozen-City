@@ -44,6 +44,11 @@ getrandom = "0.2"
 rusqlite = { version = "0.31", features = ["bundled"] }
 # Verifies passwords against the bcrypt hashes the bot stores.
 bcrypt = "0.15"
+# Catches SIGTERM (systemd's `systemctl stop`/restart signal, also what a
+# deploy swap sends) on the dedicated server so it can save the world before
+# exiting instead of being killed mid-tick. "termination" is required for
+# SIGTERM/SIGHUP — without it this crate only catches SIGINT (Ctrl+C).
+ctrlc = { version = "3", features = ["termination"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3.103"

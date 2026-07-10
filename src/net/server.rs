@@ -14,7 +14,7 @@ use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -24,6 +24,7 @@ use crate::game::sim;
 use crate::game::types::{GamePhase, GameState, PlayerCommand, PlayerInfo, TICK_MS};
 use crate::net::accounts;
 use crate::net::client::ClientConn;
+use crate::net::persist;
 use crate::net::protocol::{
     read_frame, write_frame, ClientMsg, ServerMsg, MAX_FRAME, TILES_EVERY_N_TICKS,
 };
@@ -61,6 +62,11 @@ pub struct ServerConfig {
 /// fresh map after this long, keeping the connected players.
 const WORLD_RESET_AFTER: Duration = Duration::from_secs(45);
 
+/// How often a persistent server writes its world to disk. Bounds how much
+/// progress a hard kill (crash, OOM, `RuntimeMaxSec`) can lose; a graceful
+/// stop (SIGTERM) saves immediately instead of waiting for this.
+const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(20);
+
 pub enum ToServer {
     Join {
         name: String,
@@ -84,11 +90,24 @@ pub struct ServerHandle {
     pub to_server: Sender<ToServer>,
     pub shutdown: Arc<AtomicBool>,
     pub addr: Option<SocketAddr>,
+    /// The sim thread, so a caller can block until it has actually finished
+    /// (and, for a persistent server, written its final save) instead of
+    /// racing it: `stop()` only flips a flag the sim thread polls, it doesn't
+    /// wait for the thread to notice.
+    sim_thread: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
 }
 
 impl ServerHandle {
     pub fn stop(&self) {
         self.shutdown.store(true, Ordering::SeqCst);
+    }
+
+    /// Blocks until the sim thread has exited. Idempotent — a second call
+    /// (or a call on a handle that was never joined) is a no-op.
+    pub fn join(&self) {
+        if let Some(t) = self.sim_thread.lock().unwrap().take() {
+            let _ = t.join();
+        }
     }
 }
 
@@ -112,7 +131,7 @@ pub fn start(config: ServerConfig) -> io::Result<ServerHandle> {
     };
 
     let flag = shutdown.clone();
-    thread::Builder::new()
+    let sim_thread = thread::Builder::new()
         .name("fc-sim".into())
         .spawn(move || sim_loop(config, to_server_rx, flag))
         .expect("spawn sim");
@@ -121,6 +140,7 @@ pub fn start(config: ServerConfig) -> io::Result<ServerHandle> {
         to_server: to_server_tx,
         shutdown,
         addr,
+        sim_thread: Arc::new(Mutex::new(Some(sim_thread))),
     })
 }
 
@@ -690,7 +710,15 @@ fn disconnect(
 }
 
 fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBool>) {
-    let mut state = sim::new_game(config.seed, config.win_days);
+    // A persistent (dedicated) server resumes its last save instead of
+    // starting fresh, so the periodic systemd restart and a deploy's
+    // stop/start don't wipe every player's city. Anything else (singleplayer,
+    // host/join) is a throwaway in-memory world, same as before.
+    let mut state = if config.persistent {
+        persist::load().unwrap_or_else(|| sim::new_game(config.seed, config.win_days))
+    } else {
+        sim::new_game(config.seed, config.win_days)
+    };
     let mut clients: HashMap<u64, Sender<ServerMsg>> = HashMap::new();
     // Connection id (key of `clients`, the `client` field on `ToServer`) is
     // decoupled from player id: a connection is a socket, a player is a
@@ -716,6 +744,7 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
 
     let tick_dur = Duration::from_millis(TICK_MS);
     let mut next_tick = Instant::now() + tick_dur;
+    let mut last_save = Instant::now();
 
     if config.verbose {
         if let Some(_) = config.port {
@@ -903,6 +932,16 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
         }
 
         let now = Instant::now();
+
+        if config.persistent && now.duration_since(last_save) >= AUTOSAVE_INTERVAL {
+            last_save = now;
+            if let Err(e) = persist::save(&state) {
+                if config.verbose {
+                    eprintln!("[server] world autosave failed: {e}");
+                }
+            }
+        }
+
         if now >= next_tick {
             let day_before = state.day();
             // Drop commands queued by a player who has since left or been
@@ -1017,6 +1056,13 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
         let wait = next_tick.saturating_duration_since(Instant::now());
         if !wait.is_zero() {
             thread::sleep(wait.min(Duration::from_millis(50)));
+        }
+    }
+    if config.persistent {
+        if let Err(e) = persist::save(&state) {
+            if config.verbose {
+                eprintln!("[server] final world save on shutdown failed: {e}");
+            }
         }
     }
     shutdown.store(true, Ordering::SeqCst);

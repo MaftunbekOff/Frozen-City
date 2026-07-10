@@ -238,6 +238,13 @@ fn run_dedicated(cli: &Cli) {
             std::process::exit(1);
         }
     };
+    // SIGTERM is what `systemctl stop` (and a `deploy.sh` swap) sends; without
+    // a handler it kills the process on the spot, before the sim thread gets a
+    // chance to save. Ctrl+C (SIGINT) is covered the same way.
+    let stop_handle = handle.clone();
+    if let Err(e) = ctrlc::set_handler(move || stop_handle.stop()) {
+        eprintln!("Failed to install shutdown handler: {e} (world save on stop won't work)");
+    }
     println!(
         "Frozen City dedicated server listening on port {} (Ctrl+C to stop)",
         cli.host_port
@@ -246,6 +253,10 @@ fn run_dedicated(cli: &Cli) {
     while !handle.shutdown.load(std::sync::atomic::Ordering::SeqCst) {
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
+    // The flag above just tells the sim thread to stop; wait for it to
+    // actually finish (and write its final save) before this process exits —
+    // an un-joined thread is simply killed the moment main() returns.
+    handle.join();
 }
 
 /// Phones get the Low tier; anything else in a browser gets Medium.
