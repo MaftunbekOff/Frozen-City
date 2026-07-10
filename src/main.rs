@@ -7,6 +7,13 @@
 //!   frozen_city --server [port]     -> headless dedicated server
 //! Options: --name <name>  --seed <n>  --days <n>  --smoke
 
+// Bevy systems routinely take one parameter per Query/Res and Queries
+// routinely need multi-clause filter tuples — both trip clippy's generic
+// arg-count/type-complexity thresholds on essentially every system in this
+// file tree. This is the standard Bevy-project lint config, not a waiver for
+// an actual problem.
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
+
 mod client;
 
 use bevy::prelude::*;

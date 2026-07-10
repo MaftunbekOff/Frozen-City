@@ -584,7 +584,7 @@ pub fn tick(state: &mut GameState) {
         .retain(|p| tick.saturating_sub(p.tick) < PING_TTL_TICKS);
 
     // --- Midnight: day rollover ---
-    if state.tick % TICKS_PER_DAY == 0 {
+    if state.tick.is_multiple_of(TICKS_PER_DAY) {
         let day = state.day();
         if day > state.win_days {
             state.phase = GamePhase::Won;

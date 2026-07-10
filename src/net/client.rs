@@ -36,6 +36,9 @@ impl ClientConn {
 
     /// Drain everything received since the last call. `Ok(msgs)` while the
     /// connection lives; `Err(())` once the server is gone.
+    // `()` is deliberate: the only failure mode is "the connection closed",
+    // and every caller already treats it as a boolean, not an error to report.
+    #[allow(clippy::result_unit_err)]
     pub fn poll(&self) -> Result<Vec<ServerMsg>, ()> {
         let (rx, closed) = match self {
             ClientConn::Channels { rx, .. } => (rx, false),
@@ -142,14 +145,11 @@ pub fn connect_tcp_with(addr: &str, hello: ClientMsg) -> std::io::Result<ClientC
     thread::Builder::new()
         .name("fc-client-reader".into())
         .spawn(move || {
-            loop {
-                match read_frame::<_, ServerMsg>(&mut stream) {
-                    Ok(msg) => {
-                        if out_tx.send(msg).is_err() {
-                            break;
-                        }
-                    }
-                    Err(_) => break, // dropping out_tx signals disconnect
+            // Dropping `out_tx` when the loop ends (Err or a closed receiver)
+            // signals disconnect to the app side.
+            while let Ok(msg) = read_frame::<_, ServerMsg>(&mut stream) {
+                if out_tx.send(msg).is_err() {
+                    break;
                 }
             }
         })

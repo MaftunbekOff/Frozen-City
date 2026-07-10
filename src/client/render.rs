@@ -315,7 +315,7 @@ pub fn setup_camera_and_assets(
             let c = player_color(i as u8);
             materials.add(StandardMaterial {
                 base_color: c,
-                emissive: LinearRgba::from(c.to_linear()) * 0.6,
+                emissive: c.to_linear() * 0.6,
                 ..default()
             })
         }),
