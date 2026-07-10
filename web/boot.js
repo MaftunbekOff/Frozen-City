@@ -17,6 +17,9 @@ async function pickVariant() {
   }
 }
 
+// Fire-and-forget PWA install: never block or delay game boot on this.
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');
+
 const status = document.getElementById('status');
 const variant = await pickVariant();
 if (status) status.textContent = `Loading the frozen world… (${variant})`;
