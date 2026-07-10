@@ -183,6 +183,8 @@ pub fn connect_local(handle: &ServerHandle, name: String) -> ClientConn {
 /// Hard cap on concurrent accepted connections (native, WebSocket and plain
 /// HTTP all share this accept path), so a connection flood can't spawn
 /// unbounded OS threads and exhaust memory/handles.
+// Per-process: when several regions run side by side on one box, each gets
+// its own independent 128-connection budget, not a shared one.
 const MAX_CONNECTIONS: usize = 128;
 
 /// Decrements the shared active-connection counter when a handler thread
@@ -325,14 +327,9 @@ fn handle_native(mut stream: TcpStream, to_server: Sender<ToServer>) {
         })
         .ok();
 
-    loop {
-        match read_frame::<_, ClientMsg>(&mut stream) {
-            Ok(msg) => {
-                if to_server.send(ToServer::Msg { client: id, msg }).is_err() {
-                    break;
-                }
-            }
-            Err(_) => break,
+    while let Ok(msg) = read_frame::<_, ClientMsg>(&mut stream) {
+        if to_server.send(ToServer::Msg { client: id, msg }).is_err() {
+            break;
         }
     }
     let _ = to_server.send(ToServer::Leave { client: id });
@@ -746,13 +743,11 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
     let mut next_tick = Instant::now() + tick_dur;
     let mut last_save = Instant::now();
 
-    if config.verbose {
-        if let Some(_) = config.port {
-            println!(
-                "[server] Frozen City dedicated server up (seed {}, survive {} days)",
-                config.seed, config.win_days
-            );
-        }
+    if config.verbose && config.port.is_some() {
+        println!(
+            "[server] Frozen City dedicated server up (seed {}, survive {} days)",
+            config.seed, config.win_days
+        );
     }
 
     'outer: loop {
@@ -1018,32 +1013,41 @@ fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: Arc<AtomicBo
             }
 
             // Broadcast the snapshot; tiles ride along every Nth tick only.
-            let include_tiles = state.tick % TILES_EVERY_N_TICKS == 0;
-            let mut wire = state.clone();
-            if !include_tiles {
-                wire.tiles = Vec::new();
-            }
-            let mut dead: Vec<u64> = Vec::new();
-            for (id, out) in &clients {
-                let msg = ServerMsg::State {
-                    state: wire.clone(),
-                    tiles_included: include_tiles,
-                };
-                if out.send(msg).is_err() {
-                    dead.push(*id);
+            // With nobody connected (a persistent, currently-empty region)
+            // there's nothing to send it to, so skip the clone/serialize/send
+            // work entirely — the sim keeps ticking (and autosaving) above
+            // regardless. `include_tiles` still advances off `state.tick` on
+            // its normal cadence, so the moment a client joins mid-cycle it
+            // sees exactly the tile/no-tile pattern it would have if the
+            // broadcast had never stopped.
+            if !clients.is_empty() {
+                let include_tiles = state.tick % TILES_EVERY_N_TICKS == 0;
+                let mut wire = state.clone();
+                if !include_tiles {
+                    wire.tiles = Vec::new();
                 }
-            }
-            for id in dead {
-                disconnect(
-                    id,
-                    &mut clients,
-                    &mut player_of,
-                    &mut token_of,
-                    &mut sessions,
-                    &mut session_order,
-                    &mut limiters,
-                    &mut state,
-                );
+                let mut dead: Vec<u64> = Vec::new();
+                for (id, out) in &clients {
+                    let msg = ServerMsg::State {
+                        state: wire.clone(),
+                        tiles_included: include_tiles,
+                    };
+                    if out.send(msg).is_err() {
+                        dead.push(*id);
+                    }
+                }
+                for id in dead {
+                    disconnect(
+                        id,
+                        &mut clients,
+                        &mut player_of,
+                        &mut token_of,
+                        &mut sessions,
+                        &mut session_order,
+                        &mut limiters,
+                        &mut state,
+                    );
+                }
             }
 
             next_tick += tick_dur;
