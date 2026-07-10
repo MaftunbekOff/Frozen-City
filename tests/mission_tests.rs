@@ -64,6 +64,7 @@ fn population_mission_completes() {
             name: "Extra".into(),
             hp: 100.0,
             hunger: 0.0,
+            assigned_building: None,
         });
         next_id += 1;
     }

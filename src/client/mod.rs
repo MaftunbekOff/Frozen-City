@@ -26,6 +26,7 @@ pub mod net_sync;
 pub mod render;
 pub mod research;
 pub mod roles;
+pub mod roster;
 pub mod touch;
 pub mod ui;
 
@@ -362,6 +363,7 @@ impl Plugin for ClientPlugin {
         app.add_plugins(chat::plugin);
         app.add_plugins(minimap::plugin);
         app.add_plugins(roles::plugin);
+        app.add_plugins(roster::plugin);
         app.add_plugins(missions::plugin);
         app.add_plugins(research::plugin);
         app.add_plugins(events::plugin);
@@ -388,6 +390,8 @@ fn teardown_game(
     mut chat: ResMut<chat::ChatState>,
     mut reconnecting: ResMut<net_sync::Reconnecting>,
     mut research: ResMut<research::ResearchOpen>,
+    mut roster_open: ResMut<roster::RosterOpen>,
+    mut roster_sel: ResMut<roster::SurvivorSelection>,
 ) {
     net.0 = None;
     #[cfg(not(target_arch = "wasm32"))]
@@ -423,6 +427,8 @@ fn teardown_game(
     // Close the research modal so a new game doesn't start with it stuck open
     // (which would silently swallow world/camera input, same as chat).
     *research = Default::default();
+    *roster_open = Default::default();
+    *roster_sel = Default::default();
 }
 
 /// In `--smoke` mode, exit automatically after a few seconds of rendering.

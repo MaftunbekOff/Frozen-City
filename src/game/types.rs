@@ -205,6 +205,11 @@ pub struct Survivor {
     pub hp: f32,
     /// 0..=120; starvation damage above 80.
     pub hunger: f32,
+    /// Building this survivor is individually assigned to work at, if any.
+    /// `None` means they're part of the anonymous pool `AdjustWorkers`
+    /// counts but doesn't track by identity. Cleared automatically when the
+    /// survivor dies or their building is demolished.
+    pub assigned_building: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq)]
@@ -475,6 +480,10 @@ pub enum PlayerCommand {
     Place { kind: BuildingKind, x: u8, y: u8 },
     Demolish { building: u32 },
     AdjustWorkers { building: u32, delta: i8 },
+    /// Assign (or, with `building: None`, unassign) one named survivor to
+    /// work at a specific building. Distinct from `AdjustWorkers`: this
+    /// targets an identity, not a headcount.
+    AssignSurvivor { survivor: u32, building: Option<u32> },
     SetFurnaceLevel { level: u8 },
     /// Contribute resources toward excavating the Tunnel (once unlocked).
     InvestTunnel,
@@ -670,6 +679,7 @@ impl GameState {
                 // goals are the cooperative core, so guests may all pitch in.
                 PlayerCommand::Place { .. }
                 | PlayerCommand::AdjustWorkers { .. }
+                | PlayerCommand::AssignSurvivor { .. }
                 | PlayerCommand::InvestTunnel
                 | PlayerCommand::Research { .. }
                 | PlayerCommand::RespondEvent { .. } => true,

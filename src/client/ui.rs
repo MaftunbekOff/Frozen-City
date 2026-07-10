@@ -22,7 +22,7 @@ const COL_COAL: Color = Color::srgb(0.62, 0.66, 0.75);
 const COL_FOOD: Color = Color::srgb(0.55, 0.82, 0.48);
 
 const DEFAULT_HINT: &str =
-    "LMB place/select   RMB cancel   1-8 build   WASD pan   Q/E rotate   wheel zoom   R research   Enter chat   Alt+click ping";
+    "LMB place/select   RMB cancel   1-8 build   WASD pan   Q/E rotate   wheel zoom   R research   P roster   Enter chat   Alt+click ping";
 
 #[derive(Component, Clone, Copy, PartialEq)]
 pub enum HudField {
@@ -74,6 +74,16 @@ pub struct WorkerPlus;
 
 #[derive(Component)]
 pub struct DemolishBtn;
+
+/// Assigns the survivor currently selected in the roster panel (`roster.rs`)
+/// to the building selected here. Only visible/enabled when both a building
+/// and a roster survivor are selected — logic lives in `roster.rs` since it
+/// needs `SurvivorSelection`, but the button is part of this panel's layout.
+#[derive(Component)]
+pub struct AssignHereBtn;
+
+#[derive(Component)]
+pub struct AssignHereLabel;
 
 #[derive(Component)]
 pub struct GameOverRoot;
@@ -313,6 +323,23 @@ pub fn spawn_hud(mut commands: Commands) {
                     .with_children(|b| {
                         b.spawn(text("+", 16.0, TEXT_MAIN));
                     });
+            });
+            p.spawn((
+                Button,
+                Node {
+                    display: Display::None,
+                    width: Val::Px(236.0),
+                    height: Val::Px(30.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(BTN_BG),
+                BaseColor(BTN_BG),
+                AssignHereBtn,
+            ))
+            .with_children(|b| {
+                b.spawn((text("", 12.5, TEXT_MAIN), AssignHereLabel));
             });
             p.spawn((
                 button(220.0, 30.0, Color::srgb(0.45, 0.16, 0.14)),

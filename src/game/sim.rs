@@ -169,6 +169,7 @@ fn new_survivor(rng: &mut Rng, next_id: &mut u32) -> Survivor {
         name: NAMES[rng.below(NAMES.len() as u32) as usize].to_string(),
         hp: 85.0 + rng.below(16) as f32,
         hunger: 20.0 + rng.below(21) as f32,
+        assigned_building: None,
     }
 }
 
@@ -487,6 +488,13 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
             {
                 let b = state.buildings.remove(i);
                 state.stock.wood += b.kind.cost_wood() as f32 * DEMOLISH_REFUND;
+                // The building's own worker slots go with it; don't leave any
+                // named survivor pointing at a building id that no longer exists.
+                for s in state.survivors.iter_mut() {
+                    if s.assigned_building == Some(b.id) {
+                        s.assigned_building = None;
+                    }
+                }
                 // Attribute the demolition to the player, if they're in the roster.
                 let name = state.player(player).map(|p| p.name.clone());
                 if let Some(p) = state.players.iter_mut().find(|p| p.id == player) {
@@ -499,16 +507,58 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
         }
         PlayerCommand::AdjustWorkers { building, delta } => {
             let idle = state.idle_workers() as i32;
+            // Named assignments (`AssignSurvivor`) are a floor this anonymous
+            // +/- can't dip below — it may only drain the anonymous slack.
+            let named = state
+                .survivors
+                .iter()
+                .filter(|s| s.assigned_building == Some(*building))
+                .count() as i32;
             if let Some(b) = state.buildings.iter_mut().find(|b| b.id == *building) {
                 let max = b.kind.max_workers() as i32;
                 let cur = b.workers as i32;
-                let target = (cur + *delta as i32).clamp(0, max);
+                let target = (cur + *delta as i32).clamp(0, max).max(named);
                 let new = if target > cur {
                     cur + (target - cur).min(idle)
                 } else {
                     target
                 };
                 b.workers = new as u8;
+            }
+        }
+        PlayerCommand::AssignSurvivor { survivor, building } => {
+            let Some(s_idx) = state.survivors.iter().position(|s| s.id == *survivor) else {
+                return;
+            };
+            let prev = state.survivors[s_idx].assigned_building;
+            match building {
+                Some(new_id) => {
+                    let Some(target) = state.buildings.iter().find(|b| b.id == *new_id) else {
+                        return;
+                    };
+                    if target.kind.max_workers() == 0 || prev == Some(*new_id) {
+                        return;
+                    }
+                    if target.workers >= target.kind.max_workers() {
+                        return;
+                    }
+                    if let Some(prev_id) = prev {
+                        if let Some(b) = state.buildings.iter_mut().find(|b| b.id == prev_id) {
+                            b.workers = b.workers.saturating_sub(1);
+                        }
+                    }
+                    if let Some(b) = state.buildings.iter_mut().find(|b| b.id == *new_id) {
+                        b.workers += 1;
+                    }
+                    state.survivors[s_idx].assigned_building = Some(*new_id);
+                }
+                None => {
+                    let Some(prev_id) = prev else { return };
+                    if let Some(b) = state.buildings.iter_mut().find(|b| b.id == prev_id) {
+                        b.workers = b.workers.saturating_sub(1);
+                    }
+                    state.survivors[s_idx].assigned_building = None;
+                }
             }
         }
         PlayerCommand::SetFurnaceLevel { level } => {
@@ -747,7 +797,7 @@ pub fn tick(state: &mut GameState) {
     } else {
         0.0
     };
-    let mut deaths: Vec<(String, &'static str)> = Vec::new();
+    let mut deaths: Vec<(u32, String, &'static str)> = Vec::new();
     let disease = state.disease_active();
 
     for (i, s) in state.survivors.iter_mut().enumerate() {
@@ -790,15 +840,28 @@ pub fn tick(state: &mut GameState) {
             } else {
                 "froze to death"
             };
-            deaths.push((s.name.clone(), cause));
+            deaths.push((s.id, s.name.clone(), cause));
         }
     }
 
     if !deaths.is_empty() {
+        // Free each dying survivor's own named slot before they're removed,
+        // so the building they worked at loses exactly its own vacancy —
+        // not an arbitrary one picked by `clamp_workers` below, which has no
+        // way to tell a named slot from anonymous fill.
+        for (id, _, _) in &deaths {
+            if let Some(b_id) = state.survivors.iter().find(|s| s.id == *id).and_then(|s| s.assigned_building) {
+                if let Some(b) = state.buildings.iter_mut().find(|b| b.id == b_id) {
+                    b.workers = b.workers.saturating_sub(1);
+                }
+            }
+        }
         state.survivors.retain(|s| s.hp > 0.0);
-        for (name, cause) in deaths {
+        for (_, name, cause) in deaths {
             push_event(state, format!("{} has {}.", name, cause));
         }
+        // Still needed as a fallback for anonymous-only overflow (shouldn't
+        // normally trigger now that every named slot above is freed first).
         clamp_workers(state);
     }
 

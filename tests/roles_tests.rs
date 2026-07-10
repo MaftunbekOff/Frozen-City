@@ -99,6 +99,44 @@ fn can_issue_guest_build_may_demolish_own_building_but_not_others() {
 }
 
 #[test]
+fn can_issue_guest_build_may_assign_named_survivors() {
+    let mut state = sim::new_game(5, 12);
+    sim::player_joined(&mut state, 1, "Owner");
+    sim::player_joined(&mut state, 2, "Guest");
+    assert_eq!(state.guest_perm, GuestPermission::Build, "default policy is Build");
+
+    assert!(state.can_issue(
+        2,
+        &PlayerCommand::AssignSurvivor { survivor: 1, building: Some(0) }
+    ));
+}
+
+#[test]
+fn can_issue_guest_view_only_denies_assign_survivor() {
+    let mut state = sim::new_game(5, 12);
+    sim::player_joined(&mut state, 1, "Owner");
+    sim::player_joined(&mut state, 2, "Guest");
+    sim::set_guest_permission(&mut state, GuestPermission::ViewOnly);
+
+    assert!(!state.can_issue(
+        2,
+        &PlayerCommand::AssignSurvivor { survivor: 1, building: Some(0) }
+    ));
+}
+
+#[test]
+fn can_issue_owner_may_assign_survivors() {
+    let mut state = sim::new_game(5, 12);
+    sim::player_joined(&mut state, 1, "Owner");
+    sim::player_joined(&mut state, 2, "Guest");
+
+    assert!(state.can_issue(
+        1,
+        &PlayerCommand::AssignSurvivor { survivor: 1, building: Some(0) }
+    ));
+}
+
+#[test]
 fn can_issue_guest_build_may_not_set_furnace_level() {
     let mut state = sim::new_game(5, 12);
     sim::player_joined(&mut state, 1, "Owner");

@@ -1073,21 +1073,40 @@ pub fn sync_survivors(
     }
     *seen = view.version;
 
-    // Visual home for each survivor: workers cluster at their buildings (in
-    // assignment order), everyone else gathers around the furnace.
-    let mut homes: Vec<Vec3> = Vec::with_capacity(state.survivors.len());
-    for b in &state.buildings {
-        for _ in 0..b.workers {
-            homes.push(building_center_world(b));
+    // Visual home for each survivor: a named (`AssignSurvivor`) worker always
+    // clusters at their own building. Everyone else (anonymous `AdjustWorkers`
+    // fill, or truly idle) fills whatever building slots remain, then spills
+    // to the furnace gathering point — same visual outcome as before named
+    // assignment existed, just no longer position-matched by array order
+    // (which had no relation to identity and could show a survivor "working"
+    // at the wrong building the moment list order shifted).
+    let mut wanted: HashMap<u32, Vec3> = HashMap::new();
+    let mut anon_capacity: HashMap<u32, u8> =
+        state.buildings.iter().map(|b| (b.id, b.workers)).collect();
+
+    for s in &state.survivors {
+        if let Some(b_id) = s.assigned_building {
+            if let Some(b) = state.find_building(b_id) {
+                wanted.insert(s.id, building_center_world(b));
+                if let Some(c) = anon_capacity.get_mut(&b_id) {
+                    *c = c.saturating_sub(1);
+                }
+            }
         }
     }
-    while homes.len() < state.survivors.len() {
-        homes.push(Vec3::new(0.0, 0.0, 2.0));
-    }
 
-    let mut wanted: HashMap<u32, Vec3> = HashMap::new();
-    for (i, s) in state.survivors.iter().enumerate() {
-        wanted.insert(s.id, homes[i]);
+    let mut anon_homes: Vec<Vec3> = Vec::new();
+    for b in &state.buildings {
+        let n = *anon_capacity.get(&b.id).unwrap_or(&0);
+        for _ in 0..n {
+            anon_homes.push(building_center_world(b));
+        }
+    }
+    let mut anon_iter = anon_homes.into_iter();
+    for s in &state.survivors {
+        wanted
+            .entry(s.id)
+            .or_insert_with(|| anon_iter.next().unwrap_or(Vec3::new(0.0, 0.0, 2.0)));
     }
 
     for s in &state.survivors {
