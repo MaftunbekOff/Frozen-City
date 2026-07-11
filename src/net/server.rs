@@ -1416,7 +1416,7 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                                             }
                                             if let Some(out) = clients.get(&client) {
                                                 let _ = out.send(system_bubble(
-                                                    "Taklif yuborildi — do'stingiz olamingizga kira oladi.",
+                                                    "Taklif yuborildi — o'z olamingizga qaytsangiz, do'stingiz kira oladi.",
                                                 ));
                                             }
                                         }

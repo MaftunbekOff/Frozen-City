@@ -8,3 +8,4 @@
 /cloudflared.exe
 /wasm-opt.exe
 __pycache__/
+.claude/

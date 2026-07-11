@@ -322,4 +322,92 @@ mod tests {
             None
         );
     }
+
+    /// In-client registration creates an account `authenticate` accepts, on a
+    /// DB that didn't exist beforehand (fresh server, bot never ran).
+    #[test]
+    fn register_then_authenticate_roundtrip() {
+        let dir = std::env::temp_dir().join("fc-accounts-test-register");
+        std::fs::remove_dir_all(&dir).ok();
+        let db = dir.join("accounts.db");
+        let db_str = db.to_str().unwrap();
+
+        let (id, name) =
+            register_account_at(db_str, "yangi_01", "parol123", "Yangi").expect("registers");
+        assert_eq!(name, "Yangi");
+        assert_eq!(
+            authenticate_at(db_str, "yangi_01", "parol123"),
+            Some((id, "Yangi".to_string()))
+        );
+        // Same login again: refused as Taken, not a second row.
+        assert_eq!(
+            register_account_at(db_str, "yangi_01", "boshqa123", "Boshqa"),
+            Err(RegisterError::Taken)
+        );
+        // Same display name under a new login: also Taken (bot rule kept).
+        assert_eq!(
+            register_account_at(db_str, "yangi_02", "parol123", "Yangi"),
+            Err(RegisterError::Taken)
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn register_validation_rejects_bad_input() {
+        let dir = std::env::temp_dir().join("fc-accounts-test-register-bad");
+        std::fs::remove_dir_all(&dir).ok();
+        let db = dir.join("accounts.db");
+        let db_str = db.to_str().unwrap();
+
+        assert!(matches!(
+            register_account_at(db_str, "ab", "parol123", "X"),
+            Err(RegisterError::Invalid(_))
+        ));
+        assert!(matches!(
+            register_account_at(db_str, "bo'sh joy", "parol123", "X"),
+            Err(RegisterError::Invalid(_))
+        ));
+        assert!(matches!(
+            register_account_at(db_str, "yaxshi_login", "123", "X"),
+            Err(RegisterError::Invalid(_))
+        ));
+        assert!(matches!(
+            register_account_at(db_str, "yaxshi_login", "parol123", "   "),
+            Err(RegisterError::Invalid(_))
+        ));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The friends table: add by display name, list, remove — plus the
+    /// not-found and self-add refusals. Uses env override since the friends
+    /// API reads `FC_ACCOUNTS_DB` (no `_at` variants needed elsewhere).
+    #[test]
+    fn friends_add_list_remove() {
+        let dir = std::env::temp_dir().join("fc-accounts-test-friends");
+        std::fs::remove_dir_all(&dir).ok();
+        let db = dir.join("accounts.db");
+        let db_str = db.to_str().unwrap().to_string();
+
+        let (aziz, _) = register_account_at(&db_str, "fr_aziz", "parol123", "Aziz").unwrap();
+        let (vali, _) = register_account_at(&db_str, "fr_vali", "parol123", "Vali").unwrap();
+
+        // SAFETY: the sole test in this binary touching FC_ACCOUNTS_DB; the
+        // other tests here use explicit `_at` paths.
+        unsafe {
+            std::env::set_var("FC_ACCOUNTS_DB", &db_str);
+        }
+        assert_eq!(friends_add(aziz, "Vali"), Ok((vali, "Vali".to_string())));
+        // Idempotent re-add.
+        assert_eq!(friends_add(aziz, "Vali"), Ok((vali, "Vali".to_string())));
+        assert_eq!(friends_add(aziz, "Nomalum"), Err(FriendError::NotFound));
+        assert_eq!(friends_add(aziz, "Aziz"), Err(FriendError::SelfAdd));
+
+        assert_eq!(friends_list(aziz), vec![(vali, "Vali".to_string())]);
+        assert!(friends_list(vali).is_empty(), "one-directional");
+
+        friends_remove(aziz, vali).unwrap();
+        assert!(friends_list(aziz).is_empty());
+        std::env::remove_var("FC_ACCOUNTS_DB");
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }
