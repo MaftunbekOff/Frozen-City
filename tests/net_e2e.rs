@@ -48,6 +48,7 @@ fn two_clients_share_one_city() {
         verbose: false,
         save_path: None,
         idle_shutdown: None,
+        central: false,
     })
     .expect("server starts");
     let port = handle.addr.expect("bound addr").port();
@@ -104,6 +105,7 @@ fn tiles_are_omitted_but_periodically_included() {
         verbose: false,
         save_path: None,
         idle_shutdown: None,
+        central: false,
     })
     .expect("server starts");
     let port = handle.addr.expect("addr").port();
@@ -150,6 +152,7 @@ fn websocket_and_tcp_clients_share_one_city() {
         verbose: false,
         save_path: None,
         idle_shutdown: None,
+        central: false,
     })
     .expect("server starts");
     let port = handle.addr.expect("addr").port();
@@ -232,6 +235,7 @@ fn http_get_serves_the_web_page() {
         verbose: false,
         save_path: None,
         idle_shutdown: None,
+        central: false,
     })
     .expect("server starts");
     let port = handle.addr.expect("addr").port();

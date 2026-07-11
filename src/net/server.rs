@@ -22,7 +22,7 @@ use tungstenite::Message;
 
 use crate::game::sim;
 use crate::game::types::{
-    GamePhase, GameState, Mission, PlayerCommand, PlayerInfo, Ping, Tech, TICK_MS,
+    GamePhase, GameState, Mission, PlayerCommand, PlayerInfo, Ping, Survivor, Tech, TICK_MS,
 };
 use crate::net::accounts;
 use crate::net::client::ClientConn;
@@ -45,6 +45,26 @@ const AUTH_FAILED_REASON: &str = "Noto'g'ri login yoki parol.";
 /// world running yet — a distinct reason from `AUTH_FAILED_REASON` is safe
 /// here (unlike login/password, capacity isn't enumerable).
 const SERVER_FULL_REASON: &str = "Server hozircha to'la, birozdan so'ng qayta urinib ko'ring.";
+
+/// Sent back as `ServerMsg::AuthFailed` for an `EnterCentral` from an account
+/// that hasn't finished the Tunnel in its personal world (and has no settlers
+/// already living in the central world from an earlier graduation).
+const NOT_GRADUATED_REASON: &str =
+    "Global Olamga o'tish uchun avval shaxsiy olamda Tunnelni qurib bitiring.";
+
+/// Sent back as `ServerMsg::AuthFailed` for a `Login`/`EnterCentral` on a
+/// process that has accounts disabled (`FC_DISABLE_ACCOUNTS`, set on the
+/// extra region servers): each process has its own `WorldManager`, so letting
+/// accounts in there would silently fork one account's "single" personal
+/// world into per-region copies — accounts live on the main region only.
+const ACCOUNTS_DISABLED_REASON: &str =
+    "Akkaunt bilan kirish faqat asosiy regionda ishlaydi. Asosiy regionni tanlang.";
+
+/// True on processes (extra region servers) where account login and the
+/// central world are switched off — see `ACCOUNTS_DISABLED_REASON`.
+fn accounts_disabled() -> bool {
+    std::env::var("FC_DISABLE_ACCOUNTS").is_ok_and(|v| !v.is_empty() && v != "0")
+}
 
 /// Mint a fresh, unguessable 64-bit token from the OS CSPRNG. Used for
 /// session/reconnect tokens: unlike a seeded PRNG stream (which can be
@@ -76,6 +96,11 @@ pub struct ServerConfig {
     /// `Some(_)` for per-account worlds, so an abandoned account's thread
     /// doesn't run forever.
     pub idle_shutdown: Option<Duration>,
+    /// This world is THE central world (the Global World through the Tunnel):
+    /// a fresh one is created with `sim::new_game_central` instead of
+    /// `sim::new_game`, and the flag is re-asserted on every load so the
+    /// world can never silently degrade into an ordinary survival map.
+    pub central: bool,
 }
 
 /// On a persistent server, a finished world (won or lost) restarts with a
@@ -93,6 +118,10 @@ pub enum ToServer {
         /// Session token from a previous `Welcome`, to resume the same player
         /// identity (reconnect) instead of joining as a fresh player.
         token: Option<u64>,
+        /// Account this connection authenticated as (`None` for guests) —
+        /// recorded on the joining `PlayerInfo` so the central world can tie
+        /// players to the settlers they own.
+        account: Option<i64>,
         out: Sender<ServerMsg>,
         id_back: Sender<u64>,
     },
@@ -102,6 +131,28 @@ pub enum ToServer {
     },
     Leave {
         client: u64,
+    },
+    /// Central world only: how many settlers `account` currently owns there.
+    /// `world_manager` asks before migrating more, so re-entry tops the group
+    /// up to the cap instead of stacking a fresh group per visit.
+    CountOwned {
+        account: i64,
+        reply: Sender<usize>,
+    },
+    /// Personal world only: remove up to `max` survivors for migration
+    /// through the Tunnel. Replies `None` when this world hasn't graduated
+    /// (the Tunnel isn't finished — nobody leaves through a hole that isn't
+    /// there), `Some(survivors)` otherwise, possibly empty.
+    ExtractMigrants {
+        max: usize,
+        reply: Sender<Option<Vec<Survivor>>>,
+    },
+    /// Central world only: settle migrated survivors as `account`'s, arriving
+    /// with the display name `name` (for the event log).
+    InjectMigrants {
+        account: i64,
+        name: String,
+        survivors: Vec<Survivor>,
     },
 }
 
@@ -199,6 +250,7 @@ pub fn connect_local(handle: &ServerHandle, name: String) -> ClientConn {
                     name,
                     // The in-process local player never reconnects.
                     token: None,
+                    account: None,
                     out: out_tx,
                     id_back: id_tx,
                 })
@@ -321,57 +373,118 @@ fn peek4(stream: &TcpStream) -> Option<[u8; 4]> {
     }
 }
 
+/// Where a connection's very first message routed it: into a world (guest
+/// shared world, an account's personal world, or the central world), refused
+/// with a reason the client should see, or a protocol violation to drop
+/// silently. Shared by the native and WebSocket paths, which only differ in
+/// how they write the `AuthFailed` back.
+enum FirstMsgOutcome {
+    Joined(Sender<ToServer>, Option<(u64, Receiver<ServerMsg>)>),
+    Refused(&'static str),
+    Drop,
+}
+
+fn route_first_msg(
+    msg: ClientMsg,
+    to_server: &Sender<ToServer>,
+    world_manager: &Option<Arc<crate::net::world_manager::WorldManager>>,
+) -> FirstMsgOutcome {
+    use crate::net::world_manager::CentralError;
+    match msg {
+        ClientMsg::Hello { name, token } => {
+            let name = sanitize_name(&name);
+            FirstMsgOutcome::Joined(to_server.clone(), join(to_server, name, token, None))
+        }
+        ClientMsg::Login {
+            login,
+            password,
+            token,
+        } => {
+            if accounts_disabled() {
+                return FirstMsgOutcome::Refused(ACCOUNTS_DISABLED_REASON);
+            }
+            match accounts::authenticate(&login, &password) {
+                Some((account_id, display_name)) => {
+                    let name = sanitize_name(&display_name);
+                    match world_manager {
+                        Some(wm) => match wm.join_account(account_id, name, token) {
+                            Some((target, id, out_rx)) => {
+                                FirstMsgOutcome::Joined(target, Some((id, out_rx)))
+                            }
+                            None => FirstMsgOutcome::Refused(SERVER_FULL_REASON),
+                        },
+                        // No world manager (co-op host, tests): authenticate
+                        // but land in the shared world, as before.
+                        None => FirstMsgOutcome::Joined(
+                            to_server.clone(),
+                            join(to_server, name, token, Some(account_id)),
+                        ),
+                    }
+                }
+                None => FirstMsgOutcome::Refused(AUTH_FAILED_REASON),
+            }
+        }
+        ClientMsg::EnterCentral {
+            login,
+            password,
+            token,
+        } => {
+            if accounts_disabled() {
+                return FirstMsgOutcome::Refused(ACCOUNTS_DISABLED_REASON);
+            }
+            match accounts::authenticate(&login, &password) {
+                Some((account_id, display_name)) => {
+                    let name = sanitize_name(&display_name);
+                    match world_manager {
+                        Some(wm) => match wm.enter_central(account_id, name, token) {
+                            Ok((target, id, out_rx)) => {
+                                FirstMsgOutcome::Joined(target, Some((id, out_rx)))
+                            }
+                            Err(CentralError::NotGraduated) => {
+                                FirstMsgOutcome::Refused(NOT_GRADUATED_REASON)
+                            }
+                            Err(CentralError::Capacity) => {
+                                FirstMsgOutcome::Refused(SERVER_FULL_REASON)
+                            }
+                        },
+                        // Only the dedicated server has a central world.
+                        None => FirstMsgOutcome::Refused(ACCOUNTS_DISABLED_REASON),
+                    }
+                }
+                None => FirstMsgOutcome::Refused(AUTH_FAILED_REASON),
+            }
+        }
+        _ => FirstMsgOutcome::Drop,
+    }
+}
+
 /// The native desktop protocol: length-prefixed bincode frames.
 fn handle_native(
     mut stream: TcpStream,
     to_server: Sender<ToServer>,
     world_manager: Option<Arc<crate::net::world_manager::WorldManager>>,
 ) {
-    // The very first frame must be Hello or Login (the 10 s timeout is
-    // already set). `target` is whichever world this connection ends up
-    // in — the shared world for a guest `Hello`, or (when authenticated and
-    // a `world_manager` is wired up) that account's own world — and is
-    // reused for every message this connection sends afterward, not just
-    // the initial join.
+    // The very first frame must be Hello, Login or EnterCentral (the 10 s
+    // timeout is already set). `target` is whichever world this connection
+    // ends up in — the shared world for a guest `Hello`, or (when
+    // authenticated and a `world_manager` is wired up) that account's own
+    // world or the central one — and is reused for every message this
+    // connection sends afterward, not just the initial join.
     let (target, joined) = match read_frame::<_, ClientMsg>(&mut stream) {
-        Ok(ClientMsg::Hello { name, token }) => {
-            let name = sanitize_name(&name);
-            (to_server.clone(), join(&to_server, name, token))
-        }
-        Ok(ClientMsg::Login {
-            login,
-            password,
-            token,
-        }) => match accounts::authenticate(&login, &password) {
-            Some((account_id, display_name)) => {
-                let name = sanitize_name(&display_name);
-                match &world_manager {
-                    Some(wm) => match wm.join_account(account_id, name, token) {
-                        Some((target, id, out_rx)) => (target, Some((id, out_rx))),
-                        None => {
-                            let _ = write_frame(
-                                &mut stream,
-                                &ServerMsg::AuthFailed {
-                                    reason: SERVER_FULL_REASON.to_string(),
-                                },
-                            );
-                            return;
-                        }
-                    },
-                    None => (to_server.clone(), join(&to_server, name, token)),
-                }
-            }
-            None => {
+        Ok(msg) => match route_first_msg(msg, &to_server, &world_manager) {
+            FirstMsgOutcome::Joined(target, joined) => (target, joined),
+            FirstMsgOutcome::Refused(reason) => {
                 let _ = write_frame(
                     &mut stream,
                     &ServerMsg::AuthFailed {
-                        reason: AUTH_FAILED_REASON.to_string(),
+                        reason: reason.to_string(),
                     },
                 );
                 return;
             }
+            FirstMsgOutcome::Drop => return,
         },
-        _ => return,
+        Err(_) => return,
     };
     let _ = stream.set_read_timeout(None);
 
@@ -421,6 +534,7 @@ pub(crate) fn join(
     to_server: &Sender<ToServer>,
     name: String,
     token: Option<u64>,
+    account: Option<i64>,
 ) -> Option<(u64, Receiver<ServerMsg>)> {
     let (out_tx, out_rx) = channel::<ServerMsg>();
     let (id_tx, id_rx) = channel::<u64>();
@@ -428,6 +542,7 @@ pub(crate) fn join(
         .send(ToServer::Join {
             name,
             token,
+            account,
             out: out_tx,
             id_back: id_tx,
         })
@@ -530,49 +645,26 @@ fn serve_websocket(
         return;
     };
 
-    // First frame must be Hello or Login (still under the 10 s read timeout).
-    // `target` is whichever world this connection ends up in — see the same
-    // split in `handle_native` above — and is reused for every message this
-    // connection sends afterward, not just the initial join.
+    // First frame must be Hello, Login or EnterCentral (still under the 10 s
+    // read timeout). `target` is whichever world this connection ends up in —
+    // see `route_first_msg` — and is reused for every message this connection
+    // sends afterward, not just the initial join.
     let (target, joined) = loop {
         match ws.read() {
             Ok(Message::Binary(b)) => match decode::<ClientMsg>(&b, MAX_FRAME as usize) {
-                Ok(ClientMsg::Hello { name, token }) => {
-                    let name = sanitize_name(&name);
-                    break (to_server.clone(), join(&to_server, name, token));
-                }
-                Ok(ClientMsg::Login {
-                    login,
-                    password,
-                    token,
-                }) => match accounts::authenticate(&login, &password) {
-                    Some((account_id, display_name)) => {
-                        let name = sanitize_name(&display_name);
-                        match &world_manager {
-                            Some(wm) => match wm.join_account(account_id, name, token) {
-                                Some((target, id, out_rx)) => break (target, Some((id, out_rx))),
-                                None => {
-                                    if let Ok(bytes) = encode(&ServerMsg::AuthFailed {
-                                        reason: SERVER_FULL_REASON.to_string(),
-                                    }) {
-                                        let _ = ws.send(Message::Binary(bytes.into()));
-                                    }
-                                    return;
-                                }
-                            },
-                            None => break (to_server.clone(), join(&to_server, name, token)),
-                        }
-                    }
-                    None => {
+                Ok(msg) => match route_first_msg(msg, &to_server, &world_manager) {
+                    FirstMsgOutcome::Joined(target, joined) => break (target, joined),
+                    FirstMsgOutcome::Refused(reason) => {
                         if let Ok(bytes) = encode(&ServerMsg::AuthFailed {
-                            reason: AUTH_FAILED_REASON.to_string(),
+                            reason: reason.to_string(),
                         }) {
                             let _ = ws.send(Message::Binary(bytes.into()));
                         }
                         return;
                     }
+                    FirstMsgOutcome::Drop => return,
                 },
-                _ => return,
+                Err(_) => return,
             },
             Ok(Message::Ping(_) | Message::Pong(_)) => continue,
             _ => return,
@@ -826,15 +918,27 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
     // starting fresh, so the periodic systemd restart and a deploy's
     // stop/start don't wipe every player's city. Anything else (singleplayer,
     // host/join) is a throwaway in-memory world, same as before.
+    let fresh = || {
+        if config.central {
+            sim::new_game_central(config.seed)
+        } else {
+            sim::new_game(config.seed, config.win_days)
+        }
+    };
     let mut state = if config.persistent {
         match &config.save_path {
             Some(path) => persist::load_at(path),
             None => persist::load(),
         }
-        .unwrap_or_else(|| sim::new_game(config.seed, config.win_days))
+        .unwrap_or_else(fresh)
     } else {
-        sim::new_game(config.seed, config.win_days)
+        fresh()
     };
+    // Re-assert on every boot: a central world stays central even if its save
+    // predates the flag or was ever written without it.
+    if config.central {
+        state.central = true;
+    }
     let mut clients: HashMap<u64, Sender<ServerMsg>> = HashMap::new();
     // Connection id (key of `clients`, the `client` field on `ToServer`) is
     // decoupled from player id: a connection is a socket, a player is a
@@ -895,7 +999,21 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                 drained += 1;
             }
             match recv {
-                Ok(ToServer::Join { name, token, out, id_back }) => {
+                Ok(ToServer::CountOwned { account, reply }) => {
+                    let _ = reply.send(state.owned_settlers(account));
+                }
+                Ok(ToServer::ExtractMigrants { max, reply }) => {
+                    let migrants = if state.graduated {
+                        Some(sim::extract_migrants(&mut state, max))
+                    } else {
+                        None
+                    };
+                    let _ = reply.send(migrants);
+                }
+                Ok(ToServer::InjectMigrants { account, name, survivors }) => {
+                    sim::inject_migrants(&mut state, account, &name, survivors);
+                }
+                Ok(ToServer::Join { name, token, account, out, id_back }) => {
                     let client_id = next_client_id;
                     next_client_id += 1;
 
@@ -905,9 +1023,15 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                     // fresh.
                     let reconnect = token.and_then(|t| sessions.remove(&t).map(|info| (t, info)));
                     let (player_id, session_token, reconnected) =
-                        if let Some((t, saved)) = reconnect {
+                        if let Some((t, mut saved)) = reconnect {
                             let player_id = saved.id;
                             session_order.retain(|&tok| tok != t);
+                            // A stashed session may predate the account field
+                            // (or the player first joined as a guest); the
+                            // authenticated connection is the fresher truth.
+                            if account.is_some() {
+                                saved.account = account;
+                            }
                             sim::player_rejoined(&mut state, saved);
                             // Rotate the token on every reconnect: the old one
                             // was sent once in plaintext, so a sniffed token is
@@ -917,7 +1041,7 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                             let player_id = next_player_id;
                             next_player_id += 1;
                             let session_token = fresh_token();
-                            sim::player_joined(&mut state, player_id, &name);
+                            sim::player_joined_as(&mut state, player_id, &name, account);
                             (player_id, session_token, false)
                         };
 
@@ -971,10 +1095,12 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                         ClientMsg::Cursor { .. } => limiters
                             .get_mut(&client)
                             .is_some_and(|l| l.allow_cursor(now)),
-                        // Both are only meaningful as the very first frame
-                        // (consumed before `join()`, never reaches here); a
+                        // All three are only meaningful as the very first frame
+                        // (consumed before `join()`, never reach here); a
                         // later one is a protocol violation, not a command.
-                        ClientMsg::Hello { .. } | ClientMsg::Login { .. } => false,
+                        ClientMsg::Hello { .. }
+                        | ClientMsg::Login { .. }
+                        | ClientMsg::EnterCentral { .. } => false,
                         // Low-frequency owner-only admin actions: never rate
                         // limited (they're structurally rare — one click each
                         // — and gating them behind the cmd/chat/ping caps
@@ -987,7 +1113,9 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                             ClientMsg::Cursor { x, y } => sim::set_cursor(&mut state, pid, x, y),
                             ClientMsg::Chat { text } => sim::push_chat(&mut state, pid, &text),
                             ClientMsg::Ping { x, y } => sim::add_ping(&mut state, pid, x, y),
-                            ClientMsg::Hello { .. } | ClientMsg::Login { .. } => {}
+                            ClientMsg::Hello { .. }
+                            | ClientMsg::Login { .. }
+                            | ClientMsg::EnterCentral { .. } => {}
                             ClientMsg::SetGuestPermission { perm } => {
                                 if state.is_owner(pid) {
                                     sim::set_guest_permission(&mut state, perm);
@@ -1120,10 +1248,17 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                         // reopens to Build for everyone each game cycle.
                         let guest_perm = state.guest_perm;
                         let owner_id = state.owner_id;
+                        // Graduation is a permanent achievement, not a
+                        // property of one map: it's what admits this world's
+                        // account to the central world, and must not expire
+                        // just because the next survival run started before
+                        // (or without) the player stepping through.
+                        let graduated = state.graduated;
                         state = sim::new_game(seed, config.win_days);
                         state.players = players;
                         state.guest_perm = guest_perm;
                         state.owner_id = owner_id;
+                        state.graduated = graduated;
                         printed_events = 0;
                         printed_chat = 0;
                         // `total_events`/`total_chat` also restart at 0 on a fresh

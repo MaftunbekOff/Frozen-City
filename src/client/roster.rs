@@ -233,8 +233,19 @@ fn update_roster(
         }
     }
 
+    // In the central world only YOUR settlers are listed — they're the only
+    // ones you can command (`can_issue` enforces it server-side), and a
+    // shared map's full population would drown the panel in strangers.
+    let my_account = view
+        .player_id
+        .and_then(|pid| state.players.iter().find(|p| p.id == pid))
+        .and_then(|p| p.account);
     // Idle survivors first (most actionable), stable by id otherwise.
-    let mut sorted: Vec<&frozen_city::game::types::Survivor> = state.survivors.iter().collect();
+    let mut sorted: Vec<&frozen_city::game::types::Survivor> = state
+        .survivors
+        .iter()
+        .filter(|s| !state.central || (my_account.is_some() && s.owner == my_account))
+        .collect();
     sorted.sort_by_key(|s| (s.assigned_building.is_some(), s.id));
 
     for (row, mut node) in &mut rows {

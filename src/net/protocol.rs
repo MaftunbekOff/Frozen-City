@@ -42,6 +42,18 @@ pub enum ClientMsg {
         password: String,
         token: Option<u64>,
     },
+    /// Third possible first message: sign in and enter the CENTRAL world (the
+    /// Global World through the Tunnel) instead of this account's personal
+    /// world. Only graduated accounts are admitted; on first entry the server
+    /// migrates a group of survivors out of the personal world to be this
+    /// account's settlers. `token` reconnects an interrupted central-world
+    /// session, same meaning as on `Hello`/`Login`.
+    /// (Appended last: bincode enum indices are positional.)
+    EnterCentral {
+        login: String,
+        password: String,
+        token: Option<u64>,
+    },
 }
 
 /// Which of `GameState`'s pricier collection fields actually ride along on a

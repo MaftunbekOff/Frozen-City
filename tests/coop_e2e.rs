@@ -51,6 +51,7 @@ fn start_server(seed: u64) -> server::ServerHandle {
         verbose: false,
         save_path: None,
         idle_shutdown: None,
+        central: false,
     })
     .expect("server starts")
 }

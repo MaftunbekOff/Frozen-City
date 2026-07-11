@@ -15,6 +15,15 @@ use crate::game::types::GameState;
 /// mainly so tests can point at a throwaway path instead of the real one.
 pub const DEFAULT_SAVE_PATH: &str = "/var/lib/frozen-city/world.bin";
 
+/// Version header every save is written with since the format grew fields
+/// (V2: `Survivor::owner`, `PlayerInfo::account`, `GameState::central`).
+/// Bincode is positional, so without a header there'd be no way to tell a
+/// V2 file from a V1 one — and a V1 file misread as V2 (or vice versa) would
+/// "collapse to None" in `load_at` and silently wipe a production world on
+/// the first deploy after a format change. Files WITHOUT this prefix are
+/// decoded through the frozen V1 mirror (`legacy.rs`) and migrated.
+const MAGIC_V2: &[u8; 8] = b"FCWORLD2";
+
 fn resolve_path() -> String {
     std::env::var("FC_WORLD_SAVE").unwrap_or_else(|_| DEFAULT_SAVE_PATH.to_string())
 }
@@ -34,13 +43,18 @@ pub fn load() -> Option<GameState> {
 }
 
 /// Exposed to `world_manager` so it can save/load each account's world at
-/// its own path, independent of the single shared-world path above.
-pub(crate) fn save_at(state: &GameState, path: &str) -> io::Result<()> {
+/// its own path, independent of the single shared-world path above — and to
+/// e2e tests, which pre-seed world files (e.g. a graduated personal world)
+/// before starting a server against them.
+pub fn save_at(state: &GameState, path: &str) -> io::Result<()> {
     if let Some(dir) = Path::new(path).parent() {
         fs::create_dir_all(dir)?;
     }
-    let bytes =
+    let body =
         bincode::serialize(state).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let mut bytes = Vec::with_capacity(MAGIC_V2.len() + body.len());
+    bytes.extend_from_slice(MAGIC_V2);
+    bytes.extend_from_slice(&body);
     // Write to a sibling temp file and rename over the target: a kill mid-write
     // (the exact moment this feature exists to survive) leaves the previous,
     // still-valid save in place instead of a truncated, unloadable one — a
@@ -51,9 +65,17 @@ pub(crate) fn save_at(state: &GameState, path: &str) -> io::Result<()> {
     Ok(())
 }
 
-pub(crate) fn load_at(path: &str) -> Option<GameState> {
+pub fn load_at(path: &str) -> Option<GameState> {
     let bytes = fs::read(path).ok()?;
-    bincode::deserialize(&bytes).ok()
+    match bytes.strip_prefix(MAGIC_V2.as_slice()) {
+        Some(body) => bincode::deserialize(body).ok(),
+        // No header: a save written before versioning existed — decode it
+        // through the frozen V1 mirror and migrate. The next autosave
+        // rewrites it as V2.
+        None => bincode::deserialize::<crate::net::legacy::GameStateV1>(&bytes)
+            .ok()
+            .map(GameState::from),
+    }
 }
 
 #[cfg(test)]
@@ -90,6 +112,89 @@ mod tests {
         let path = throwaway_path("corrupt");
         fs::write(&path, b"not a valid bincode payload").unwrap();
         assert!(load_at(&path).is_none());
+        fs::remove_file(&path).ok();
+    }
+
+    /// A world saved by a pre-versioning binary (raw V1 bincode, no magic
+    /// header) must load and migrate, not collapse to None — None here means
+    /// a production city silently wiped on the first post-format-change boot.
+    #[test]
+    fn v1_save_without_header_migrates() {
+        use crate::net::legacy::{GameStateV1, PlayerInfoV1, SurvivorV1};
+
+        let path = throwaway_path("v1-migrate");
+        // Fabricate V1 bytes exactly the way an old binary wrote them: a
+        // plain bincode `GameState` (V1 layout), no header. Build the V1
+        // struct from a current state so every shared field is realistic.
+        let mut modern = sim::new_game(11, 12);
+        sim::player_joined(&mut modern, 7, "Aziz");
+        modern.graduated = true;
+        let v1 = GameStateV1 {
+            tick: modern.tick,
+            win_days: modern.win_days,
+            tiles: modern.tiles.clone(),
+            buildings: modern.buildings.clone(),
+            survivors: modern
+                .survivors
+                .iter()
+                .map(|s| SurvivorV1 {
+                    id: s.id,
+                    name: s.name.clone(),
+                    hp: s.hp,
+                    hunger: s.hunger,
+                    assigned_building: s.assigned_building,
+                })
+                .collect(),
+            stock: modern.stock,
+            furnace_level: modern.furnace_level,
+            furnace_lit: modern.furnace_lit,
+            cold_snap: modern.cold_snap,
+            players: modern
+                .players
+                .iter()
+                .map(|p| PlayerInfoV1 {
+                    id: p.id,
+                    name: p.name.clone(),
+                    color: p.color,
+                    cursor: p.cursor,
+                    built: p.built,
+                    demolished: p.demolished,
+                    role: p.role,
+                })
+                .collect(),
+            phase: modern.phase,
+            events: modern.events.clone(),
+            total_events: modern.total_events,
+            chat: modern.chat.clone(),
+            total_chat: modern.total_chat,
+            pings: modern.pings.clone(),
+            missions: modern.missions.clone(),
+            tunnel: modern.tunnel,
+            graduated: modern.graduated,
+            techs: modern.techs.clone(),
+            disease_until: modern.disease_until,
+            blizzard_until: modern.blizzard_until,
+            pending_event: modern.pending_event,
+            event_rng: modern.event_rng,
+            guest_perm: modern.guest_perm,
+            owner_id: modern.owner_id,
+            next_id: modern.next_id,
+            rng: modern.rng,
+        };
+        fs::write(&path, bincode::serialize(&v1).unwrap()).unwrap();
+
+        let loaded = load_at(&path).expect("V1 save must migrate, never wipe");
+        assert_eq!(loaded.survivors.len(), modern.survivors.len());
+        assert!(loaded.survivors.iter().all(|s| s.owner.is_none()));
+        assert!(loaded.players.iter().all(|p| p.account.is_none()));
+        assert!(!loaded.central);
+        assert!(loaded.graduated, "graduation must survive migration");
+        assert_eq!(loaded.tiles, modern.tiles);
+        assert_eq!(loaded.stock, modern.stock);
+
+        // And once re-saved (V2, with header), it round-trips as-is.
+        save_at(&loaded, &path).unwrap();
+        assert_eq!(load_at(&path).expect("V2 reload"), loaded);
         fs::remove_file(&path).ok();
     }
 

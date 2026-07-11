@@ -149,12 +149,18 @@ pub fn watch_disconnect(
     next.set(Screen::Menu);
 }
 
-/// The first message to redial with: `Login` (with the same credentials the
-/// session originally signed in with) if this was an account session,
+/// The first message to redial with: `EnterCentral` when the session was in
+/// the central world (a plain `Login` would drop the player back into their
+/// personal world mid-outage), `Login` for a personal-world account session,
 /// otherwise a guest `Hello`. Either way carries the last known session
 /// token so a successful redial resumes the same player identity.
 fn reconnect_hello(session: &Session) -> ClientMsg {
     match &session.auth {
+        Some(auth) if session.central => ClientMsg::EnterCentral {
+            login: auth.login.clone(),
+            password: auth.password.clone(),
+            token: session.token,
+        },
         Some(auth) => ClientMsg::Login {
             login: auth.login.clone(),
             password: auth.password.clone(),

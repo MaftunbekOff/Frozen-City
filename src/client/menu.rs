@@ -269,6 +269,78 @@ pub fn spawn_menu(mut commands: Commands, settings: Res<Settings>, view: Res<Gam
         });
 }
 
+/// Completes an in-game world switch (Tunnel → central world, or back): the
+/// game screen has just torn down, so dial the target world and re-enter
+/// `Screen::Game` immediately — the player sees one menu frame, not a menu.
+/// Runs before the other menu systems so nothing else reacts to that frame.
+pub fn pending_switch(
+    mut pending: ResMut<PendingSwitch>,
+    mut net: ResMut<NetConn>,
+    mut view: ResMut<GameView>,
+    mut session: ResMut<Session>,
+    mut next: ResMut<NextState<Screen>>,
+    mut error_text: Query<&mut Text, With<MenuErrorText>>,
+) {
+    let Some(target) = pending.0.take() else { return };
+    // Only account sessions can switch worlds; a guest has neither a personal
+    // world nor Tunnel access. The buttons are hidden for guests, so this is
+    // just a stale-state guard.
+    let Some(auth) = session.auth.clone() else { return };
+    let central = target == WorldTarget::Central;
+    let first_msg = if central {
+        ClientMsg::EnterCentral {
+            login: auth.login.clone(),
+            password: auth.password.clone(),
+            token: None,
+        }
+    } else {
+        ClientMsg::Login {
+            login: auth.login.clone(),
+            password: auth.password.clone(),
+            token: None,
+        }
+    };
+    // Accounts (and the central world) live on the main region process only —
+    // see `main_region_addr`.
+    #[cfg(target_arch = "wasm32")]
+    {
+        session.join_addr = main_region_addr(&session.join_addr);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let dialed = frozen_city::net::client::connect_tcp_with(&session.join_addr, first_msg)
+        .map_err(|e| format!("Could not join {}: {e}", session.join_addr));
+    #[cfg(target_arch = "wasm32")]
+    let dialed = frozen_city::net::ws::connect_with(&ws_url(&session.join_addr), first_msg)
+        .map_err(|e| format!("Could not join {}: {e}", session.join_addr));
+    match dialed {
+        Ok(conn) => {
+            // A token belongs to the world that minted it; the new world
+            // issues its own in the coming `Welcome`.
+            session.token = None;
+            session.attempts = 0;
+            session.reconnectable = true;
+            session.central = central;
+            *view = GameView::default();
+            net.0 = Some(Mutex::new(conn));
+            next.set(Screen::Game);
+        }
+        Err(e) => {
+            if let Ok(mut t) = error_text.single_mut() {
+                t.0 = e;
+            }
+        }
+    }
+}
+
+/// Rewrites `addr` to the main region's `/ws` path. Account logins and the
+/// central world are main-region-only: every region process has its own
+/// `WorldManager`, so signing in through `/ws-r2` would silently fork the
+/// account's "single" personal world into a per-region copy.
+#[cfg(target_arch = "wasm32")]
+fn main_region_addr(addr: &str) -> String {
+    with_path(addr, "/ws")
+}
+
 /// Handle `--host`, `--join` and `--smoke`: act once, straight from the menu.
 pub fn autostart(
     mut auto: ResMut<AutoStart>,
@@ -390,6 +462,7 @@ fn start_game(
                     verbose: false,
                     save_path: None,
                     idle_shutdown: None,
+                    central: false,
                 };
                 let handle = server::start(config)
                     .map_err(|e| format!("Could not start the server: {e}"))?;
@@ -433,6 +506,7 @@ fn start_game(
         token: None,
         reconnectable: action == AutoAction::Join,
         attempts: 0,
+        central: false,
     };
     *view = GameView::default();
     net.0 = Some(Mutex::new(conn));
@@ -568,15 +642,21 @@ fn submit_login(
         password: password.to_string(),
         token: None,
     };
-    #[cfg(not(target_arch = "wasm32"))]
-    let conn = frozen_city::net::client::connect_tcp_with(&settings.join_addr, hello)
-        .map_err(|e| format!("Could not join {}: {e}", settings.join_addr))?;
+    // Region choice applies to guest co-op only: accounts are main-region-only
+    // (see `main_region_addr`), so an account login ignores a picked `/ws-r2`.
     #[cfg(target_arch = "wasm32")]
-    let conn = frozen_city::net::ws::connect_with(&ws_url(&settings.join_addr), hello)
-        .map_err(|e| format!("Could not join {}: {e}", settings.join_addr))?;
+    let addr = main_region_addr(&settings.join_addr);
+    #[cfg(not(target_arch = "wasm32"))]
+    let addr = settings.join_addr.clone();
+    #[cfg(not(target_arch = "wasm32"))]
+    let conn = frozen_city::net::client::connect_tcp_with(&addr, hello)
+        .map_err(|e| format!("Could not join {addr}: {e}"))?;
+    #[cfg(target_arch = "wasm32")]
+    let conn = frozen_city::net::ws::connect_with(&ws_url(&addr), hello)
+        .map_err(|e| format!("Could not join {addr}: {e}"))?;
 
     *session = Session {
-        join_addr: settings.join_addr.clone(),
+        join_addr: addr,
         name: settings.name.clone(),
         auth: Some(AccountAuth {
             login: login.to_string(),
@@ -585,6 +665,7 @@ fn submit_login(
         token: None,
         reconnectable: true,
         attempts: 0,
+        central: false,
     };
     *view = GameView::default();
     net.0 = Some(Mutex::new(conn));

@@ -247,6 +247,7 @@ fn run_dedicated(cli: &Cli) {
             verbose: true,
             save_path: None,
             idle_shutdown: None,
+            central: false,
         },
         world_manager.clone(),
     ) {

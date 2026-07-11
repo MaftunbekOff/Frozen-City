@@ -21,6 +21,11 @@ pub const DEFAULT_WIN_DAYS: u32 = 12;
 /// can complete, or the Tunnel could be permanently unreachable on that world.
 pub const MIN_WIN_DAYS: u32 = 4;
 pub const MAX_POPULATION: i32 = 60;
+/// How many survivors one account may bring through the Tunnel into the
+/// central world, total. Re-entering tops the group back up to this cap (from
+/// the personal world's population), so repeat visits can't flood the shared
+/// map with one account's settlers.
+pub const CENTRAL_MIGRANTS_PER_ACCOUNT: usize = 5;
 
 pub const FOOD_PER_SURVIVOR_DAY: f32 = 1.2;
 pub const FURNACE_COAL_PER_DAY_PER_LEVEL: f32 = 12.0;
@@ -210,6 +215,10 @@ pub struct Survivor {
     /// counts but doesn't track by identity. Cleared automatically when the
     /// survivor dies or their building is demolished.
     pub assigned_building: Option<u32>,
+    /// Account id (see `net::accounts`) this survivor belongs to. `None` in
+    /// personal/shared worlds; `Some` only for settlers brought through the
+    /// Tunnel into the central world, where only their owner may command them.
+    pub owner: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq)]
@@ -233,6 +242,11 @@ pub struct PlayerInfo {
     pub demolished: u32,
     /// Authority in this world (owner vs guest); kept across reconnects.
     pub role: Role,
+    /// Account id this player signed in with, `None` for guests. In the
+    /// central world it links a player to the settlers they own (see
+    /// `Survivor::owner`); the stable identity across sessions is the
+    /// account, not the per-world player id.
+    pub account: Option<i64>,
 }
 
 /// One line of co-op text chat, attributed to its author.
@@ -525,7 +539,14 @@ pub struct GameState {
     pub tunnel: TunnelState,
     /// Set when the win was earned by completing the Tunnel (graduating to
     /// the Global World), as opposed to surviving to the day-count victory.
+    /// A permanent achievement: the server carries it across the post-game
+    /// world reset, so graduation keeps unlocking the central world forever.
     pub graduated: bool,
+    /// True for the one shared central world (the Global World reached
+    /// through the Tunnel): survivors there are account-owned settlers who
+    /// never hunger or die, there is no win/lose/events/arrivals, and command
+    /// authority follows settler ownership instead of owner/guest roles.
+    pub central: bool,
     /// Permanently unlocked technologies.
     pub techs: Vec<Tech>,
     /// Tick until which a disease is active (0 = none).
@@ -660,11 +681,61 @@ impl GameState {
         self.players.iter().any(|p| p.role == Role::Owner)
     }
 
+    /// The account `pid` signed in with, if they're connected and logged in.
+    pub fn player_account(&self, pid: u64) -> Option<i64> {
+        self.player(pid).and_then(|p| p.account)
+    }
+
+    /// How many central-world settlers `account` owns.
+    pub fn owned_settlers(&self, account: i64) -> usize {
+        self.survivors
+            .iter()
+            .filter(|s| s.owner == Some(account))
+            .count()
+    }
+
     /// The single source of truth for command authority, shared by the server
     /// (enforcement), the sim (`apply_command`) and the client (UI greying).
     /// Unknown players (unit tests, trusted local calls) and owner-less worlds
     /// are unrestricted so co-op never dead-ends when the owner leaves.
     pub fn can_issue(&self, pid: u64, cmd: &PlayerCommand) -> bool {
+        // The central world has no owner/guest hierarchy at all — authority
+        // follows settler ownership. This branch must come before the
+        // unknown-player and no-owner fallbacks below: both are unrestricted,
+        // and an owner-less shared map full of strangers is exactly where
+        // "anyone commands anyone's settlers" must never happen.
+        if self.central {
+            let account = self.player_account(pid);
+            return match cmd {
+                // Anyone may add to the shared city; tearing down is limited
+                // to what this session built (buildings are keyed by player
+                // id, not account — good enough until central-world building
+                // ownership becomes account-based).
+                PlayerCommand::Place { .. } => true,
+                PlayerCommand::Demolish { building } => self
+                    .find_building(*building)
+                    .map(|b| b.owner == Some(pid))
+                    .unwrap_or(false),
+                // Only your own settlers, by account identity.
+                PlayerCommand::AssignSurvivor { survivor, .. } => {
+                    account.is_some()
+                        && self
+                            .survivors
+                            .iter()
+                            .find(|s| s.id == *survivor)
+                            .is_some_and(|s| s.owner == account)
+                }
+                // The anonymous +/- pool can't tell whose settler it would
+                // move, so it has no meaning where every settler is owned.
+                PlayerCommand::AdjustWorkers { .. } => false,
+                // Communal fixtures and personal-world progression have no
+                // per-player authority in the central world.
+                PlayerCommand::SetFurnaceLevel { .. }
+                | PlayerCommand::InvestTunnel
+                | PlayerCommand::Research { .. }
+                | PlayerCommand::RespondEvent { .. } => false,
+            };
+        }
         let Some(p) = self.player(pid) else {
             return true;
         };

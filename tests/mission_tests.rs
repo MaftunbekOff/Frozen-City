@@ -65,6 +65,7 @@ fn population_mission_completes() {
             hp: 100.0,
             hunger: 0.0,
             assigned_building: None,
+            owner: None,
         });
         next_id += 1;
     }

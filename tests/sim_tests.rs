@@ -471,6 +471,7 @@ fn player_rejoined_restores_identity_and_stats() {
         built: 3,
         demolished: 1,
         role: Role::Guest,
+        account: None,
     };
 
     sim::player_rejoined(&mut state, saved);

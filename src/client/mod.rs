@@ -146,7 +146,28 @@ pub struct Session {
     pub reconnectable: bool,
     /// Reconnect attempts already spent for the current outage.
     pub attempts: u32,
+    /// True while this session is in the CENTRAL world (entered through the
+    /// Tunnel) — reconnects must replay `EnterCentral`, not `Login`, or a
+    /// blip would silently drop the player back into their personal world.
+    pub central: bool,
 }
+
+/// Which world a requested in-game switch should land in.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum WorldTarget {
+    /// The account's own personal world (a plain `Login`).
+    Personal,
+    /// The shared Global World through the Tunnel (`EnterCentral`).
+    Central,
+}
+
+/// A world switch requested from inside the game (the Tunnel buttons in
+/// `ui.rs`). Routed through a one-frame trip to `Screen::Menu` so the whole
+/// game scene tears down and rebuilds for the new world — entity ids from the
+/// old world mean nothing in the new one — then consumed by
+/// `menu::pending_switch`, which dials and re-enters `Screen::Game`.
+#[derive(Resource, Default)]
+pub struct PendingSwitch(pub Option<WorldTarget>);
 
 impl GameView {
     /// State with the cached tile grid guaranteed to be present.
@@ -268,6 +289,7 @@ impl Plugin for ClientPlugin {
             .init_resource::<ServerRes>()
             .init_resource::<GameView>()
             .init_resource::<Session>()
+            .init_resource::<PendingSwitch>()
             .init_resource::<menu::LoginForm>()
             .init_resource::<net_sync::Reconnecting>()
             .init_resource::<BuildMode>()
@@ -284,6 +306,7 @@ impl Plugin for ClientPlugin {
             .add_systems(
                 Update,
                 (
+                    menu::pending_switch,
                     menu::autostart,
                     menu::menu_buttons,
                     #[cfg(target_arch = "wasm32")]
@@ -354,6 +377,7 @@ impl Plugin for ClientPlugin {
                     ui::selection_panel_update,
                     ui::selection_panel_buttons,
                     ui::game_over_ui,
+                    ui::world_switch_button,
                     ui::generic_button_hover,
                     net_sync::watch_disconnect,
                 )

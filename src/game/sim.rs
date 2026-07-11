@@ -98,6 +98,7 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
         ],
         tunnel: TunnelState::default(),
         graduated: false,
+        central: false,
         techs: Vec::new(),
         disease_until: 0,
         blizzard_until: 0,
@@ -114,6 +115,26 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
             "The last furnace is lit. Survive until day {}.",
             win_days
         ),
+    );
+    state
+}
+
+/// The one shared central world — the Global World on the far side of the
+/// Tunnel. Same procedural map, but it starts with no population (settlers
+/// only ever arrive through the Tunnel, owned by their account) and no
+/// personal-world progression: no missions, so the Tunnel can never unlock
+/// (`all_missions_done` is false on an empty list), and `tick` skips
+/// hunger/death/win/lose/events/arrivals for `central` worlds.
+pub fn new_game_central(seed: u64) -> GameState {
+    let mut state = new_game(seed, DEFAULT_WIN_DAYS);
+    state.central = true;
+    state.survivors.clear();
+    state.missions.clear();
+    state.events.clear();
+    state.total_events = 0;
+    push_event(
+        &mut state,
+        "The Global World. Settlers arrive through the Tunnel.",
     );
     state
 }
@@ -170,6 +191,7 @@ fn new_survivor(rng: &mut Rng, next_id: &mut u32) -> Survivor {
         hp: 85.0 + rng.below(16) as f32,
         hunger: 20.0 + rng.below(21) as f32,
         assigned_building: None,
+        owner: None,
     }
 }
 
@@ -206,6 +228,13 @@ pub fn push_action_event(state: &mut GameState, text: impl Into<String>) {
 }
 
 pub fn player_joined(state: &mut GameState, id: u64, name: &str) {
+    player_joined_as(state, id, name, None);
+}
+
+/// Like [`player_joined`], but records which account the connection signed in
+/// with — in the central world that's what links a player to the settlers
+/// they own.
+pub fn player_joined_as(state: &mut GameState, id: u64, name: &str, account: Option<i64>) {
     // A joining player's display name is just as untrusted as a chat line —
     // it's stored and then rendered verbatim in the roster, in chat
     // attribution ("<name> built a Tent"), and in the event log, so it must
@@ -215,7 +244,13 @@ pub fn player_joined(state: &mut GameState, id: u64, name: &str) {
     // Ownership is bound to the FIRST player ever to join, tracked in
     // `owner_id` — NOT the momentary roster size. If the owner is mid-reconnect
     // (roster briefly empty), a fresh joiner must not be able to seize the world.
-    let role = if state.owner_id.is_none_or(|o| o == id) {
+    // The central world is the exception: it belongs to no one, so nobody ever
+    // gets the Owner role (which would grant kick/policy power over every
+    // account on the shared map) — authority there follows settler ownership,
+    // see `GameState::can_issue`.
+    let role = if state.central {
+        Role::Guest
+    } else if state.owner_id.is_none_or(|o| o == id) {
         state.owner_id = Some(id);
         Role::Owner
     } else {
@@ -235,6 +270,7 @@ pub fn player_joined(state: &mut GameState, id: u64, name: &str) {
         built: 0,
         demolished: 0,
         role,
+        account,
     });
     // Join/leave churn is cosmetic so a flood of connects can never evict a
     // genuine system event (death, weather, victory) from the capped log.
@@ -267,6 +303,90 @@ pub fn kick_player(state: &mut GameState, target: u64) {
         let name = state.players.remove(pos).name;
         push_event(state, format!("{} was removed by the owner.", name));
     }
+}
+
+/// Remove up to `max` survivors from a personal world for migration through
+/// the Tunnel, preferring idle ones so a working city keeps its staffed
+/// buildings. Assigned survivors taken anyway (when idle ones run out) free
+/// their building slot exactly like the death path does. Returns the removed
+/// survivors; the caller (`world_manager`) hands them to the central world's
+/// `inject_migrants`.
+pub fn extract_migrants(state: &mut GameState, max: usize) -> Vec<Survivor> {
+    let mut picked: Vec<u32> = state
+        .survivors
+        .iter()
+        .filter(|s| s.assigned_building.is_none())
+        .map(|s| s.id)
+        .take(max)
+        .collect();
+    if picked.len() < max {
+        let more: Vec<u32> = state
+            .survivors
+            .iter()
+            .filter(|s| s.assigned_building.is_some())
+            .map(|s| s.id)
+            .take(max - picked.len())
+            .collect();
+        picked.extend(more);
+    }
+    let mut out = Vec::with_capacity(picked.len());
+    for id in picked {
+        let Some(idx) = state.survivors.iter().position(|s| s.id == id) else {
+            continue;
+        };
+        if let Some(b_id) = state.survivors[idx].assigned_building {
+            if let Some(b) = state.buildings.iter_mut().find(|b| b.id == b_id) {
+                b.workers = b.workers.saturating_sub(1);
+            }
+        }
+        let mut s = state.survivors.remove(idx);
+        s.assigned_building = None;
+        out.push(s);
+    }
+    if !out.is_empty() {
+        let plural = if out.len() == 1 { "" } else { "s" };
+        push_event(
+            state,
+            format!("{} settler{} left through the Tunnel.", out.len(), plural),
+        );
+    }
+    out
+}
+
+/// Add migrated survivors to the central world as `account`'s settlers.
+/// Re-ids each one from this world's own counter (ids are only unique within
+/// the world they came from — two personal worlds both have a survivor 1) and
+/// enforces the per-account cap even if the caller already checked, so racing
+/// entries can't stack one account past it. Returns how many actually settled.
+pub fn inject_migrants(
+    state: &mut GameState,
+    account: i64,
+    owner_name: &str,
+    migrants: Vec<Survivor>,
+) -> usize {
+    let mut settled = 0usize;
+    for mut s in migrants {
+        if state.owned_settlers(account) >= CENTRAL_MIGRANTS_PER_ACCOUNT {
+            break;
+        }
+        s.id = state.next_id;
+        state.next_id += 1;
+        s.assigned_building = None;
+        s.owner = Some(account);
+        state.survivors.push(s);
+        settled += 1;
+    }
+    if settled > 0 {
+        let plural = if settled == 1 { "" } else { "s" };
+        push_event(
+            state,
+            format!(
+                "{} settler{} arrived through the Tunnel with {}.",
+                settled, plural, owner_name
+            ),
+        );
+    }
+    settled
 }
 
 /// Restore a previously-connected player's roster entry (reconnect flow).
@@ -643,7 +763,10 @@ pub fn tick(state: &mut GameState) {
         .retain(|p| tick.saturating_sub(p.tick) < PING_TTL_TICKS);
 
     // --- Midnight: day rollover ---
-    if state.tick.is_multiple_of(TICKS_PER_DAY) {
+    // The central world is a permanent meeting place, not a survival run: no
+    // day-count victory, no weather forecast drama, no disease/blizzard
+    // events — days just pass.
+    if state.tick.is_multiple_of(TICKS_PER_DAY) && !state.central {
         let day = state.day();
         if day > state.win_days {
             state.phase = GamePhase::Won;
@@ -799,6 +922,17 @@ pub fn tick(state: &mut GameState) {
     };
     let mut deaths: Vec<(u32, String, &'static str)> = Vec::new();
     let disease = state.disease_active();
+
+    // Central-world settlers are a presence, not mouths to feed: they never
+    // hunger, freeze, sicken or die (their owner may be offline for weeks —
+    // returning to a starved-out group would make migration pointless).
+    // Everything above (production, furnace) still runs so an assigned
+    // settler keeps contributing to the communal stock.
+    if state.central {
+        state.rng = rng.0;
+        state.event_rng = erng.0;
+        return;
+    }
 
     for (i, s) in state.survivors.iter_mut().enumerate() {
         s.hunger = (s.hunger + hunger_per_tick).min(120.0);

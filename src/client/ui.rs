@@ -97,8 +97,22 @@ pub enum GoText {
 #[derive(Component)]
 pub struct GameOverBack;
 
+/// Game-over overlay: step through the freshly opened Tunnel into the
+/// central world. Shown only on a graduated win, and only for account
+/// sessions (a guest has no account to own settlers with).
+#[derive(Component)]
+pub struct EnterCentralBtn;
+
 #[derive(Component)]
 pub struct QuitToMenuBtn;
+
+/// Top-bar world switch: "Global World" in a graduated personal world,
+/// "My City" in the central world, hidden otherwise (guests, ungraduated).
+#[derive(Component)]
+pub struct WorldSwitchBtn;
+
+#[derive(Component)]
+pub struct WorldSwitchLabel;
 
 fn text(t: impl Into<String>, size: f32, color: Color) -> impl Bundle {
     (
@@ -159,6 +173,25 @@ pub fn spawn_hud(mut commands: Commands) {
                 ..default()
             });
             p.spawn((text("Furnace L1", 15.0, TEXT_MAIN), HudField::Furnace));
+            p.spawn((
+                Button,
+                Node {
+                    width: Val::Px(110.0),
+                    height: Val::Px(30.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    // Hidden until `world_switch_button` decides this session
+                    // may switch worlds at all.
+                    display: Display::None,
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.13, 0.30, 0.40)),
+                BaseColor(Color::srgb(0.13, 0.30, 0.40)),
+                WorldSwitchBtn,
+            ))
+            .with_children(|b| {
+                b.spawn((text("Global World", 13.0, TEXT_MAIN), WorldSwitchLabel));
+            });
             p.spawn((button(70.0, 30.0, BTN_BG), QuitToMenuBtn))
                 .with_children(|b| {
                     b.spawn(text("Menu", 13.0, TEXT_MAIN));
@@ -375,6 +408,13 @@ pub fn spawn_hud(mut commands: Commands) {
         .with_children(|p| {
             p.spawn((text("", 44.0, TEXT_MAIN), GoText::Title));
             p.spawn((text("", 16.0, TEXT_DIM), GoText::Info));
+            p.spawn((
+                button(260.0, 46.0, Color::srgb(0.13, 0.35, 0.45)),
+                EnterCentralBtn,
+            ))
+            .with_children(|b| {
+                b.spawn(text("Enter the Global World", 15.0, TEXT_MAIN));
+            });
             p.spawn((button(220.0, 46.0, BTN_BG), GameOverBack))
                 .with_children(|b| {
                     b.spawn(text("Return to Menu", 15.0, TEXT_MAIN));
@@ -802,15 +842,26 @@ pub fn selection_panel_buttons(
 
 pub fn game_over_ui(
     view: Res<GameView>,
+    session: Res<Session>,
+    mut pending: ResMut<PendingSwitch>,
     mut next: ResMut<NextState<Screen>>,
     mut root: Query<&mut Node, With<GameOverRoot>>,
     mut texts: Query<(&mut Text, &mut TextColor, &GoText)>,
     back: Query<&Interaction, (Changed<Interaction>, With<GameOverBack>)>,
     quit: Query<&Interaction, (Changed<Interaction>, With<QuitToMenuBtn>)>,
+    enter_central: Query<&Interaction, (Changed<Interaction>, With<EnterCentralBtn>)>,
+    mut central_btn: Query<&mut Node, (With<EnterCentralBtn>, Without<GameOverRoot>)>,
 ) {
     if back.iter().any(|i| *i == Interaction::Pressed)
         || quit.iter().any(|i| *i == Interaction::Pressed)
     {
+        next.set(Screen::Menu);
+        return;
+    }
+    if enter_central.iter().any(|i| *i == Interaction::Pressed) {
+        // The dial happens in `menu::pending_switch` after the game scene
+        // tears down — see `PendingSwitch`.
+        pending.0 = Some(WorldTarget::Central);
         next.set(Screen::Menu);
         return;
     }
@@ -828,6 +879,17 @@ pub fn game_over_ui(
     }
     if state.phase == GamePhase::Running {
         return;
+    }
+
+    // The Tunnel exit is only offered where it can work: a graduated win, an
+    // account signed in to own the settlers, and not already in the central
+    // world (its overlay never shows anyway — no win/lose there).
+    let offer_central = state.graduated && session.auth.is_some() && !state.central;
+    for mut node in &mut central_btn {
+        let want = if offer_central { Display::Flex } else { Display::None };
+        if node.display != want {
+            node.display = want;
+        }
     }
 
     for (mut text, mut color, kind) in &mut texts {
@@ -870,6 +932,50 @@ pub fn game_over_ui(
             text.0 = new;
         }
         color.0 = col;
+    }
+}
+
+/// The top-bar world-switch button: visible as "Global World" in a graduated
+/// personal world (account sessions only) and as "My City" inside the central
+/// world; hidden for guests and ungraduated cities. A press routes through
+/// `PendingSwitch` exactly like the game-over button.
+pub fn world_switch_button(
+    view: Res<GameView>,
+    session: Res<Session>,
+    mut pending: ResMut<PendingSwitch>,
+    mut next: ResMut<NextState<Screen>>,
+    mut btn: Query<(&Interaction, &mut Node), With<WorldSwitchBtn>>,
+    mut label: Query<&mut Text, With<WorldSwitchLabel>>,
+) {
+    let Some(state) = view.state.as_ref() else { return };
+    let target = if session.auth.is_none() {
+        None
+    } else if state.central {
+        Some((WorldTarget::Personal, "My City"))
+    } else if state.graduated {
+        Some((WorldTarget::Central, "Global World"))
+    } else {
+        None
+    };
+    for (interaction, mut node) in &mut btn {
+        let want = if target.is_some() { Display::Flex } else { Display::None };
+        if node.display != want {
+            node.display = want;
+        }
+        if let Some((world, _)) = target {
+            if *interaction == Interaction::Pressed {
+                pending.0 = Some(world);
+                next.set(Screen::Menu);
+                return;
+            }
+        }
+    }
+    if let Some((_, wanted)) = target {
+        for mut text in &mut label {
+            if text.0 != wanted {
+                text.0 = wanted.to_string();
+            }
+        }
     }
 }
 

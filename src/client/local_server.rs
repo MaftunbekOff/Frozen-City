@@ -77,9 +77,14 @@ pub fn tick(mut server: ResMut<ServerRes>, time: Res<Time>) {
                     Ok(ClientMsg::Ping { x, y }) => {
                         sim::add_ping(&mut srv.state, LOCAL_PLAYER_ID, x, y)
                     }
-                    // Singleplayer has no accounts, so a `Login` (like `Hello`)
-                    // is just ignored — the connection is already set up in `start()`.
-                    Ok(ClientMsg::Hello { .. } | ClientMsg::Login { .. }) => {}
+                    // Singleplayer has no accounts (and no central world), so
+                    // `Login`/`EnterCentral` (like `Hello`) are just ignored —
+                    // the connection is already set up in `start()`.
+                    Ok(
+                        ClientMsg::Hello { .. }
+                        | ClientMsg::Login { .. }
+                        | ClientMsg::EnterCentral { .. },
+                    ) => {}
                     // Singleplayer is a solo owner: no guests to gate or kick.
                     Ok(ClientMsg::SetGuestPermission { .. } | ClientMsg::Kick { .. }) => {}
                     Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,

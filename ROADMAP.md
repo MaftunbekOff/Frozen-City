@@ -60,6 +60,18 @@ tafsilotlar "V0.4" bo'limida):
 - **Ko'p-region infratuzilmasi**: 3ta mustaqil static olam (asosiy + region2 + region3,
   alohida systemd xizmat va portlarda), brauzerda region tanlash menyusi, PWA
   (manifest+service worker), yuk-test vositasi (`examples/loadtest.rs`).
+- **Markaziy olam (V0.5'ning birinchi bosqichi, 2026-07-11)**: Tunnel bitgan akkaunt
+  `EnterCentral` bilan bitta doimiy **Global Olamga** o'tadi; o'tishda shaxsiy
+  olamidan 5 tagacha aholi **ko'chib o'tadi** (Tunnel orqali, shaxsiy olamdan
+  chiqib ketadi) va markaziy olamda **faqat egasi boshqaradigan** ko'chmanchilarga
+  aylanadi (`Survivor::owner`, akkaunt bo'yicha). Markaziy olamda ochlik/o'lim/
+  g'alaba/mag'lubiyat yo'q — doimiy uchrashuv maydoni. Saqlash formati
+  versiyalandi (`FCWORLD2` + V1 migratsiya, `net/legacy.rs`) — eski production
+  olamlar buzilmasdan o'qiladi. Akkauntlar va markaziy olam **faqat asosiy
+  regionda** (klient login/EnterCentral'ni `/ws`ga majburlaydi; region2/3
+  `FC_DISABLE_ACCOUNTS=1` bilan rad etadi) — aks holda har region o'z
+  WorldManager'i bilan bitta akkauntning "yagona" olamini regionlararo
+  nusxalarga bo'lib yuborar edi (V0.4'dagi ochiq savol shu tarzda yechildi).
 
 **Hal qilingan follow-up'lar (avvalgi review'dan):**
 - ✅ Async reconnect — fon thread'ida dial, ilova muzlamaydi.
@@ -240,9 +252,11 @@ tasdiqlash, va region-mahalliylik nuance'i (pastga qarang).
       AKKAUNT orasidagi izolyatsiya va restart'dan omon qolishni tasdiqlaydi, lekin
       **bitta akkauntning ikkita turli klientdan ketma-ket kirishi** ("brauzerda
       qurib, uzilib, keyin desktopdan o'sha shaharni ko'rish") hali alohida testda
-      aniq isbotlanmagan. Nuance: har region (asosiy/region2/region3) — mustaqil
-      process, demak har birining **o'z** WorldManager'i bor — bitta akkauntning
-      olami hozircha region-mahalliy, regionlar aro yagona emas.
+      aniq isbotlanmagan. ~~Nuance: region-mahalliylik~~ — **yechildi (2026-07-11)**:
+      akkauntlar (va markaziy olam) faqat asosiy region processida yashaydi;
+      klient akkaunt-login/EnterCentral'ni doim `/ws`ga yo'naltiradi, region2/3
+      esa `FC_DISABLE_ACCOUNTS=1` bilan akkaunt kirishini rad etadi. Region
+      tanlash faqat mehmon co-op uchun qoldi.
 - [ ] **Olam menejeri (ko'p-region miqyosida)**: uchta region hamon 3ta **mustaqil,
       qo'lda ishga tushirilgan** static process (alohida systemd xizmat/port,
       brauzerda region tanlash menyusi) — bu qatlamda hali dinamik emas. E'tibor
@@ -265,19 +279,43 @@ tasdiqlash, va region-mahalliylik nuance'i (pastga qarang).
 
 **Maqsad:** butun dunyo o'yinchilari uchrashadigan bitta doimiy makon.
 
+**Holat (2026-07-11):** birinchi bosqich JONLI — markaziy olam mavjud, Tunnel
+orqali kiriladi, har akkaunt o'z ko'chmanchilarini olib o'tadi va faqat ularni
+boshqaradi. Hozircha "hub" avatar-rejim emas: o'sha shahar-sim xaritasi, lekin
+o'lim/g'alabasiz doimiy makon — o'yinchi o'z aholisini binolarga qo'yadi,
+quradi, chat qiladi. Avatar/yengil rejim keyingi bosqich.
+
 ### Vazifalar
 
-- [ ] **Hub-rejim**: avatar bilan yurish (shahar-sim emas — yengil rejim),
-      atrofdagi o'yinchilarni ko'rish, ism/ko'rinish.
+- [~] **Hub-rejim**: ✅ bitta doimiy markaziy olam (`sim::new_game_central`,
+      `GameState::central`): ochlik/o'lim/voqealar/g'alaba-mag'lubiyat yo'q,
+      aholi faqat Tunnel orqali keladi (`extract_migrants`/`inject_migrants`,
+      akkauntga 5 tagacha, qaytib kirish nusxalamaydi — cap'gacha to'ldiradi),
+      **har kim faqat o'z ko'chmanchilarini boshqaradi** (`can_issue`ning
+      central-tarmog'i, roster ham faqat o'znikini ko'rsatadi), Owner roli
+      yo'q (birinchi kirgan ham kick qila olmaydi). Qoldi: avatar bilan yurish
+      o'rniga hozircha shahar-sim ko'rinishi — yengil avatar-rejim keyin.
 - [ ] **Global va yaqin-atrof chat**, do'stlar ro'yxati (qo'shish/o'chirish).
-- [ ] **Tunnel o'tish oqimi**: shaxsiy olam ↔ hub bitta klient ichida silliq
-      almashadi (ulanishni almashtirish, yuklash ekrani).
+      (Oddiy umumiy chat markaziy olamda allaqachon ishlaydi — snapshot'dagi
+      mavjud chat tizimi; "yaqin-atrof" va do'stlar ro'yxati yo'q hali.)
+- [~] **Tunnel o'tish oqimi**: ✅ minimal ishlaydi — graduatsiya ekranidagi
+      "Enter the Global World" tugmasi va HUD'dagi "Global World"/"My City"
+      almashtirgichi (`PendingSwitch`: bir freym menyu orqali toza qayta
+      qurish); uzilishda reconnect `EnterCentral`ni qayta jo'natadi (shaxsiy
+      olamga tushib qolmaydi). Qoldi: yuklash ekrani/silliq o'tish animatsiyasi.
 - [ ] **Interest management**: mijoz faqat atrofidagi zonani oladi; kerak
       bo'lganda gateway + region serverlar. Zaminiy infratuzilma qisman bor —
       3ta mustaqil region-server (V0.4'da tasvirlangan) — lekin bu hub/avatar
       shardlash emas, qo'lda ochilgan qo'shimcha statik olamlar.
 - [ ] **Hub mashg'ulotlari (v1)**: boshqa shaharlarning vitrinasi (statistika,
       «tashrif»), e'lonlar taxtasi; keyinroq savdo/almashuv — dizayn ochiq.
+
+**Muhim texnik asos (2026-07-11):** saqlash formati endi versiyalangan —
+`persist.rs` har saqlovni `FCWORLD2` magic bilan yozadi; magic'siz fayl eski
+(V1) format deb `net/legacy.rs`dagi muzlatilgan ko'zgu-strukturalar orqali
+o'qilib migratsiya qilinadi. `GameState`ga maydon qo'shishdan OLDIN har doim:
+yangi versiya magic + legacy zanjiriga yangi bo'g'in, va deploy'dan oldin
+haqiqiy production saqlovlar nusxasini `examples/checksave.rs` bilan tekshirish.
 
 ### Natija mezonlari
 
@@ -368,7 +406,7 @@ tasdiqlash, va region-mahalliylik nuance'i (pastga qarang).
 | V0.2 Tarmoq poydevori | ✅ bajarildi | Attributsiya, rollar, reconnect — hamma ijtimoiy narsaning asosi |
 | V0.3 Missiyalar + Tunnel | ✅ bajarildi | Shaxsiy olam kontenti — o'yinchini hub'gacha yetaklaydi |
 | V0.4 Akkauntlar + doimiy olamlar | 🔶 qisman (yuqoriga qarang) | Taklif va hub uchun identity + persistensiya shart |
-| V0.5 Global Olam (hub) | boshlanmagan (region infra zaminiy) | Eng katta yangi ish: avatar rejimi + masshtab |
+| V0.5 Global Olam (hub) | 🔶 boshlandi — markaziy olam + Tunnel o'tishi + ko'chmanchi egaligi JONLI | Eng katta yangi ish: avatar rejimi + masshtab |
 | V0.6 Taklif + mehmon co-op | boshlanmagan | Vizyon halqasini yopadi; hammasi tayyor bo'lgach arzon |
 | V1.0 Sayqal + tarqatish | qisman (yuqoriga qarang) | Keng auditoriyadan oldin oxirgi qatlam |
 
@@ -384,3 +422,13 @@ tasdiqlash, va region-mahalliylik nuance'i (pastga qarang).
    shaharni ko'rish — buni tasdiqlovchi aniq e2e test yoki qo'lda (headless
    chromium) tekshiruv yozish kerak. Shu bilan birga: akkaunt ro'yxatdan o'tishni
    Telegram botsiz, client ichidan qilish (V0.4 "Akkauntlar" qoldig'i) ham navbatda.
+
+**V0.5'ning keyingi qadamlari (markaziy olam v1'dan keyin):**
+
+- Markaziy olamda **avatar/yengil rejim** yoki hozirgi ko'chmanchi-shahar
+  modelini boyitish (dizayn tanlovi — foydalanuvchi bilan kelishiladi).
+- **Do'stlar ro'yxati** va yaqin-atrof chat.
+- Markaziy olam **iqtisodiyoti**: umumiy stock hozir "hamma uchun bitta" —
+  per-akkaunt hissa/vitrina, savdo keyinroq.
+- Markaziy olamda binolarning egaligi hozir sessiya-pid bo'yicha (buzish
+  cheklovi uchun) — akkaunt-asosli qilish kerak.
