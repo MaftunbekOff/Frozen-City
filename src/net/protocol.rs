@@ -48,12 +48,63 @@ pub enum ClientMsg {
     /// migrates a group of survivors out of the personal world to be this
     /// account's settlers. `token` reconnects an interrupted central-world
     /// session, same meaning as on `Hello`/`Login`.
-    /// (Appended last: bincode enum indices are positional.)
+    /// (This and everything below it: appended in order, never reordered —
+    /// bincode enum indices are positional.)
     EnterCentral {
         login: String,
         password: String,
         token: Option<u64>,
     },
+    /// Fourth possible first message: create an account right from the client
+    /// (no Telegram bot needed) and, on success, sign straight into the new
+    /// account's personal world. Refused (as `AuthFailed`, with the reason)
+    /// when the login/display name is taken or fails validation.
+    Register {
+        login: String,
+        password: String,
+        /// Desired display name (unique, like the bot enforces).
+        name: String,
+    },
+    /// Fifth possible first message: sign in and join a FRIEND's personal
+    /// world as a guest. Admitted only while a fresh invite from `host`
+    /// (`ClientMsg::Invite`, issued in the central world) is standing AND the
+    /// host is currently online in their world. `token` reconnects an
+    /// interrupted visit.
+    VisitFriend {
+        login: String,
+        password: String,
+        /// Account id of the world's owner (from `ServerMsg::Invited`).
+        host: i64,
+        token: Option<u64>,
+    },
+    /// Nearby chat: delivered as a transient `ServerMsg::Bubble` to players
+    /// whose presence is within earshot, instead of the persistent world-wide
+    /// chat log. The speaker's position is their last cursor/avatar position.
+    ChatLocal { text: String },
+    /// Add `name` (a display name) to the sender's friends list. Answered
+    /// with a refreshed `ServerMsg::Social`.
+    AddFriend { name: String },
+    /// Remove an account from the sender's friends list. Answered with a
+    /// refreshed `ServerMsg::Social`.
+    RemoveFriend { account: i64 },
+    /// Ask for a fresh `ServerMsg::Social` (e.g. to poll who's online).
+    RefreshSocial,
+    /// Central world only: invite another account (who must be online in the
+    /// central world right now) to visit the sender's personal world. The
+    /// target receives `ServerMsg::Invited`; the standing invite then admits
+    /// their `VisitFriend` for a while.
+    Invite { account: i64 },
+}
+
+/// One friend row in `ServerMsg::Social`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct FriendInfo {
+    pub account: i64,
+    pub name: String,
+    /// True when this friend is connected to the central world right now.
+    /// Only meaningful when the receiving client is in the central world
+    /// itself (elsewhere the server reports `false` — it has no global view).
+    pub online_central: bool,
 }
 
 /// Which of `GameState`'s pricier collection fields actually ride along on a
@@ -86,6 +137,21 @@ pub enum ServerMsg {
     /// Sent instead of `Welcome` when a `Login` first message had a bad
     /// login/password; the connection is closed right after.
     AuthFailed { reason: String },
+    /// Transient nearby-chat line (see `ClientMsg::ChatLocal`): rendered as a
+    /// short-lived speech bubble / tagged chat line, never stored in the
+    /// world snapshot. (Appended: bincode enum indices are positional.)
+    Bubble {
+        player_id: u64,
+        name: String,
+        color: u8,
+        text: String,
+    },
+    /// The sender's friends list, refreshed after every Add/Remove/Refresh
+    /// and once on join for account sessions.
+    Social { friends: Vec<FriendInfo> },
+    /// Someone in the central world invited this client to visit their
+    /// personal world — follow up with `VisitFriend { host, .. }`.
+    Invited { host: i64, host_name: String },
 }
 
 /// Deflate level: fast enough to run every tick on a shared box, still gets

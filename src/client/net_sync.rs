@@ -11,7 +11,7 @@ use bevy::prelude::*;
 use frozen_city::net::client::ClientConn;
 use frozen_city::net::protocol::{ClientMsg, ServerMsg};
 
-use super::{GameView, NetConn, Screen, Session};
+use super::{BubbleEvent, GameView, NetConn, Screen, Session, SocialState};
 
 /// Holds an in-flight background reconnect dial (native). `None` when idle.
 #[derive(Resource, Default)]
@@ -23,6 +23,7 @@ pub fn pump_net(
     net: Res<NetConn>,
     mut view: ResMut<GameView>,
     mut session: ResMut<Session>,
+    mut social: ResMut<SocialState>,
     mut next: ResMut<NextState<Screen>>,
 ) {
     let Some(conn) = &net.0 else { return };
@@ -92,6 +93,30 @@ pub fn pump_net(
                 view.error = Some(reason);
                 next.set(Screen::Menu);
             }
+            ServerMsg::Bubble {
+                player_id,
+                name,
+                color,
+                text,
+            } => {
+                social.bubbles.push(BubbleEvent {
+                    player_id,
+                    name,
+                    color,
+                    text,
+                });
+                // A stuck UI must not let the inbox grow without bound.
+                let overflow = social.bubbles.len().saturating_sub(32);
+                if overflow > 0 {
+                    social.bubbles.drain(..overflow);
+                }
+            }
+            ServerMsg::Social { friends } => {
+                social.friends = friends;
+            }
+            ServerMsg::Invited { host, host_name } => {
+                social.invite = Some((host, host_name));
+            }
         }
     }
 }
@@ -159,6 +184,15 @@ fn reconnect_hello(session: &Session) -> ClientMsg {
         Some(auth) if session.central => ClientMsg::EnterCentral {
             login: auth.login.clone(),
             password: auth.password.clone(),
+            token: session.token,
+        },
+        // A visit outlives a blip: the standing invite re-admits the same
+        // visitor, so replay VisitFriend rather than dropping them into
+        // their own world mid-conversation.
+        Some(auth) if session.visiting.is_some() => ClientMsg::VisitFriend {
+            login: auth.login.clone(),
+            password: auth.password.clone(),
+            host: session.visiting.unwrap_or_default(),
             token: session.token,
         },
         Some(auth) => ClientMsg::Login {

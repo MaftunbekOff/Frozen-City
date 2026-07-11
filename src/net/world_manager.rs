@@ -41,6 +41,52 @@ pub enum CentralError {
     Capacity,
 }
 
+/// Why `visit_friend` refused, mapped to a client-visible `AuthFailed`
+/// reason by the caller.
+pub enum VisitError {
+    /// No standing invite from that host for this visitor (or it expired).
+    NoInvite,
+    /// The host isn't currently online in their personal world — the default
+    /// policy is that a world without its owner admits no visitors.
+    HostOffline,
+    /// A needed world couldn't be spawned or didn't answer.
+    Capacity,
+}
+
+/// How long an `Invite` keeps admitting the invited account's `VisitFriend`.
+/// Long enough to comfortably switch worlds (and survive a reconnect or
+/// two); short enough that an invite isn't a permanent key to the city.
+const INVITE_TTL: Duration = Duration::from_secs(15 * 60);
+
+/// Standing invites: (host account, visitor account) → when issued. Written
+/// by the central world's sim thread (an `Invite` command), read by
+/// `visit_friend` when the visitor dials in. Deliberately NOT persisted —
+/// a server restart voiding pending invites is fine.
+#[derive(Default)]
+pub struct InviteBook {
+    map: Mutex<HashMap<(i64, i64), std::time::Instant>>,
+}
+
+impl InviteBook {
+    /// Record (or refresh) an invite from `host` to `visitor`.
+    pub fn invite(&self, host: i64, visitor: i64) {
+        let mut map = self.map.lock().unwrap();
+        let now = std::time::Instant::now();
+        // Opportunistic cleanup so the map never grows unbounded on a
+        // long-running server full of never-used invites.
+        map.retain(|_, at| now.duration_since(*at) < INVITE_TTL);
+        map.insert((host, visitor), now);
+    }
+
+    /// Is there a fresh invite from `host` to `visitor`? Not consumed on
+    /// read: the visitor may need it again for a reconnect a minute later.
+    pub fn valid(&self, host: i64, visitor: i64) -> bool {
+        let map = self.map.lock().unwrap();
+        map.get(&(host, visitor))
+            .is_some_and(|at| at.elapsed() < INVITE_TTL)
+    }
+}
+
 /// How long an account's world keeps running with nobody connected before it
 /// saves and its thread exits. Long enough to comfortably outlast a
 /// reconnect (page reload, brief network blip) without keeping every
@@ -78,6 +124,9 @@ pub struct WorldManager {
     /// and migrate a double group past the per-account cap. Entries are a
     /// few channel round-trips (~ms); a global lock is fine at this scale.
     central_entry: Mutex<()>,
+    /// Standing friend-world invites; written by the central world's sim
+    /// thread, checked by `visit_friend`.
+    invites: Arc<InviteBook>,
     seed: u64,
     win_days: u32,
     verbose: bool,
@@ -88,10 +137,51 @@ impl WorldManager {
         Arc::new(WorldManager {
             worlds: Mutex::new(HashMap::new()),
             central_entry: Mutex::new(()),
+            invites: Arc::new(InviteBook::default()),
             seed,
             win_days,
             verbose,
         })
+    }
+
+    /// Admits `visitor` into `host`'s personal world as a guest — only while
+    /// a fresh invite stands and the host is online there (the default
+    /// no-owner-no-entry policy). The world is never spawned FOR a visit: a
+    /// not-running world means the host isn't in it.
+    pub fn visit_friend(
+        self: &Arc<Self>,
+        host: i64,
+        visitor: i64,
+        name: String,
+        token: Option<u64>,
+    ) -> Result<(Sender<ToServer>, u64, Receiver<ServerMsg>), VisitError> {
+        if !self.invites.valid(host, visitor) {
+            return Err(VisitError::NoInvite);
+        }
+        let tx = {
+            let worlds = self.worlds.lock().unwrap();
+            match worlds.get(&host) {
+                Some(handle) => handle.tx.clone(),
+                None => return Err(VisitError::HostOffline),
+            }
+        };
+        let (reply_tx, reply_rx) = channel();
+        if tx
+            .send(ToServer::OwnerOnline {
+                owner: host,
+                reply: reply_tx,
+            })
+            .is_err()
+        {
+            return Err(VisitError::HostOffline);
+        }
+        match reply_rx.recv_timeout(MIGRATE_REPLY_TIMEOUT) {
+            Ok(true) => {}
+            Ok(false) => return Err(VisitError::HostOffline),
+            Err(_) => return Err(VisitError::Capacity),
+        }
+        let (id, out_rx) = join(&tx, name, token, Some(visitor)).ok_or(VisitError::Capacity)?;
+        Ok((tx, id, out_rx))
     }
 
     /// Joins `account_id`'s world as `name`, spawning it on first use.
@@ -259,6 +349,13 @@ impl WorldManager {
             save_path: Some(save_path),
             idle_shutdown: Some(IDLE_SHUTDOWN),
             central,
+            // A personal world is owned by its account: only that account's
+            // connections ever hold the Owner role there, no matter who
+            // (an invited visitor) joins first. The central world has no owner.
+            owner_account: (!central).then_some(key),
+            // Only the central world issues invites (that's where people
+            // meet); it needs the shared book to write them into.
+            invites: central.then(|| self.invites.clone()),
         };
         let this = self.clone();
         let flag_for_thread = world_shutdown.clone();

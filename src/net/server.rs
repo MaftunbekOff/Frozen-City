@@ -22,15 +22,16 @@ use tungstenite::Message;
 
 use crate::game::sim;
 use crate::game::types::{
-    GamePhase, GameState, Mission, PlayerCommand, PlayerInfo, Ping, Survivor, Tech, TICK_MS,
+    GamePhase, GameState, Mission, PlayerCommand, PlayerInfo, Ping, Role, Survivor, Tech, TICK_MS,
 };
 use crate::net::accounts;
 use crate::net::client::ClientConn;
 use crate::net::persist;
 use crate::net::protocol::{
-    decode, encode, read_frame, write_frame, ClientMsg, Included, ServerMsg, MAX_FRAME,
-    TILES_EVERY_N_TICKS,
+    decode, encode, read_frame, write_frame, ClientMsg, FriendInfo, Included, ServerMsg,
+    MAX_FRAME, TILES_EVERY_N_TICKS,
 };
+use crate::net::world_manager::InviteBook;
 
 /// Directory the built-in HTTP server serves the web build from.
 const WEB_ROOT: &str = "web";
@@ -64,6 +65,37 @@ const ACCOUNTS_DISABLED_REASON: &str =
 /// central world are switched off — see `ACCOUNTS_DISABLED_REASON`.
 fn accounts_disabled() -> bool {
     std::env::var("FC_DISABLE_ACCOUNTS").is_ok_and(|v| !v.is_empty() && v != "0")
+}
+
+/// Sent back as `ServerMsg::AuthFailed` for a `VisitFriend` with no standing
+/// invite (or an expired one).
+const NO_INVITE_REASON: &str =
+    "Bu olamga taklifingiz yo'q yoki muddati o'tgan. Global Olamda yangi taklif so'rang.";
+
+/// Sent back as `ServerMsg::AuthFailed` for a `VisitFriend` while the host
+/// isn't online in their own world (the default owner-present-only policy).
+const HOST_OFFLINE_REASON: &str = "Do'stingiz hozir o'z olamida emas — u kirganda qayta urining.";
+
+/// Sent back as `ServerMsg::AuthFailed` when in-client registration is
+/// throttled — a flood guard, not a player-behavior signal.
+const REGISTER_THROTTLED_REASON: &str =
+    "Hozir ro'yxatdan o'tish band, bir daqiqadan so'ng qayta urining.";
+
+/// In-process registration throttle: at most this many new accounts per
+/// sliding minute, across all connections. bcrypt hashing is also CPU-heavy,
+/// so this doubles as a hash-flood guard.
+const MAX_REGISTRATIONS_PER_MINUTE: u32 = 5;
+
+fn register_throttled() -> bool {
+    static WINDOW: std::sync::OnceLock<Mutex<(Instant, u32)>> = std::sync::OnceLock::new();
+    let window = WINDOW.get_or_init(|| Mutex::new((Instant::now(), 0)));
+    let mut w = window.lock().unwrap();
+    let now = Instant::now();
+    if now.duration_since(w.0) >= Duration::from_secs(60) {
+        *w = (now, 0);
+    }
+    w.1 += 1;
+    w.1 > MAX_REGISTRATIONS_PER_MINUTE
 }
 
 /// Mint a fresh, unguessable 64-bit token from the OS CSPRNG. Used for
@@ -101,6 +133,14 @@ pub struct ServerConfig {
     /// `sim::new_game`, and the flag is re-asserted on every load so the
     /// world can never silently degrade into an ordinary survival map.
     pub central: bool,
+    /// For per-account personal worlds: the account that OWNS this world.
+    /// Only that account's connections get the Owner role; anyone else (an
+    /// invited visitor) is a Guest no matter who joins first. `None` for the
+    /// shared guest world (first-joiner rule as ever) and the central world.
+    pub owner_account: Option<i64>,
+    /// Present only on the central world: where an `Invite` records the
+    /// standing permission that `WorldManager::visit_friend` later checks.
+    pub invites: Option<Arc<InviteBook>>,
 }
 
 /// On a persistent server, a finished world (won or lost) restarts with a
@@ -153,6 +193,12 @@ pub enum ToServer {
         account: i64,
         name: String,
         survivors: Vec<Survivor>,
+    },
+    /// Personal world only: is the owning account currently connected here?
+    /// Gate for `VisitFriend` — a world without its owner admits no visitors.
+    OwnerOnline {
+        owner: i64,
+        reply: Sender<bool>,
     },
 }
 
@@ -389,11 +435,80 @@ fn route_first_msg(
     to_server: &Sender<ToServer>,
     world_manager: &Option<Arc<crate::net::world_manager::WorldManager>>,
 ) -> FirstMsgOutcome {
-    use crate::net::world_manager::CentralError;
+    use crate::net::world_manager::{CentralError, VisitError};
     match msg {
         ClientMsg::Hello { name, token } => {
             let name = sanitize_name(&name);
             FirstMsgOutcome::Joined(to_server.clone(), join(to_server, name, token, None))
+        }
+        ClientMsg::Register {
+            login,
+            password,
+            name,
+        } => {
+            if accounts_disabled() {
+                return FirstMsgOutcome::Refused(ACCOUNTS_DISABLED_REASON);
+            }
+            if register_throttled() {
+                return FirstMsgOutcome::Refused(REGISTER_THROTTLED_REASON);
+            }
+            match accounts::register_account(&login, &password, &name) {
+                Ok((account_id, display_name)) => {
+                    // A successful registration signs straight in, exactly
+                    // like a `Login` would have.
+                    let name = sanitize_name(&display_name);
+                    match world_manager {
+                        Some(wm) => match wm.join_account(account_id, name, None) {
+                            Some((target, id, out_rx)) => {
+                                FirstMsgOutcome::Joined(target, Some((id, out_rx)))
+                            }
+                            None => FirstMsgOutcome::Refused(SERVER_FULL_REASON),
+                        },
+                        None => FirstMsgOutcome::Joined(
+                            to_server.clone(),
+                            join(to_server, name, None, Some(account_id)),
+                        ),
+                    }
+                }
+                Err(accounts::RegisterError::Taken) => {
+                    FirstMsgOutcome::Refused("Bu login yoki ism allaqachon band.")
+                }
+                Err(accounts::RegisterError::Invalid(why)) => FirstMsgOutcome::Refused(why),
+                Err(accounts::RegisterError::Io) => {
+                    FirstMsgOutcome::Refused("Server ro'yxatdan o'tkaza olmadi — keyinroq urining.")
+                }
+            }
+        }
+        ClientMsg::VisitFriend {
+            login,
+            password,
+            host,
+            token,
+        } => {
+            if accounts_disabled() {
+                return FirstMsgOutcome::Refused(ACCOUNTS_DISABLED_REASON);
+            }
+            match accounts::authenticate(&login, &password) {
+                Some((account_id, display_name)) => {
+                    let name = sanitize_name(&display_name);
+                    match world_manager {
+                        Some(wm) => match wm.visit_friend(host, account_id, name, token) {
+                            Ok((target, id, out_rx)) => {
+                                FirstMsgOutcome::Joined(target, Some((id, out_rx)))
+                            }
+                            Err(VisitError::NoInvite) => FirstMsgOutcome::Refused(NO_INVITE_REASON),
+                            Err(VisitError::HostOffline) => {
+                                FirstMsgOutcome::Refused(HOST_OFFLINE_REASON)
+                            }
+                            Err(VisitError::Capacity) => {
+                                FirstMsgOutcome::Refused(SERVER_FULL_REASON)
+                            }
+                        },
+                        None => FirstMsgOutcome::Refused(ACCOUNTS_DISABLED_REASON),
+                    }
+                }
+                None => FirstMsgOutcome::Refused(AUTH_FAILED_REASON),
+            }
         }
         ClientMsg::Login {
             login,
@@ -871,6 +986,39 @@ impl RateLimiter {
     }
 }
 
+/// How far (Chebyshev, in tiles) a nearby-chat bubble carries. Roughly the
+/// on-screen neighborhood at the default zoom — close enough to feel local,
+/// wide enough that two players talking don't have to stand on one tile.
+const LOCAL_CHAT_RADIUS: f32 = 12.0;
+
+/// The freshest friends list for `account`, with online-in-central flags when
+/// this world IS the central one (elsewhere the server has no global view and
+/// reports everyone offline — see `FriendInfo::online_central`).
+fn social_for(state: &GameState, account: i64) -> ServerMsg {
+    let friends = accounts::friends_list(account)
+        .into_iter()
+        .map(|(fid, fname)| FriendInfo {
+            account: fid,
+            name: fname,
+            online_central: state.central && state.players.iter().any(|p| p.account == Some(fid)),
+        })
+        .collect();
+    ServerMsg::Social { friends }
+}
+
+/// A private, transient system line to one client, reusing the Bubble channel
+/// (`player_id: 0` marks system text, same convention as `ChatLine`). Used
+/// for feedback that must not enter the shared world snapshot ("friend not
+/// found", "invite sent").
+fn system_bubble(text: &str) -> ServerMsg {
+    ServerMsg::Bubble {
+        player_id: 0,
+        name: "System".to_string(),
+        color: 0,
+        text: text.to_string(),
+    }
+}
+
 /// Common client-departure bookkeeping, shared by an explicit `Leave` and the
 /// broadcast dead-client cleanup. Drops the connection, stashes the
 /// departing player's stats (name/color/built/demolished) under their
@@ -1013,6 +1161,10 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                 Ok(ToServer::InjectMigrants { account, name, survivors }) => {
                     sim::inject_migrants(&mut state, account, &name, survivors);
                 }
+                Ok(ToServer::OwnerOnline { owner, reply }) => {
+                    let online = state.players.iter().any(|p| p.account == Some(owner));
+                    let _ = reply.send(online);
+                }
                 Ok(ToServer::Join { name, token, account, out, id_back }) => {
                     let client_id = next_client_id;
                     next_client_id += 1;
@@ -1045,6 +1197,22 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                             (player_id, session_token, false)
                         };
 
+                    // In an account-owned personal world, authority follows
+                    // the OWNING ACCOUNT, not join order: an invited visitor
+                    // who happens to connect first must never seize the
+                    // Owner role (or keep a stale owner_id claim).
+                    if let Some(owner_acc) = config.owner_account {
+                        let is_owner = account == Some(owner_acc);
+                        if let Some(p) = state.players.iter_mut().find(|p| p.id == player_id) {
+                            p.role = if is_owner { Role::Owner } else { Role::Guest };
+                        }
+                        if is_owner {
+                            state.owner_id = Some(player_id);
+                        } else if state.owner_id == Some(player_id) {
+                            state.owner_id = None;
+                        }
+                    }
+
                     player_of.insert(client_id, player_id);
                     token_of.insert(client_id, session_token);
                     limiters.insert(client_id, RateLimiter::new(Instant::now()));
@@ -1054,6 +1222,11 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                         token: session_token,
                         state: state.clone(),
                     });
+                    // Account sessions get their friends list right away, so
+                    // the social panel is populated without an extra request.
+                    if let Some(acc) = account {
+                        let _ = out.send(social_for(&state, acc));
+                    }
                     clients.insert(client_id, out);
                     let _ = id_back.send(client_id);
                     ever_joined = true;
@@ -1095,12 +1268,24 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                         ClientMsg::Cursor { .. } => limiters
                             .get_mut(&client)
                             .is_some_and(|l| l.allow_cursor(now)),
-                        // All three are only meaningful as the very first frame
-                        // (consumed before `join()`, never reach here); a
-                        // later one is a protocol violation, not a command.
+                        // First-frame-only messages (consumed before `join()`,
+                        // never reach here); a later one is a protocol
+                        // violation, not a command.
                         ClientMsg::Hello { .. }
                         | ClientMsg::Login { .. }
-                        | ClientMsg::EnterCentral { .. } => false,
+                        | ClientMsg::EnterCentral { .. }
+                        | ClientMsg::Register { .. }
+                        | ClientMsg::VisitFriend { .. } => false,
+                        // Social traffic shares the chat budget: all of it is
+                        // human-scale (a click or a said line), and Add/Remove
+                        // hit the accounts DB, which a flood must not.
+                        ClientMsg::ChatLocal { .. }
+                        | ClientMsg::AddFriend { .. }
+                        | ClientMsg::RemoveFriend { .. }
+                        | ClientMsg::RefreshSocial
+                        | ClientMsg::Invite { .. } => limiters
+                            .get_mut(&client)
+                            .is_some_and(|l| l.allow_chat(now)),
                         // Low-frequency owner-only admin actions: never rate
                         // limited (they're structurally rare — one click each
                         // — and gating them behind the cmd/chat/ping caps
@@ -1115,7 +1300,129 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                             ClientMsg::Ping { x, y } => sim::add_ping(&mut state, pid, x, y),
                             ClientMsg::Hello { .. }
                             | ClientMsg::Login { .. }
-                            | ClientMsg::EnterCentral { .. } => {}
+                            | ClientMsg::EnterCentral { .. }
+                            | ClientMsg::Register { .. }
+                            | ClientMsg::VisitFriend { .. } => {}
+                            ClientMsg::ChatLocal { text } => {
+                                let text = sim::sanitize_public_text(&text);
+                                if !text.trim().is_empty() {
+                                    if let Some(speaker) = state.player(pid).cloned() {
+                                        let bubble = ServerMsg::Bubble {
+                                            player_id: pid,
+                                            name: speaker.name.clone(),
+                                            color: speaker.color,
+                                            text,
+                                        };
+                                        for (cid, out) in &clients {
+                                            let Some(&other) = player_of.get(cid) else {
+                                                continue;
+                                            };
+                                            // Deliver within earshot; when a
+                                            // position is unknown (a player
+                                            // who hasn't moved yet) err on
+                                            // the side of delivering.
+                                            let near = other == pid
+                                                || match (
+                                                    speaker.cursor,
+                                                    state.player(other).and_then(|p| p.cursor),
+                                                ) {
+                                                    (Some((sx, sy)), Some((ox, oy))) => {
+                                                        (sx - ox).abs().max((sy - oy).abs())
+                                                            <= LOCAL_CHAT_RADIUS
+                                                    }
+                                                    _ => true,
+                                                };
+                                            if near {
+                                                let _ = out.send(bubble.clone());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            ClientMsg::AddFriend { name } => {
+                                if let Some(acc) = state.player_account(pid) {
+                                    let feedback = match accounts::friends_add(acc, &name) {
+                                        Ok((_, fname)) => {
+                                            format!("{fname} do'stlar ro'yxatiga qo'shildi.")
+                                        }
+                                        Err(accounts::FriendError::NotFound) => {
+                                            "Bunday ismli o'yinchi topilmadi.".to_string()
+                                        }
+                                        Err(accounts::FriendError::SelfAdd) => {
+                                            "O'zingizni qo'sha olmaysiz.".to_string()
+                                        }
+                                        Err(accounts::FriendError::Io) => {
+                                            "Server do'stlar ro'yxatini yangilay olmadi.".to_string()
+                                        }
+                                    };
+                                    if let Some(out) = clients.get(&client) {
+                                        let _ = out.send(system_bubble(&feedback));
+                                        let _ = out.send(social_for(&state, acc));
+                                    }
+                                }
+                            }
+                            ClientMsg::RemoveFriend { account: friend } => {
+                                if let Some(acc) = state.player_account(pid) {
+                                    let _ = accounts::friends_remove(acc, friend);
+                                    if let Some(out) = clients.get(&client) {
+                                        let _ = out.send(social_for(&state, acc));
+                                    }
+                                }
+                            }
+                            ClientMsg::RefreshSocial => {
+                                if let Some(acc) = state.player_account(pid) {
+                                    if let Some(out) = clients.get(&client) {
+                                        let _ = out.send(social_for(&state, acc));
+                                    }
+                                }
+                            }
+                            ClientMsg::Invite { account: target } => {
+                                // Only in the central world (that's where
+                                // people meet), only by account sessions,
+                                // never to yourself.
+                                let host_acc = state.player_account(pid);
+                                if let (true, Some(host_acc), Some(book)) =
+                                    (state.central, host_acc, config.invites.as_ref())
+                                {
+                                    if host_acc != target {
+                                        let targets: Vec<u64> = state
+                                            .players
+                                            .iter()
+                                            .filter(|p| p.account == Some(target))
+                                            .map(|p| p.id)
+                                            .collect();
+                                        if targets.is_empty() {
+                                            if let Some(out) = clients.get(&client) {
+                                                let _ = out.send(system_bubble(
+                                                    "Do'stingiz hozir Global Olamda emas.",
+                                                ));
+                                            }
+                                        } else {
+                                            book.invite(host_acc, target);
+                                            let host_name = state
+                                                .player(pid)
+                                                .map(|p| p.name.clone())
+                                                .unwrap_or_default();
+                                            for (cid, out) in &clients {
+                                                if player_of
+                                                    .get(cid)
+                                                    .is_some_and(|p| targets.contains(p))
+                                                {
+                                                    let _ = out.send(ServerMsg::Invited {
+                                                        host: host_acc,
+                                                        host_name: host_name.clone(),
+                                                    });
+                                                }
+                                            }
+                                            if let Some(out) = clients.get(&client) {
+                                                let _ = out.send(system_bubble(
+                                                    "Taklif yuborildi — do'stingiz olamingizga kira oladi.",
+                                                ));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             ClientMsg::SetGuestPermission { perm } => {
                                 if state.is_owner(pid) {
                                     sim::set_guest_permission(&mut state, perm);

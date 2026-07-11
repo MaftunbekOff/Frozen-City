@@ -1,9 +1,10 @@
-//! Reads the accounts DB the registration Telegram bot maintains (native
-//! server only). Authenticates a login/password against the bcrypt hash the
-//! bot stored and, on success, hands back the account's stable id and
-//! in-game display name. The id routes the connection to that account's own
-//! persistent world (see `world_manager.rs`); the display name is otherwise
-//! all a guest connection would have supplied on the wire.
+//! The accounts DB (native server only). Originally written solely by the
+//! registration Telegram bot and only read here; the server now also WRITES:
+//! in-client registration (`ClientMsg::Register`) inserts accounts with the
+//! same schema/bcrypt format the bot uses, and the friends list lives in an
+//! extra `friends` table the bot never touches. Authentication hands back
+//! the account's stable id and in-game display name; the id routes the
+//! connection to that account's own persistent world (see `world_manager.rs`).
 
 use std::path::Path;
 
@@ -40,6 +41,185 @@ fn authenticate_at(db_path: &str, login: &str, password: &str) -> Option<(i64, S
         .ok()
         .filter(|&ok| ok)
         .map(|_| (id, display_username))
+}
+
+/// Why an in-client registration was refused, each mapped to a client-visible
+/// `AuthFailed` reason by the caller.
+#[derive(Debug, PartialEq, Eq)]
+pub enum RegisterError {
+    /// Login or display name already exists (deliberately one error for both,
+    /// mirroring `authenticate`'s refusal-shape uniformity).
+    Taken,
+    /// Failed validation; the message says which rule.
+    Invalid(&'static str),
+    /// DB unavailable/unwritable — an ops problem, not the player's.
+    Io,
+}
+
+/// Opens the accounts DB read-write, creating the file and any missing
+/// tables. The `accounts` schema is byte-for-byte the one the Telegram bot
+/// creates, so whichever side runs first, the other keeps working; `friends`
+/// is server-only (the bot never reads it).
+fn open_rw(db_path: &str) -> Option<Connection> {
+    if let Some(dir) = Path::new(db_path).parent() {
+        std::fs::create_dir_all(dir).ok()?;
+    }
+    let conn = Connection::open(db_path).ok()?;
+    // Two writers exist (bot + server): give lock contention a beat to clear
+    // instead of failing a registration on a momentary SQLITE_BUSY.
+    let _ = conn.busy_timeout(std::time::Duration::from_secs(3));
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS accounts (
+            id INTEGER PRIMARY KEY,
+            telegram_id INTEGER UNIQUE NOT NULL,
+            telegram_username TEXT,
+            display_username TEXT UNIQUE NOT NULL,
+            first_name TEXT NOT NULL,
+            last_name TEXT NOT NULL,
+            birth_date TEXT NOT NULL,
+            login TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS friends (
+            account_id INTEGER NOT NULL,
+            friend_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (account_id, friend_id)
+        );",
+    )
+    .ok()?;
+    Some(conn)
+}
+
+/// Creates an account from inside the game client (no Telegram involved) and
+/// returns `(account_id, display_name)` ready to sign in with — the same
+/// tuple `authenticate` yields. Validation is deliberately strict-and-simple;
+/// uniqueness is enforced by the DB's UNIQUE constraints, not a racy
+/// check-then-insert.
+pub fn register_account(
+    login: &str,
+    password: &str,
+    name: &str,
+) -> Result<(i64, String), RegisterError> {
+    let db_path = std::env::var("FC_ACCOUNTS_DB").unwrap_or_else(|_| DEFAULT_DB_PATH.to_string());
+    register_account_at(&db_path, login, password, name)
+}
+
+fn register_account_at(
+    db_path: &str,
+    login: &str,
+    password: &str,
+    name: &str,
+) -> Result<(i64, String), RegisterError> {
+    let login = login.trim();
+    let name = name.trim();
+    if login.len() < 3 || login.len() > 24 {
+        return Err(RegisterError::Invalid("Login 3-24 belgi bo'lishi kerak."));
+    }
+    if !login.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err(RegisterError::Invalid(
+            "Login faqat lotin harf, raqam va _ dan iborat bo'lsin.",
+        ));
+    }
+    if password.len() < 6 || password.len() > 64 {
+        return Err(RegisterError::Invalid("Parol 6-64 belgi bo'lishi kerak."));
+    }
+    if name.is_empty() || name.chars().count() > 24 || name.chars().any(|c| c.is_control()) {
+        return Err(RegisterError::Invalid("Ism 1-24 ta oddiy belgidan iborat bo'lsin."));
+    }
+
+    let hash = bcrypt::hash(password, bcrypt::DEFAULT_COST).map_err(|_| RegisterError::Io)?;
+    // The bot's schema demands a UNIQUE NOT NULL telegram_id; client-born
+    // accounts have none, so they get a random NEGATIVE one — real Telegram
+    // ids are positive, so the two populations can never collide.
+    let mut b = [0u8; 8];
+    getrandom::getrandom(&mut b).map_err(|_| RegisterError::Io)?;
+    let synthetic_tid = -((u64::from_le_bytes(b) >> 1) as i64) - 1;
+
+    let conn = open_rw(db_path).ok_or(RegisterError::Io)?;
+    match conn.execute(
+        "INSERT INTO accounts
+            (telegram_id, telegram_username, display_username, first_name,
+             last_name, birth_date, login, password_hash, created_at)
+         VALUES (?1, NULL, ?2, ?2, '', '', ?3, ?4, datetime('now'))",
+        rusqlite::params![synthetic_tid, name, login, hash],
+    ) {
+        Ok(_) => {
+            let id = conn.last_insert_rowid();
+            Ok((id, name.to_string()))
+        }
+        Err(rusqlite::Error::SqliteFailure(e, _))
+            if e.code == rusqlite::ErrorCode::ConstraintViolation =>
+        {
+            Err(RegisterError::Taken)
+        }
+        Err(_) => Err(RegisterError::Io),
+    }
+}
+
+/// Why an AddFriend was refused.
+#[derive(Debug, PartialEq, Eq)]
+pub enum FriendError {
+    /// No account with that display name.
+    NotFound,
+    /// Adding yourself.
+    SelfAdd,
+    Io,
+}
+
+/// Adds the account whose display name is `friend_name` to `account`'s
+/// friends list (one-directional, idempotent). Returns the friend's id+name.
+pub fn friends_add(account: i64, friend_name: &str) -> Result<(i64, String), FriendError> {
+    let db_path = std::env::var("FC_ACCOUNTS_DB").unwrap_or_else(|_| DEFAULT_DB_PATH.to_string());
+    let conn = open_rw(&db_path).ok_or(FriendError::Io)?;
+    let (fid, fname): (i64, String) = conn
+        .query_row(
+            "SELECT id, display_username FROM accounts WHERE display_username = ?1",
+            [friend_name.trim()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|_| FriendError::NotFound)?;
+    if fid == account {
+        return Err(FriendError::SelfAdd);
+    }
+    conn.execute(
+        "INSERT OR IGNORE INTO friends (account_id, friend_id) VALUES (?1, ?2)",
+        rusqlite::params![account, fid],
+    )
+    .map_err(|_| FriendError::Io)?;
+    Ok((fid, fname))
+}
+
+/// Removes `friend` from `account`'s list. Idempotent.
+pub fn friends_remove(account: i64, friend: i64) -> Result<(), FriendError> {
+    let db_path = std::env::var("FC_ACCOUNTS_DB").unwrap_or_else(|_| DEFAULT_DB_PATH.to_string());
+    let conn = open_rw(&db_path).ok_or(FriendError::Io)?;
+    conn.execute(
+        "DELETE FROM friends WHERE account_id = ?1 AND friend_id = ?2",
+        rusqlite::params![account, friend],
+    )
+    .map_err(|_| FriendError::Io)?;
+    Ok(())
+}
+
+/// `account`'s friends as `(account_id, display_name)`, name-ordered.
+/// Missing DB or table collapses to an empty list (a fresh server).
+pub fn friends_list(account: i64) -> Vec<(i64, String)> {
+    let db_path = std::env::var("FC_ACCOUNTS_DB").unwrap_or_else(|_| DEFAULT_DB_PATH.to_string());
+    let Some(conn) = open_rw(&db_path) else {
+        return Vec::new();
+    };
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT f.friend_id, a.display_username
+         FROM friends f JOIN accounts a ON a.id = f.friend_id
+         WHERE f.account_id = ?1 ORDER BY a.display_username",
+    ) else {
+        return Vec::new();
+    };
+    stmt.query_map([account], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

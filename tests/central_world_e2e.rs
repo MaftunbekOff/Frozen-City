@@ -128,6 +128,8 @@ fn start(seed: u64, wm: std::sync::Arc<WorldManager>) -> server::ServerHandle {
             save_path: None,
             idle_shutdown: None,
             central: false, // the shared guest world; WorldManager owns the central one
+            owner_account: None,
+            invites: None,
         },
         wm,
     )

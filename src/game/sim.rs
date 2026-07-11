@@ -491,6 +491,14 @@ fn sanitize_name(name: &str) -> String {
     }
 }
 
+/// The chat sanitizer, exposed for text that is broadcast but never stored in
+/// the world snapshot (nearby-chat bubbles, `ServerMsg::Bubble`): identical
+/// rules to persistent chat, so a bubble can't smuggle in what a chat line
+/// can't.
+pub fn sanitize_public_text(text: &str) -> String {
+    sanitize_text(text, MAX_CHAT_LEN)
+}
+
 /// Append a chat line from `player_id`, sanitizing and length-capping the text.
 /// Silently dropped if the player isn't connected or the text is empty after sanitizing.
 pub fn push_chat(state: &mut GameState, player_id: u64, text: &str) {

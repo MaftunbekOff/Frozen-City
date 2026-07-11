@@ -287,18 +287,27 @@ pub fn pending_switch(
     // just a stale-state guard.
     let Some(auth) = session.auth.clone() else { return };
     let central = target == WorldTarget::Central;
-    let first_msg = if central {
-        ClientMsg::EnterCentral {
+    let visiting = match target {
+        WorldTarget::Visit(host) => Some(host),
+        _ => None,
+    };
+    let first_msg = match target {
+        WorldTarget::Central => ClientMsg::EnterCentral {
             login: auth.login.clone(),
             password: auth.password.clone(),
             token: None,
-        }
-    } else {
-        ClientMsg::Login {
+        },
+        WorldTarget::Visit(host) => ClientMsg::VisitFriend {
+            login: auth.login.clone(),
+            password: auth.password.clone(),
+            host,
+            token: None,
+        },
+        WorldTarget::Personal => ClientMsg::Login {
             login: auth.login.clone(),
             password: auth.password.clone(),
             token: None,
-        }
+        },
     };
     // Accounts (and the central world) live on the main region process only —
     // see `main_region_addr`.
@@ -320,6 +329,7 @@ pub fn pending_switch(
             session.attempts = 0;
             session.reconnectable = true;
             session.central = central;
+            session.visiting = visiting;
             *view = GameView::default();
             net.0 = Some(Mutex::new(conn));
             next.set(Screen::Game);
@@ -463,6 +473,8 @@ fn start_game(
                     save_path: None,
                     idle_shutdown: None,
                     central: false,
+                    owner_account: None,
+                    invites: None,
                 };
                 let handle = server::start(config)
                     .map_err(|e| format!("Could not start the server: {e}"))?;
@@ -507,6 +519,7 @@ fn start_game(
         reconnectable: action == AutoAction::Join,
         attempts: 0,
         central: false,
+        visiting: None,
     };
     *view = GameView::default();
     net.0 = Some(Mutex::new(conn));
@@ -666,6 +679,7 @@ fn submit_login(
         reconnectable: true,
         attempts: 0,
         central: false,
+        visiting: None,
     };
     *view = GameView::default();
     net.0 = Some(Mutex::new(conn));

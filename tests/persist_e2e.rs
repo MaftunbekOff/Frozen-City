@@ -65,6 +65,8 @@ fn start_persistent(seed: u64) -> server::ServerHandle {
         save_path: None,
         idle_shutdown: None,
         central: false,
+        owner_account: None,
+        invites: None,
     })
     .expect("server starts")
 }

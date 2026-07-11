@@ -150,6 +150,10 @@ pub struct Session {
     /// Tunnel) — reconnects must replay `EnterCentral`, not `Login`, or a
     /// blip would silently drop the player back into their personal world.
     pub central: bool,
+    /// `Some(host account)` while this session is visiting a friend's
+    /// personal world — reconnects must replay `VisitFriend` for the same
+    /// host (the invite outlives a blip).
+    pub visiting: Option<i64>,
 }
 
 /// Which world a requested in-game switch should land in.
@@ -159,6 +163,31 @@ pub enum WorldTarget {
     Personal,
     /// The shared Global World through the Tunnel (`EnterCentral`).
     Central,
+    /// A friend's personal world, by their account id (`VisitFriend` — needs
+    /// a standing invite, see `SocialState::invite`).
+    Visit(i64),
+}
+
+/// One transient nearby-chat line received from the server, waiting for the
+/// social UI to display it (an inbox drained by `social.rs`, never a log).
+#[derive(Clone)]
+pub struct BubbleEvent {
+    pub player_id: u64,
+    pub name: String,
+    pub color: u8,
+    pub text: String,
+}
+
+/// Client-side mirror of the account's social life: the friends list the
+/// server last sent, a pending world-visit invite (if any), and freshly
+/// arrived nearby-chat bubbles.
+#[derive(Resource, Default)]
+pub struct SocialState {
+    pub friends: Vec<frozen_city::net::protocol::FriendInfo>,
+    /// `(host account, host display name)` of the newest unanswered invite.
+    pub invite: Option<(i64, String)>,
+    /// Inbox of bubbles not yet rendered; the social UI drains this.
+    pub bubbles: Vec<BubbleEvent>,
 }
 
 /// A world switch requested from inside the game (the Tunnel buttons in
@@ -290,6 +319,7 @@ impl Plugin for ClientPlugin {
             .init_resource::<GameView>()
             .init_resource::<Session>()
             .init_resource::<PendingSwitch>()
+            .init_resource::<SocialState>()
             .init_resource::<menu::LoginForm>()
             .init_resource::<net_sync::Reconnecting>()
             .init_resource::<BuildMode>()
