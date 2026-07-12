@@ -160,9 +160,11 @@ pub fn spawn_hud(mut commands: Commands, ff: Res<theme::FormFactor>, lang: Res<L
             } else {
                 Overflow::clip()
             },
+            border: UiRect::top(Val::Px(1.0)),
             ..default()
         },
         BackgroundColor(BG_PANEL),
+        BorderColor::all(BORDER),
         Interaction::default(),
         UiBlocker,
         DespawnOnExit(Screen::Game),
@@ -214,8 +216,23 @@ pub fn spawn_hud(mut commands: Commands, ff: Res<theme::FormFactor>, lang: Res<L
             },
         ));
         for lvl in 0u8..=3 {
-            p.spawn((
-                Button,
+            // Level 0 ("Off"/"O'chiq"/"Выкл") is a word, not a single digit —
+            // a fixed 42px box clips/overflows it into the neighboring "1"
+            // button, so it gets auto-width (like the other text-buttons in
+            // this design system) with the same horizontal padding; the
+            // numeric 1-3 buttons stay fixed-width squares since a single
+            // digit always fits.
+            let node = if lvl == 0 {
+                Node {
+                    width: Val::Auto,
+                    height: Val::Px(btn_h.min(48.0).max(if ff.compact() { ff.btn_h() } else { 40.0 })),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    padding: UiRect::horizontal(Val::Px(SP_SM)),
+                    flex_shrink: 0.0,
+                    ..default()
+                }
+            } else {
                 Node {
                     width: Val::Px(42.0),
                     height: Val::Px(btn_h.min(48.0).max(if ff.compact() { ff.btn_h() } else { 40.0 })),
@@ -223,19 +240,17 @@ pub fn spawn_hud(mut commands: Commands, ff: Res<theme::FormFactor>, lang: Res<L
                     align_items: AlignItems::Center,
                     flex_shrink: 0.0,
                     ..default()
-                },
-                BackgroundColor(BTN),
-                BaseColor(BTN),
-                FurnaceLvlBtn(lvl),
-            ))
-            .with_children(|b| {
-                let label = if lvl == 0 {
-                    i18n_hud::furnace_off_label(lang).to_string()
-                } else {
-                    lvl.to_string()
-                };
-                b.spawn(theme::text(label, FS_BODY - 1.0, TEXT_PRIMARY));
-            });
+                }
+            };
+            p.spawn((Button, node, BackgroundColor(BTN), BaseColor(BTN), FurnaceLvlBtn(lvl)))
+                .with_children(|b| {
+                    let label = if lvl == 0 {
+                        i18n_hud::furnace_off_label(lang).to_string()
+                    } else {
+                        lvl.to_string()
+                    };
+                    b.spawn(theme::text(label, FS_BODY - 1.0, TEXT_PRIMARY));
+                });
         }
     });
 
@@ -288,23 +303,31 @@ pub fn spawn_hud(mut commands: Commands, ff: Res<theme::FormFactor>, lang: Res<L
         DespawnOnExit(Screen::Game),
     ));
 
-    // --- Event feed (right side) ---
+    // --- Event feed (right side) --- (capped narrower on Mobile, with a
+    // smaller font, so it can't collide with the minimap on the opposite
+    // side of a phone-width screen)
+    let events_font = if ff.compact() { FS_MICRO } else { FS_SMALL };
+    let mut events_node = Node {
+        position_type: PositionType::Absolute,
+        right: Val::Px(12.0),
+        top: Val::Px(54.0),
+        padding: UiRect::all(Val::Px(SP_SM)),
+        border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
+        ..default()
+    };
+    if ff.compact() {
+        events_node.max_width = Val::Percent(52.0);
+    } else {
+        events_node.width = Val::Px(340.0);
+    }
     commands
         .spawn((
-            Node {
-                position_type: PositionType::Absolute,
-                right: Val::Px(12.0),
-                top: Val::Px(54.0),
-                width: Val::Px(340.0),
-                padding: UiRect::all(Val::Px(SP_SM)),
-                border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
-                ..default()
-            },
+            events_node,
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.25)),
             DespawnOnExit(Screen::Game),
         ))
         .with_children(|p| {
-            p.spawn((theme::text("", FS_SMALL, Color::srgba(0.85, 0.90, 1.0, 0.9)), HudField::Events));
+            p.spawn((theme::text("", events_font, Color::srgba(0.85, 0.90, 1.0, 0.9)), HudField::Events));
         });
 
     // --- Selection panel --- (kept clear of the build bar on Mobile, where
@@ -435,9 +458,11 @@ fn spawn_top_bar_desktop(commands: &mut Commands, lang: Lang) {
                 padding: UiRect::horizontal(Val::Px(14.0)),
                 align_items: AlignItems::Center,
                 column_gap: Val::Px(20.0),
+                border: UiRect::bottom(Val::Px(1.0)),
                 ..default()
             },
             BackgroundColor(BG_PANEL),
+            BorderColor::all(BORDER),
             Interaction::default(),
             UiBlocker,
             DespawnOnExit(Screen::Game),
@@ -485,11 +510,32 @@ fn spawn_top_bar_desktop(commands: &mut Commands, lang: Lang) {
         });
 }
 
+/// A single-line HUD text node: `flex_shrink: 0.0` so a tight mobile row
+/// never compresses it below its natural content width (which is what forces
+/// a wrap mid-word, e.g. "Yog'och" and its number landing on separate lines).
+fn hud_text_mobile(t: impl Into<String>, color: Color) -> impl Bundle {
+    (
+        theme::text(t, FS_MICRO, color),
+        // NoWrap ham shart: flex_shrink 0 taffy'ga tegishli, lekin matn
+        // o'lchagichi baribir mavjud enga qarab ichki o'rashga ruxsat beradi
+        // ("Yog'och" va soni alohida qatorlarga tushib qolardi).
+        TextLayout::new(Justify::Left, LineBreak::NoWrap),
+        Node {
+            flex_shrink: 0.0,
+            ..default()
+        },
+    )
+}
+
 /// Mobile top bar: two compact rows instead of one wide one, so nothing
 /// spills off-screen at phone widths. Row 1: the three resources + pop.
 /// Row 2: clock, temperature, furnace, morale and the Menu button
 /// (world-switch stays inside row 2 too, right next to Menu, since it's
-/// rarely both visible and it's still just a single extra slot).
+/// rarely both visible and it's still just a single extra slot). Every field
+/// is `FS_MICRO` + non-shrinking (see `hud_text_mobile`) and each row wraps
+/// (`FlexWrap::Wrap`) as a last resort, so at a 390px-wide phone (UiScale
+/// 0.8) both rows fit without any single field wrapping mid-text or the two
+/// rows overlapping each other.
 fn spawn_top_bar_mobile(commands: &mut Commands, lang: Lang) {
     commands
         .spawn((
@@ -498,12 +544,15 @@ fn spawn_top_bar_mobile(commands: &mut Commands, lang: Lang) {
                 left: Val::Px(0.0),
                 right: Val::Px(0.0),
                 top: Val::Px(0.0),
+                height: Val::Auto,
                 flex_direction: FlexDirection::Column,
                 padding: UiRect::axes(Val::Px(SP_SM), Val::Px(SP_XS)),
                 row_gap: Val::Px(SP_XS),
+                border: UiRect::bottom(Val::Px(1.0)),
                 ..default()
             },
             BackgroundColor(BG_PANEL),
+            BorderColor::all(BORDER),
             Interaction::default(),
             UiBlocker,
             DespawnOnExit(Screen::Game),
@@ -511,35 +560,41 @@ fn spawn_top_bar_mobile(commands: &mut Commands, lang: Lang) {
         .with_children(|p| {
             // Row 1: resources + population.
             p.spawn(Node {
+                height: Val::Auto,
                 align_items: AlignItems::Center,
-                column_gap: Val::Px(SP_MD),
+                flex_wrap: FlexWrap::Wrap,
+                column_gap: Val::Px(SP_SM),
+                row_gap: Val::Px(SP_XS),
                 ..default()
             })
             .with_children(|row| {
-                row.spawn((theme::text(i18n_hud::hud_wood(0, lang), FS_SMALL, RES_WOOD), HudField::Wood));
-                row.spawn((theme::text(i18n_hud::hud_coal(0, lang), FS_SMALL, RES_COAL), HudField::Coal));
-                row.spawn((theme::text(i18n_hud::hud_food(0, lang), FS_SMALL, RES_FOOD), HudField::Food));
+                row.spawn((hud_text_mobile(i18n_hud::hud_wood(0, lang), RES_WOOD), HudField::Wood));
+                row.spawn((hud_text_mobile(i18n_hud::hud_coal(0, lang), RES_COAL), HudField::Coal));
+                row.spawn((hud_text_mobile(i18n_hud::hud_food(0, lang), RES_FOOD), HudField::Food));
                 row.spawn(Node {
                     flex_grow: 1.0,
                     ..default()
                 });
-                row.spawn((theme::text(i18n_hud::hud_pop(0, 0, lang), FS_SMALL, TEXT_PRIMARY), HudField::Pop));
+                row.spawn((hud_text_mobile(i18n_hud::hud_pop(0, 0, lang), TEXT_PRIMARY), HudField::Pop));
             });
             // Row 2: clock, temp, furnace, morale, world-switch, Menu.
             p.spawn(Node {
+                height: Val::Auto,
                 align_items: AlignItems::Center,
-                column_gap: Val::Px(SP_MD),
+                flex_wrap: FlexWrap::Wrap,
+                column_gap: Val::Px(SP_SM),
+                row_gap: Val::Px(SP_XS),
                 ..default()
             })
             .with_children(|row| {
-                row.spawn((theme::text(i18n_hud::hud_clock(1, 1, 6, 0, lang), FS_SMALL, TEXT_PRIMARY), HudField::Clock));
-                row.spawn((theme::text("-0 C", FS_SMALL, Color::srgb(0.55, 0.80, 0.95)), HudField::Temp));
+                row.spawn((hud_text_mobile(i18n_hud::hud_clock(1, 1, 6, 0, lang), TEXT_PRIMARY), HudField::Clock));
+                row.spawn((hud_text_mobile("-0 C", Color::srgb(0.55, 0.80, 0.95)), HudField::Temp));
                 row.spawn(Node {
                     flex_grow: 1.0,
                     ..default()
                 });
-                row.spawn((theme::text("Furnace L1", FS_SMALL, TEXT_PRIMARY), HudField::Furnace));
-                row.spawn((theme::text("Morale --", FS_SMALL, TEXT_PRIMARY), HudField::Morale));
+                row.spawn((hud_text_mobile("Furnace L1", TEXT_PRIMARY), HudField::Furnace));
+                row.spawn((hud_text_mobile("Morale --", TEXT_PRIMARY), HudField::Morale));
                 row.spawn((
                     Button,
                     Node {
@@ -547,6 +602,7 @@ fn spawn_top_bar_mobile(commands: &mut Commands, lang: Lang) {
                         height: Val::Px(30.0),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
+                        flex_shrink: 0.0,
                         display: Display::None,
                         ..default()
                     },
@@ -557,10 +613,23 @@ fn spawn_top_bar_mobile(commands: &mut Commands, lang: Lang) {
                 .with_children(|b| {
                     b.spawn((theme::text(i18n_hud::world_switch_global(lang), FS_MICRO, TEXT_PRIMARY), WorldSwitchLabel));
                 });
-                row.spawn((btn_px(60.0, 30.0, BTN), QuitToMenuBtn))
-                    .with_children(|b| {
-                        b.spawn(theme::text(i18n_hud::menu_button(lang), FS_MICRO, TEXT_PRIMARY));
-                    });
+                row.spawn((
+                    Button,
+                    Node {
+                        width: Val::Px(60.0),
+                        height: Val::Px(30.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        flex_shrink: 0.0,
+                        ..default()
+                    },
+                    BackgroundColor(BTN),
+                    BaseColor(BTN),
+                    QuitToMenuBtn,
+                ))
+                .with_children(|b| {
+                    b.spawn(theme::text(i18n_hud::menu_button(lang), FS_MICRO, TEXT_PRIMARY));
+                });
             });
         });
 }
@@ -649,6 +718,7 @@ pub(crate) struct HudCache {
 pub fn hud_update(
     view: Res<GameView>,
     lang: Res<Lang>,
+    ff: Res<theme::FormFactor>,
     mut cache: Local<HudCache>,
     mut q: Query<(&mut Text, Option<&mut TextColor>, &HudField)>,
 ) {
@@ -705,13 +775,7 @@ pub fn hud_update(
                 let key = (state.furnace_level, state.furnace_lit);
                 if cache.furnace != Some((key.0, key.1, lang)) {
                     cache.furnace = Some((key.0, key.1, lang));
-                    let status = if state.furnace_lit {
-                        i18n_hud::furnace_status_burning(lang)
-                    } else if state.furnace_level == 0 {
-                        i18n_hud::furnace_status_off(lang)
-                    } else {
-                        i18n_hud::furnace_status_out_of_fuel(lang)
-                    };
+                    let out_of_fuel = !state.furnace_lit && state.furnace_level > 0;
                     if let Some(mut c) = color {
                         c.0 = if state.furnace_lit {
                             Color::srgb(0.95, 0.65, 0.30)
@@ -719,12 +783,32 @@ pub fn hud_update(
                             Color::srgb(0.95, 0.30, 0.25)
                         };
                     }
-                    text.0 = i18n_hud::hud_furnace(
-                        state.furnace_level,
-                        state.furnace_level as f32 * FURNACE_COAL_PER_DAY_PER_LEVEL,
-                        status,
-                        lang,
-                    );
+                    // Mobile: a short single-line form (see
+                    // `i18n_hud::hud_furnace_short`'s doc) — the full status
+                    // word would wrap at `FS_MICRO` on a phone-width bar and
+                    // collide with the row below.
+                    text.0 = if ff.compact() {
+                        i18n_hud::hud_furnace_short(
+                            state.furnace_level,
+                            state.furnace_level as f32 * FURNACE_COAL_PER_DAY_PER_LEVEL,
+                            out_of_fuel,
+                            lang,
+                        )
+                    } else {
+                        let status = if state.furnace_lit {
+                            i18n_hud::furnace_status_burning(lang)
+                        } else if state.furnace_level == 0 {
+                            i18n_hud::furnace_status_off(lang)
+                        } else {
+                            i18n_hud::furnace_status_out_of_fuel(lang)
+                        };
+                        i18n_hud::hud_furnace(
+                            state.furnace_level,
+                            state.furnace_level as f32 * FURNACE_COAL_PER_DAY_PER_LEVEL,
+                            status,
+                            lang,
+                        )
+                    };
                 }
             }
             HudField::Morale => {

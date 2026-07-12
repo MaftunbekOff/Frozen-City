@@ -15,8 +15,19 @@ use super::input::CamRig;
 use super::ui::UiBlocker;
 use super::{kind_color, player_color, terrain_color, tilef_to_world, GameView, Screen, TILE};
 
-/// On-screen size of the (square) minimap in logical pixels.
-const MINIMAP_PX: f32 = 184.0;
+/// On-screen size of the (square) minimap in logical pixels, by
+/// `FormFactor` — Mobile gets a much smaller footprint so it doesn't dominate
+/// a phone-width screen; Tablet/Desktop keep the original size.
+const MINIMAP_PX_MOBILE: f32 = 110.0;
+const MINIMAP_PX_DEFAULT: f32 = 184.0;
+
+fn minimap_px(ff: super::theme::FormFactor) -> f32 {
+    if ff.compact() {
+        MINIMAP_PX_MOBILE
+    } else {
+        MINIMAP_PX_DEFAULT
+    }
+}
 
 /// Handle to the minimap's CPU-updated texture (created once at startup).
 #[derive(Resource)]
@@ -71,15 +82,16 @@ fn setup_texture(mut images: ResMut<Assets<Image>>, mut commands: Commands) {
     commands.insert_resource(MinimapTex(handle));
 }
 
-fn spawn_minimap(mut commands: Commands, tex: Res<MinimapTex>) {
+fn spawn_minimap(mut commands: Commands, tex: Res<MinimapTex>, ff: Res<super::theme::FormFactor>) {
+    let px = minimap_px(*ff);
     commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(12.0),
                 top: Val::Px(78.0),
-                width: Val::Px(MINIMAP_PX),
-                height: Val::Px(MINIMAP_PX),
+                width: Val::Px(px),
+                height: Val::Px(px),
                 border: UiRect::all(Val::Px(2.0)),
                 border_radius: BorderRadius::all(Val::Px(super::theme::RAD_BTN)),
                 // Clip the square minimap texture to the rounded frame —

@@ -454,17 +454,22 @@ struct InviteLabel;
 /// flexbox with a variable on-screen position (window width, and whether
 /// World-Switch is even shown), and the right column below it is already
 /// crowded (event feed at `top:54`, then the missions panel at `top:232`) —
-/// so this sits on the LEFT instead, in the free strip between the top bar
-/// and the minimap (FPS text already lives at `left:14, top:54`; this is
-/// offset further right on the same row, clear of it).
-fn spawn_hud_button(mut commands: Commands) {
+/// so this sits on the LEFT instead. FPS text lives at `left:14, top:54` and
+/// its full diagnostic string ("FPS 60  |  High  |  WebGPU  |  1920x1080")
+/// is wide enough to reach past x=210 at typical window widths, so this
+/// button no longer shares that row; it sits to the right of the minimap
+/// (184px wide at `left:12, top:78` on non-Mobile, see `minimap::minimap_px`)
+/// instead, clear of both the FPS line above and the minimap beside it.
+fn spawn_hud_button(mut commands: Commands, ff: Res<FormFactor>) {
     commands
         .spawn((
             Button,
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Px(210.0),
-                top: Val::Px(52.0),
+                // Mobil: minimap (110px) ostidagi bo'sh polosa — o'ng tomonda
+                // voqealar lentasi band. Desktop/Tablet: minimap yonida.
+                left: Val::Px(if ff.compact() { 12.0 } else { 206.0 }),
+                top: Val::Px(if ff.compact() { 196.0 } else { 78.0 }),
                 width: Val::Px(90.0),
                 height: Val::Px(28.0),
                 justify_content: JustifyContent::Center,

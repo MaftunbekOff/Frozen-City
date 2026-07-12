@@ -166,10 +166,20 @@ fn spawn_roster(mut commands: Commands, ff: Res<FormFactor>) {
                             RosterRow(i),
                         ))
                         .with_children(|row| {
+                            // Name (left, shrinkable) + profession/status
+                            // (middle, fixed but non-shrinking so a long
+                            // "Profession L2 — Leader, Building" line doesn't
+                            // get squeezed into wrapping onto two lines,
+                            // which would otherwise sit visually above this
+                            // row's vertical center) + unassign (right) — all
+                            // three in one row, centered on the cross axis.
                             row.spawn((
                                 Button,
                                 Node {
                                     flex_grow: 1.0,
+                                    flex_shrink: 1.0,
+                                    min_width: Val::Px(0.0),
+                                    align_items: AlignItems::Center,
                                     padding: UiRect::axes(Val::Px(theme::SP_SM), Val::Px(theme::SP_XS)),
                                     border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
                                     ..default()
@@ -187,13 +197,18 @@ fn spawn_roster(mut commands: Commands, ff: Res<FormFactor>) {
                             row.spawn((
                                 theme::text("", theme::FS_MICRO, theme::TEXT_MUTED),
                                 RosterStatus(i),
-                                Node { width: Val::Px(150.0), ..default() },
+                                Node {
+                                    width: Val::Px(170.0),
+                                    flex_shrink: 0.0,
+                                    ..default()
+                                },
                             ));
                             row.spawn((
                                 Button,
                                 Node {
                                     width: Val::Px(ff.btn_h() * 0.55),
                                     height: Val::Px(ff.btn_h() * 0.5),
+                                    flex_shrink: 0.0,
                                     justify_content: JustifyContent::Center,
                                     align_items: AlignItems::Center,
                                     border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),

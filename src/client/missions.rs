@@ -54,12 +54,17 @@ fn spawn_panel(mut commands: Commands, ff: Res<FormFactor>) {
     // micro font size, per the task brief (no collapse-toggle — out of scope).
     let width = if ff.compact() { Val::Percent(46.0) } else { Val::Px(320.0) };
     let row_font = if ff.compact() { theme::FS_MICRO } else { theme::FS_SMALL };
+    // Mobile: the events feed sits right above this panel (also right-
+    // anchored, `ui::spawn_hud`'s "Event feed" at `top:54`) and can grow to
+    // several lines — 232px (tuned for Desktop's feed height) isn't enough
+    // clearance on a phone screen, so start well below it instead.
+    let top = if ff.compact() { 204.0 } else { 232.0 };
     commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
                 right: Val::Px(12.0),
-                top: Val::Px(232.0),
+                top: Val::Px(top),
                 width,
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(theme::SP_XS),

@@ -108,6 +108,22 @@ pub fn hud_furnace(level: u8, per_day: f32, status: &str, l: Lang) -> String {
     }
 }
 
+/// Mobile top-bar variant of `hud_furnace`: the full status word (especially
+/// `furnace_status_out_of_fuel`) is long enough at `FS_MICRO` on a phone-width
+/// bar to wrap onto a second line and collide with the row below, so this
+/// drops it to a single trailing glyph — "!" only when fuel is the problem
+/// (unlit and level > 0); an unlit level-0 furnace ("off") needs no glyph,
+/// same reasoning `morale_tier_*` uses for its bracketed tier tag. E.g.
+/// "Pech L1 12/k" (fine) vs "Pech L1 12/k!" (out of fuel).
+pub fn hud_furnace_short(level: u8, per_day: f32, out_of_fuel: bool, l: Lang) -> String {
+    let warn = if out_of_fuel { "!" } else { "" };
+    match l {
+        Lang::Uz => format!("Pech L{level} {per_day:.0}/k{warn}"),
+        Lang::En => format!("Furn L{level} {per_day:.0}/d{warn}"),
+        Lang::Ru => format!("Печь {level} {per_day:.0}/д{warn}"),
+    }
+}
+
 /// Morale banding tier tags. Kept short since they're appended inline after
 /// the numeric value (`hud_morale`'s `[tier]`).
 pub fn morale_tier_critical(l: Lang) -> &'static str {

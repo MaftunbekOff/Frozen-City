@@ -21,6 +21,7 @@ pub mod input;
 #[cfg(target_arch = "wasm32")]
 pub mod local_server;
 pub mod menu;
+pub mod menu_fx;
 pub mod minimap;
 pub mod missions;
 pub mod net_sync;
@@ -473,10 +474,14 @@ impl Plugin for ClientPlugin {
             // spawned, hence first in `Startup` (see `i18n::install_default_font`'s
             // doc comment for why `Startup` is early enough).
             .add_systems(Startup, i18n::install_default_font)
-            .add_systems(Update, theme::update_form_factor)
+            // PreUpdate: StateTransition'dan (ya'ni barcha OnEnter spawn'lardan)
+            // OLDIN ishlashi shart — aks holda avtostart (`?join`) 1-freymda
+            // Screen::Game'ga kirganda FormFactor hali Default (Desktop) bo'lib,
+            // mobil layout tarmoqlari umuman ishga tushmaydi.
+            .add_systems(PreUpdate, theme::update_form_factor)
             .add_systems(Startup, render::setup_camera_and_assets)
             // Menu.
-            .add_systems(OnEnter(Screen::Menu), menu::spawn_menu)
+            .add_systems(OnEnter(Screen::Menu), (menu::spawn_menu, menu_fx::spawn_menu_fx))
             .add_systems(
                 Update,
                 (
@@ -498,6 +503,10 @@ impl Plugin for ClientPlugin {
                     ui::generic_button_hover,
                 )
                     .run_if(in_state(Screen::Menu)),
+            )
+            .add_systems(
+                Update,
+                menu_fx::snow_fall.run_if(in_state(Screen::Menu)),
             )
             // Game lifecycle.
             .add_systems(OnEnter(Screen::Game), (render::enter_game, ui::spawn_hud))

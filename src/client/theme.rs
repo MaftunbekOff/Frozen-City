@@ -170,10 +170,20 @@ pub fn button(w: Val, h: f32, bg: Color) -> impl Bundle {
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
             padding: UiRect::horizontal(Val::Px(SP_MD)),
+            border: UiRect::all(Val::Px(1.0)),
             border_radius: BorderRadius::all(Val::Px(RAD_BTN)),
             ..default()
         },
         BackgroundColor(bg),
+        BorderColor::all(BORDER),
+        // Yengil "ko'tarilish" soyasi — bosiladigan elementni ajratadi.
+        BoxShadow::new(
+            Color::srgba(0.0, 0.0, 0.0, 0.30),
+            Val::Px(0.0),
+            Val::Px(2.0),
+            Val::Px(0.0),
+            Val::Px(6.0),
+        ),
         BaseColor(bg),
     )
 }
@@ -206,6 +216,14 @@ pub fn modal_panel(ff: FormFactor) -> impl Bundle {
         },
         BackgroundColor(BG_PANEL),
         BorderColor::all(BORDER),
+        // Modal butun sahna ustida "suzadi" — chuqur drop-shadow.
+        BoxShadow::new(
+            Color::srgba(0.0, 0.0, 0.0, 0.50),
+            Val::Px(0.0),
+            Val::Px(12.0),
+            Val::Px(2.0),
+            Val::Px(30.0),
+        ),
         ScrollPosition::default(),
     )
 }
