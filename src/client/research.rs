@@ -8,17 +8,11 @@ use frozen_city::game::types::{PlayerCommand, Tech};
 use frozen_city::net::protocol::ClientMsg;
 
 use super::chat::ChatState;
+use super::i18n_names;
+use super::i18n_panels;
+use super::theme::{self, FormFactor};
 use super::ui::UiBlocker;
 use super::{GameView, NetConn, Screen};
-
-const PANEL_BG: Color = Color::srgba(0.05, 0.08, 0.13, 0.98);
-const BACKDROP: Color = Color::srgba(0.0, 0.0, 0.0, 0.55);
-const BTN_BG: Color = Color::srgb(0.20, 0.36, 0.30);
-const BTN_DIM: Color = Color::srgba(0.10, 0.12, 0.16, 0.9);
-const BTN_DONE: Color = Color::srgb(0.22, 0.44, 0.26);
-const TEXT_MAIN: Color = Color::srgb(0.90, 0.93, 0.97);
-const TEXT_DIM: Color = Color::srgb(0.62, 0.68, 0.78);
-const DONE: Color = Color::srgb(0.55, 0.88, 0.50);
 
 /// Whether the research modal is open (also gates world/camera input).
 #[derive(Resource, Default)]
@@ -33,6 +27,9 @@ struct ResearchBtn(Tech);
 #[derive(Component)]
 struct ResearchBtnLabel(Tech);
 
+#[derive(Component)]
+struct ResearchBtnBg(Tech);
+
 pub fn plugin(app: &mut App) {
     app.init_resource::<ResearchOpen>()
         .add_systems(OnEnter(Screen::Game), spawn_research)
@@ -43,82 +40,71 @@ pub fn plugin(app: &mut App) {
         );
 }
 
-fn text(t: impl Into<String>, size: f32, color: Color) -> impl Bundle {
-    (Text::new(t.into()), TextFont::from_font_size(size), TextColor(color))
-}
-
-fn spawn_research(mut commands: Commands) {
+fn spawn_research(mut commands: Commands, ff: Res<FormFactor>) {
+    let ff = *ff;
     commands
-        .spawn((
-            Node {
-                display: Display::None,
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                top: Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            BackgroundColor(BACKDROP),
-            Interaction::default(),
-            UiBlocker,
-            ResearchRoot,
-            DespawnOnExit(Screen::Game),
-        ))
+        .spawn((theme::scrim(ff), UiBlocker, ResearchRoot, DespawnOnExit(Screen::Game)))
         .with_children(|p| {
-            p.spawn((
-                Node {
-                    width: Val::Px(470.0),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(8.0),
-                    padding: UiRect::all(Val::Px(16.0)),
-                    ..default()
-                },
-                BackgroundColor(PANEL_BG),
-            ))
-            .with_children(|panel| {
-                panel.spawn(text("Research   (R or Esc to close)", 18.0, TEXT_MAIN));
+            p.spawn(theme::modal_panel(ff)).with_children(|panel| {
+                panel.spawn((theme::title(""), TitleText));
                 for tech in Tech::ALL {
                     panel
-                        .spawn(Node {
-                            align_items: AlignItems::Center,
-                            column_gap: Val::Px(10.0),
-                            ..default()
-                        })
+                        .spawn(theme::card())
                         .with_children(|row| {
-                            row.spawn((
-                                Node {
-                                    flex_grow: 1.0,
-                                    flex_direction: FlexDirection::Column,
-                                    ..default()
-                                },
-                            ))
+                            row.spawn(Node {
+                                flex_grow: 1.0,
+                                flex_direction: FlexDirection::Column,
+                                row_gap: Val::Px(theme::SP_XS),
+                                ..default()
+                            })
                             .with_children(|info| {
-                                info.spawn(text(tech.name(), 14.0, TEXT_MAIN));
-                                info.spawn(text(tech.description(), 12.0, TEXT_DIM));
+                                info.spawn((
+                                    theme::text("", theme::FS_BODY, theme::TEXT_PRIMARY),
+                                    TechNameText(tech),
+                                ));
+                                info.spawn((
+                                    theme::text("", theme::FS_SMALL, theme::TEXT_MUTED),
+                                    TechDescText(tech),
+                                ));
                             });
                             row.spawn((
                                 Button,
                                 Node {
                                     width: Val::Px(150.0),
-                                    height: Val::Px(34.0),
+                                    height: Val::Px(ff.btn_h()),
                                     justify_content: JustifyContent::Center,
                                     align_items: AlignItems::Center,
+                                    border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
                                     ..default()
                                 },
-                                BackgroundColor(BTN_BG),
+                                // No BaseColor: this button's color is owned entirely by
+                                // update_research (owned/affordable/dim), so the generic
+                                // hover system must not fight it over BackgroundColor
+                                // (same reasoning as missions.rs's TunnelInvestBtn).
+                                BackgroundColor(theme::BTN),
                                 ResearchBtn(tech),
+                                ResearchBtnBg(tech),
                             ))
                             .with_children(|b| {
-                                b.spawn((text("", 12.0, TEXT_MAIN), ResearchBtnLabel(tech)));
+                                b.spawn((
+                                    theme::text("", theme::FS_SMALL, theme::TEXT_PRIMARY),
+                                    ResearchBtnLabel(tech),
+                                ));
                             });
                         });
                 }
             });
         });
 }
+
+#[derive(Component)]
+struct TitleText;
+
+#[derive(Component)]
+struct TechNameText(Tech);
+
+#[derive(Component)]
+struct TechDescText(Tech);
 
 fn toggle_research(
     keys: Res<ButtonInput<KeyCode>>,
@@ -133,17 +119,29 @@ fn toggle_research(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn update_research(
     open: Res<ResearchOpen>,
     view: Res<GameView>,
+    lang: Res<super::i18n::Lang>,
     mut root: Query<&mut Node, With<ResearchRoot>>,
-    mut btns: Query<(&ResearchBtn, &mut BackgroundColor)>,
-    mut labels: Query<(&ResearchBtnLabel, &mut Text, &mut TextColor)>,
+    mut title: Query<&mut Text, (With<TitleText>, Without<TechNameText>, Without<TechDescText>)>,
+    mut names: Query<(&TechNameText, &mut Text), (Without<TitleText>, Without<TechDescText>)>,
+    mut descs: Query<(&TechDescText, &mut Text), (Without<TitleText>, Without<TechNameText>)>,
+    mut btn_bgs: Query<(&ResearchBtnBg, &mut BackgroundColor)>,
+    mut labels: Query<(&ResearchBtnLabel, &mut Text, &mut TextColor), (Without<TitleText>, Without<TechNameText>, Without<TechDescText>)>,
 ) {
+    let lang = *lang;
     let display = if open.0 { Display::Flex } else { Display::None };
     for mut node in &mut root {
         if node.display != display {
             node.display = display;
+        }
+    }
+    if let Ok(mut t) = title.single_mut() {
+        let new = format!("{}   {}", i18n_panels::research_title(lang), i18n_panels::research_hint(lang));
+        if t.0 != new {
+            t.0 = new;
         }
     }
     if !open.0 {
@@ -151,16 +149,28 @@ fn update_research(
     }
     let Some(state) = view.state.as_ref() else { return };
 
-    for (btn, mut bg) in &mut btns {
+    for (name, mut t) in &mut names {
+        let new = i18n_names::tech_name(name.0, lang);
+        if t.0 != new {
+            t.0 = new.to_string();
+        }
+    }
+    for (desc, mut t) in &mut descs {
+        let new = i18n_names::tech_desc(desc.0, lang);
+        if t.0 != new {
+            t.0 = new.to_string();
+        }
+    }
+    for (btn, mut bg) in &mut btn_bgs {
         let owned = state.has_tech(btn.0);
         let affordable = state.stock.wood >= btn.0.cost_wood() as f32
             && state.stock.coal >= btn.0.cost_coal() as f32;
         let want = if owned {
-            BTN_DONE
+            theme::BTN_SUCCESS
         } else if affordable {
-            BTN_BG
+            theme::BTN
         } else {
-            BTN_DIM
+            theme::BTN_DIM
         };
         if bg.0 != want {
             bg.0 = want;
@@ -169,11 +179,11 @@ fn update_research(
     for (label, mut t, mut c) in &mut labels {
         let owned = state.has_tech(label.0);
         let (s, col) = if owned {
-            ("Researched".to_string(), DONE)
+            (i18n_panels::researched(lang).to_string(), theme::SUCCESS)
         } else {
             (
-                format!("{}w {}c", label.0.cost_wood(), label.0.cost_coal()),
-                TEXT_MAIN,
+                i18n_panels::tech_cost(label.0.cost_wood(), label.0.cost_coal(), lang),
+                theme::TEXT_PRIMARY,
             )
         };
         if t.0 != s {

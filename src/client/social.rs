@@ -4,14 +4,18 @@
 //! is driven by the existing [`SocialState`] resource — server plumbing
 //! (`ClientMsg::AddFriend/RemoveFriend/RefreshSocial/VisitFriend/Invite`,
 //! `ServerMsg::Social/Invited/Bubble`) already lands there via `net_sync.rs`;
-//! this module only renders it and forwards clicks.
+//! this module only renders it and forwards clicks. Chat-bubble/system-toast
+//! TEXT comes from the server (or is a player's own typed chat) and is never
+//! translated — only this module's own frame/labels are localized.
 
 use bevy::prelude::*;
 
 use frozen_city::net::protocol::ClientMsg;
 
+use super::i18n_panels;
+use super::theme::{self, BaseColor, FormFactor};
 use super::chat::ChatState;
-use super::ui::{BaseColor, UiBlocker};
+use super::ui::UiBlocker;
 use super::{i18n, GameView, NetConn, PendingSwitch, Screen, Session, SocialState, WorldTarget};
 
 /// Visible friend rows at once — friends lists are small (this is a co-op
@@ -27,19 +31,16 @@ const MAX_NAME_INPUT: usize = 32;
 const TOAST_LIFETIME: f32 = 7.0;
 const TOAST_FADE: f32 = 1.5;
 
-const PANEL_BG: Color = Color::srgba(0.05, 0.08, 0.13, 0.98);
-const BACKDROP: Color = Color::srgba(0.0, 0.0, 0.0, 0.55);
-const BTN_BG: Color = Color::srgb(0.16, 0.20, 0.28);
-const VISIT_BG: Color = Color::srgb(0.16, 0.34, 0.44);
-const INVITE_BG: Color = Color::srgb(0.20, 0.36, 0.30);
-const REMOVE_BG: Color = Color::srgb(0.45, 0.16, 0.14);
-const FIELD_BG: Color = Color::srgba(0.02, 0.04, 0.08, 0.92);
-const FIELD_FOCUS_BG: Color = Color::srgb(0.10, 0.16, 0.26);
-const TEXT_MAIN: Color = Color::srgb(0.90, 0.93, 0.97);
-const TEXT_DIM: Color = Color::srgb(0.62, 0.68, 0.78);
-const ONLINE_COL: Color = Color::srgb(0.55, 0.90, 0.50);
-const INVITE_COL: Color = Color::srgb(0.95, 0.80, 0.35);
-const SYSTEM_TOAST_COL: Color = Color::srgb(0.70, 0.80, 0.95);
+const FIELD_BG: Color = Color::srgba(0.020, 0.040, 0.080, 0.92);
+const FIELD_FOCUS_BG: Color = Color::srgb(0.100, 0.160, 0.260);
+const ONLINE_COL: Color = Color::srgb(0.550, 0.900, 0.500);
+const INVITE_COL: Color = Color::srgb(0.950, 0.800, 0.350);
+const SYSTEM_TOAST_COL: Color = Color::srgb(0.700, 0.800, 0.950);
+/// "Visit" action button — a distinct ice-blue the shared palette has no
+/// button-background equivalent for (`ACCENT_ICE` is a text/border accent).
+const VISIT_BG: Color = Color::srgb(0.160, 0.340, 0.440);
+/// "Go home" button — same ice-blue family as `VISIT_BG`, slightly darker.
+const GO_HOME_BG: Color = Color::srgb(0.130, 0.300, 0.400);
 
 /// Whether the social modal is open (also gates world/camera input, same
 /// idiom as `research::ResearchOpen`).
@@ -169,6 +170,7 @@ pub fn plugin(app: &mut App) {
                 animate_toasts,
                 update_policy_row,
                 policy_button,
+                update_static_labels,
             )
                 .run_if(in_state(Screen::Game)),
         );
@@ -181,18 +183,15 @@ fn reset_add_friend_form(mut form: ResMut<AddFriendForm>) {
     *form = AddFriendForm::default();
 }
 
-fn text(t: impl Into<String>, size: f32, color: Color) -> impl Bundle {
-    (Text::new(t.into()), TextFont::from_font_size(size), TextColor(color))
-}
-
-fn small_btn(bg: Color, w: f32) -> impl Bundle {
+fn small_btn(bg: Color, w: f32, h: f32) -> impl Bundle {
     (
         Button,
         Node {
             width: Val::Px(w),
-            height: Val::Px(24.0),
+            height: Val::Px(h),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
+            border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
             ..default()
         },
         BackgroundColor(bg),
@@ -201,49 +200,25 @@ fn small_btn(bg: Color, w: f32) -> impl Bundle {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn spawn_social_ui(mut commands: Commands) {
+fn spawn_social_ui(mut commands: Commands, ff: Res<FormFactor>) {
+    let ff = *ff;
+    let btn_h = ff.btn_h();
     // --- Main modal (friends list, add-friend field, refresh) ---
     commands
-        .spawn((
-            Node {
-                display: Display::None,
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                top: Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            BackgroundColor(BACKDROP),
-            Interaction::default(),
-            UiBlocker,
-            SocialRoot,
-            DespawnOnExit(Screen::Game),
-        ))
+        .spawn((theme::scrim(ff), UiBlocker, SocialRoot, DespawnOnExit(Screen::Game)))
         .with_children(|p| {
-            p.spawn((
-                Node {
-                    width: Val::Px(380.0),
-                    max_height: Val::Px(560.0),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(6.0),
-                    padding: UiRect::all(Val::Px(16.0)),
-                    ..default()
-                },
-                BackgroundColor(PANEL_BG),
-            ))
-            .with_children(|panel| {
-                panel.spawn(text("Friends   (F or Esc to close)", 18.0, TEXT_MAIN));
+            p.spawn(theme::modal_panel(ff)).with_children(|panel| {
+                panel.spawn((theme::title(""), StaticLabel::Title));
 
-                // Add-friend row.
+                // --- Invite: add a friend by name, and refresh the list. ---
+                panel.spawn((theme::section(""), StaticLabel::SectionInvite));
+                panel.spawn(theme::divider());
                 panel
                     .spawn(Node {
                         flex_direction: FlexDirection::Row,
-                        column_gap: Val::Px(6.0),
+                        column_gap: Val::Px(theme::SP_SM),
                         align_items: AlignItems::Center,
-                        margin: UiRect::bottom(Val::Px(4.0)),
+                        margin: UiRect::bottom(Val::Px(theme::SP_XS)),
                         ..default()
                     })
                     .with_children(|row| {
@@ -251,27 +226,34 @@ fn spawn_social_ui(mut commands: Commands) {
                             Button,
                             Node {
                                 flex_grow: 1.0,
-                                height: Val::Px(32.0),
-                                padding: UiRect::horizontal(Val::Px(6.0)),
+                                height: Val::Px(btn_h),
+                                padding: UiRect::horizontal(Val::Px(theme::SP_SM)),
                                 justify_content: JustifyContent::FlexStart,
                                 align_items: AlignItems::Center,
+                                border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
                                 ..default()
                             },
                             BackgroundColor(FIELD_BG),
                             AddFriendBox,
                         ))
                         .with_children(|b| {
-                            b.spawn((text("", 13.0, TEXT_DIM), AddFriendText));
+                            b.spawn((theme::text("", theme::FS_SMALL, theme::TEXT_MUTED), AddFriendText));
                         });
-                        row.spawn((small_btn(BTN_BG, 60.0), AddFriendSubmitBtn))
+                        row.spawn((small_btn(theme::BTN, 60.0, btn_h), AddFriendSubmitBtn))
                             .with_children(|b| {
-                                b.spawn(text("Add", 12.0, TEXT_MAIN));
+                                b.spawn((theme::text("", theme::FS_SMALL, theme::TEXT_PRIMARY), StaticLabel::AddFriendSubmit));
                             });
-                        row.spawn((small_btn(BTN_BG, 60.0), RefreshBtn))
+                        row.spawn((small_btn(theme::BTN, 66.0, btn_h), RefreshBtn))
                             .with_children(|b| {
-                                b.spawn(text("Refresh", 11.0, TEXT_MAIN));
+                                b.spawn((theme::text("", theme::FS_MICRO, theme::TEXT_PRIMARY), StaticLabel::Refresh));
                             });
                     });
+
+                // --- Friends list + Showcase (showcase stats ride along each
+                // friend row: "d{days} p{population} b{buildings}"). ---
+                panel.spawn((theme::section(""), StaticLabel::SectionFriends));
+                panel.spawn(theme::divider());
+                panel.spawn((theme::text("", theme::FS_MICRO, theme::TEXT_FAINT), StaticLabel::SectionShowcase));
 
                 for i in 0..FRIEND_ROWS {
                     panel
@@ -279,14 +261,17 @@ fn spawn_social_ui(mut commands: Commands) {
                             Node {
                                 display: Display::None,
                                 align_items: AlignItems::Center,
-                                column_gap: Val::Px(5.0),
+                                column_gap: Val::Px(theme::SP_XS),
+                                padding: UiRect::axes(Val::Px(theme::SP_SM), Val::Px(theme::SP_XS)),
+                                border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
                                 ..default()
                             },
+                            BackgroundColor(theme::BG_SECTION),
                             FriendRow(i),
                         ))
                         .with_children(|row| {
                             row.spawn((
-                                text("", 13.0, TEXT_MAIN),
+                                theme::text("", theme::FS_SMALL, theme::TEXT_PRIMARY),
                                 FriendName(i),
                                 Node {
                                     flex_grow: 1.0,
@@ -294,28 +279,31 @@ fn spawn_social_ui(mut commands: Commands) {
                                 },
                             ));
                             row.spawn((
-                                small_btn(VISIT_BG, 46.0),
+                                small_btn(VISIT_BG, 46.0, btn_h * 0.8),
                                 VisitBtn { row: i, account: None },
                             ))
                             .with_children(|b| {
-                                b.spawn(text("Visit", 10.5, TEXT_MAIN));
+                                b.spawn((theme::text("", theme::FS_MICRO, theme::TEXT_PRIMARY), VisitLabel));
                             });
                             row.spawn((
-                                small_btn(INVITE_BG, 50.0),
+                                small_btn(theme::BTN_SUCCESS, 52.0, btn_h * 0.8),
                                 InviteBtn { row: i, account: None },
                             ))
                             .with_children(|b| {
-                                b.spawn(text("Invite", 10.5, TEXT_MAIN));
+                                b.spawn((theme::text("", theme::FS_MICRO, theme::TEXT_PRIMARY), InviteLabel));
                             });
                             row.spawn((
-                                small_btn(REMOVE_BG, 22.0),
+                                small_btn(theme::BTN_DANGER, 24.0, btn_h * 0.8),
                                 RemoveBtn { row: i, account: None },
                             ))
                             .with_children(|b| {
-                                b.spawn(text("x", 11.0, TEXT_MAIN));
+                                b.spawn(theme::text("x", theme::FS_MICRO, theme::TEXT_PRIMARY));
                             });
                         });
                 }
+
+                panel.spawn((theme::section(""), StaticLabel::SectionPolicy));
+                panel.spawn(theme::divider());
 
                 // V0.6 owner-offline policy toggle — hidden until the server
                 // reports this account's setting (guest sessions never see it).
@@ -324,24 +312,24 @@ fn spawn_social_ui(mut commands: Commands) {
                         Node {
                             display: Display::None,
                             flex_direction: FlexDirection::Row,
-                            column_gap: Val::Px(6.0),
+                            column_gap: Val::Px(theme::SP_SM),
                             align_items: AlignItems::Center,
-                            margin: UiRect::top(Val::Px(8.0)),
                             ..default()
                         },
                         PolicyRow,
                     ))
                     .with_children(|row| {
                         row.spawn((
-                            text("Guests may enter while I'm offline:", 11.5, TEXT_DIM),
+                            theme::text("", theme::FS_SMALL, theme::TEXT_MUTED),
+                            StaticLabel::Policy,
                             Node {
                                 flex_grow: 1.0,
                                 ..default()
                             },
                         ));
-                        row.spawn((small_btn(BTN_BG, 44.0), PolicyBtn))
+                        row.spawn((small_btn(theme::BTN, 50.0, btn_h * 0.8), PolicyBtn))
                             .with_children(|b| {
-                                b.spawn((text("OFF", 11.0, TEXT_MAIN), PolicyText));
+                                b.spawn((theme::text("", theme::FS_MICRO, theme::TEXT_PRIMARY), PolicyText));
                             });
                     });
             });
@@ -367,16 +355,17 @@ fn spawn_social_ui(mut commands: Commands) {
                 Node {
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
-                    row_gap: Val::Px(8.0),
-                    padding: UiRect::all(Val::Px(12.0)),
+                    row_gap: Val::Px(theme::SP_SM),
+                    padding: UiRect::all(Val::Px(theme::SP_MD)),
+                    border_radius: BorderRadius::all(Val::Px(theme::RAD_PANEL)),
                     ..default()
                 },
-                BackgroundColor(Color::srgba(0.10, 0.09, 0.03, 0.96)),
+                BackgroundColor(Color::srgba(0.100, 0.090, 0.030, 0.96)),
                 Interaction::default(),
                 UiBlocker,
             ))
             .with_children(|panel| {
-                panel.spawn((text("", 13.5, INVITE_COL), InviteToastText));
+                panel.spawn((theme::text("", theme::FS_SMALL + 1.0, INVITE_COL), InviteToastText));
                 panel
                     .spawn((
                         Button,
@@ -385,14 +374,15 @@ fn spawn_social_ui(mut commands: Commands) {
                             height: Val::Px(30.0),
                             justify_content: JustifyContent::Center,
                             align_items: AlignItems::Center,
+                            border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
                             ..default()
                         },
-                        BackgroundColor(VISIT_BG),
-                        BaseColor(VISIT_BG),
+                        BackgroundColor(theme::BTN_SUCCESS),
+                        BaseColor(theme::BTN_SUCCESS),
                         InviteAcceptBtn,
                     ))
                     .with_children(|b| {
-                        b.spawn(text("Accept -> visit", 13.0, TEXT_MAIN));
+                        b.spawn((theme::text("", theme::FS_SMALL, theme::TEXT_PRIMARY), StaticLabel::InviteAccept));
                     });
             });
         });
@@ -408,14 +398,14 @@ fn spawn_social_ui(mut commands: Commands) {
                 top: Val::Px(50.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                column_gap: Val::Px(12.0),
+                column_gap: Val::Px(theme::SP_MD),
                 ..default()
             },
             VisitingRoot,
             DespawnOnExit(Screen::Game),
         ))
         .with_children(|p| {
-            p.spawn((text("", 14.0, ONLINE_COL), VisitingText));
+            p.spawn((theme::text("", theme::FS_BODY, ONLINE_COL), VisitingText));
             p.spawn((
                 Button,
                 Node {
@@ -423,14 +413,15 @@ fn spawn_social_ui(mut commands: Commands) {
                     height: Val::Px(28.0),
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
+                    border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
                     ..default()
                 },
-                BackgroundColor(Color::srgb(0.13, 0.30, 0.40)),
-                BaseColor(Color::srgb(0.13, 0.30, 0.40)),
+                BackgroundColor(GO_HOME_BG),
+                BaseColor(GO_HOME_BG),
                 GoHomeBtn,
             ))
             .with_children(|b| {
-                b.spawn(text("My City", 12.5, TEXT_MAIN));
+                b.spawn((theme::text("", theme::FS_SMALL, theme::TEXT_PRIMARY), StaticLabel::GoHome));
             });
         });
 
@@ -449,6 +440,12 @@ fn spawn_social_ui(mut commands: Commands) {
         DespawnOnExit(Screen::Game),
     ));
 }
+
+#[derive(Component)]
+struct VisitLabel;
+
+#[derive(Component)]
+struct InviteLabel;
 
 /// The Friends HUD button (mobile has no `F` key). Spawned separately from
 /// `ui::spawn_hud` (a different plugin/file) so it survives independently of
@@ -472,15 +469,16 @@ fn spawn_hud_button(mut commands: Commands) {
                 height: Val::Px(28.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
+                border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
                 ..default()
             },
-            BackgroundColor(BTN_BG),
-            BaseColor(BTN_BG),
+            BackgroundColor(theme::BTN),
+            BaseColor(theme::BTN),
             SocialHudBtn,
             DespawnOnExit(Screen::Game),
         ))
         .with_children(|b| {
-            b.spawn(text("Friends [F]", 12.0, TEXT_MAIN));
+            b.spawn((theme::text("", theme::FS_SMALL, theme::TEXT_PRIMARY), StaticLabel::Hud));
         });
 }
 
@@ -528,11 +526,66 @@ fn refresh_button(
     }
 }
 
+/// Every one of these labels is `&mut Text` on its own dedicated marker
+/// entity — but Bevy's query-conflict check only recognizes two
+/// `Query<&mut Text, With<A>>` / `Query<&mut Text, With<B>>` parameters as
+/// disjoint when at least one side *also* excludes the other's marker
+/// (`With<A>` alone vs `With<B>` alone is NOT sufficient — see
+/// `bevy_ecs::query::access::FilteredAccess::is_ruled_out_by`, which only
+/// rules two queries compatible via an explicit `with`/`without` overlap).
+/// Rather than writing eleven mutually-excluding marker structs, all eleven
+/// live on one `StaticLabel` enum component instead, read through a single
+/// `Query<(&StaticLabel, &mut Text)>` — one `&mut Text` access, no conflict
+/// possible.
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+enum StaticLabel {
+    Title,
+    SectionInvite,
+    SectionFriends,
+    SectionShowcase,
+    SectionPolicy,
+    AddFriendSubmit,
+    Refresh,
+    Hud,
+    GoHome,
+    InviteAccept,
+    Policy,
+}
+
+/// Refreshes every static (non-per-row) label whenever the language changes —
+/// title, section headers, placeholders, HUD/toast button labels. Split out
+/// from the per-row systems (`update_social_panel`, etc.) since those already
+/// have `#[allow(clippy::too_many_arguments)]` Query lists at the Bevy cap.
+fn update_static_labels(lang: Res<i18n::Lang>, mut labels: Query<(&StaticLabel, &mut Text)>) {
+    let lang = *lang;
+    for (marker, mut t) in &mut labels {
+        let new = match marker {
+            StaticLabel::Title => {
+                format!("{}   {}", i18n_panels::social_title(lang), i18n_panels::social_hint(lang))
+            }
+            StaticLabel::SectionInvite => i18n_panels::section_invite(lang).to_string(),
+            StaticLabel::SectionFriends => i18n_panels::section_friends(lang).to_string(),
+            StaticLabel::SectionShowcase => i18n_panels::section_showcase(lang).to_string(),
+            StaticLabel::SectionPolicy => i18n_panels::section_offline_policy(lang).to_string(),
+            StaticLabel::AddFriendSubmit => i18n_panels::btn_add(lang).to_string(),
+            StaticLabel::Refresh => i18n_panels::btn_refresh(lang).to_string(),
+            StaticLabel::Hud => i18n_panels::friends_hud_button(lang).to_string(),
+            StaticLabel::GoHome => i18n_panels::btn_my_city(lang).to_string(),
+            StaticLabel::InviteAccept => i18n_panels::btn_accept_visit(lang).to_string(),
+            StaticLabel::Policy => i18n_panels::policy_row_label(lang).to_string(),
+        };
+        if t.0 != new {
+            t.0 = new;
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn update_social_panel(
     open: Res<SocialOpen>,
     view: Res<GameView>,
     social: Res<SocialState>,
+    lang: Res<i18n::Lang>,
     mut root: Query<&mut Node, With<SocialRoot>>,
     mut rows: Query<(&FriendRow, &mut Node), Without<SocialRoot>>,
     mut names: Query<(&FriendName, &mut Text)>,
@@ -550,11 +603,24 @@ fn update_social_panel(
         &mut RemoveBtn,
         (Without<SocialRoot>, Without<FriendRow>, Without<VisitBtn>, Without<InviteBtn>),
     >,
+    mut visit_labels: Query<&mut Text, (With<VisitLabel>, Without<FriendName>)>,
+    mut invite_labels: Query<&mut Text, (With<InviteLabel>, Without<FriendName>, Without<VisitLabel>)>,
 ) {
+    let lang = *lang;
     let display = if open.0 { Display::Flex } else { Display::None };
     for mut node in &mut root {
         if node.display != display {
             node.display = display;
+        }
+    }
+    for mut t in &mut visit_labels {
+        if t.0 != i18n_panels::btn_visit(lang) {
+            t.0 = i18n_panels::btn_visit(lang).to_string();
+        }
+    }
+    for mut t in &mut invite_labels {
+        if t.0 != i18n_panels::btn_invite(lang) {
+            t.0 = i18n_panels::btn_invite(lang).to_string();
         }
     }
     if !open.0 {
@@ -580,7 +646,7 @@ fn update_social_panel(
             .get(name.0)
             .map(|f| {
                 let mut s = if f.online_central {
-                    format!("{} (online)", f.name)
+                    i18n_panels::friend_online_suffix(&f.name, lang)
                 } else {
                     f.name.clone()
                 };
@@ -747,6 +813,7 @@ fn submit_add_friend(form: &mut AddFriendForm, net: &NetConn) {
 
 fn update_add_friend_field(
     form: Res<AddFriendForm>,
+    lang: Res<i18n::Lang>,
     mut boxes: Query<&mut BackgroundColor, With<AddFriendBox>>,
     mut texts: Query<(&mut Text, &mut TextColor), With<AddFriendText>>,
 ) {
@@ -758,10 +825,10 @@ fn update_add_friend_field(
     }
     if let Ok((mut t, mut c)) = texts.single_mut() {
         let (new, col) = if form.text.is_empty() && !form.focus {
-            ("Add friend by name...".to_string(), TEXT_DIM)
+            (i18n_panels::add_friend_placeholder(*lang).to_string(), theme::TEXT_MUTED)
         } else {
             let cursor = if form.focus { "_" } else { "" };
-            (format!("{}{cursor}", form.text), TEXT_MAIN)
+            (format!("{}{cursor}", form.text), theme::TEXT_PRIMARY)
         };
         if t.0 != new {
             t.0 = new;
@@ -774,6 +841,7 @@ fn update_add_friend_field(
 
 fn update_invite_toast(
     social: Res<SocialState>,
+    lang: Res<i18n::Lang>,
     mut root: Query<&mut Node, With<InviteToastRoot>>,
     mut text: Query<&mut Text, With<InviteToastText>>,
 ) {
@@ -784,7 +852,7 @@ fn update_invite_toast(
         }
     }
     let Some((_, host_name)) = &social.invite else { return };
-    let new = format!("{host_name} invited you to visit their city!");
+    let new = i18n_panels::invite_toast(host_name, *lang);
     if let Ok(mut t) = text.single_mut() {
         if t.0 != new {
             t.0 = new;
@@ -816,6 +884,7 @@ fn invite_accept_button(
 fn update_visiting_indicator(
     session: Res<Session>,
     social: Res<SocialState>,
+    lang: Res<i18n::Lang>,
     mut root: Query<&mut Node, With<VisitingRoot>>,
     mut text: Query<&mut Text, With<VisitingText>>,
 ) {
@@ -831,8 +900,8 @@ fn update_visiting_indicator(
         .iter()
         .find(|f| f.account == host)
         .map(|f| f.name.clone())
-        .unwrap_or_else(|| "a friend".to_string());
-    let new = format!("Visiting {name}'s city");
+        .unwrap_or_else(|| i18n_panels::a_friend(*lang).to_string());
+    let new = i18n_panels::visiting_indicator(&name, *lang);
     if let Ok(mut t) = text.single_mut() {
         if t.0 != new {
             t.0 = new;
@@ -863,6 +932,8 @@ fn go_home_button(
 /// world-space floating bubble above the sender's avatar/cursor, spawned via
 /// `chat::spawn_bubble` (`chat.rs` owns that rendering/fade logic since it's
 /// conceptually a chat feature; this module only owns the toast feed).
+/// Bubble/system text itself is server-authored (or the player's own typed
+/// chat) and is never translated here.
 fn drain_bubbles_to_toasts(
     mut commands: Commands,
     mut social: ResMut<SocialState>,
@@ -879,7 +950,7 @@ fn drain_bubbles_to_toasts(
             (format!("{}: {}", b.name, b.text), super::player_color(b.color))
         };
         commands.entity(root).with_children(|p| {
-            p.spawn((text(line, 13.0, color), Toast { age: 0.0 }));
+            p.spawn((theme::text(line, theme::FS_SMALL, color), Toast { age: 0.0 }));
         });
         // Only real chat (not player_id==0 system feedback) gets a
         // world-space bubble — a system line like "friend not found" has no
@@ -914,6 +985,7 @@ fn animate_toasts(
 /// and keep the ON/OFF label in sync with it.
 fn update_policy_row(
     social: Res<SocialState>,
+    lang: Res<i18n::Lang>,
     mut row: Query<&mut Node, With<PolicyRow>>,
     mut label: Query<&mut Text, With<PolicyText>>,
 ) {
@@ -928,8 +1000,8 @@ fn update_policy_row(
         }
     }
     let want = match social.visit_policy {
-        Some(true) => "ON",
-        _ => "OFF",
+        Some(true) => i18n_panels::policy_on(*lang),
+        _ => i18n_panels::policy_off(*lang),
     };
     for mut t in &mut label {
         if t.0 != want {

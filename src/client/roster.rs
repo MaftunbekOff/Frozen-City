@@ -19,7 +19,11 @@ use frozen_city::game::types::{PlayerCommand, Survivor, XP_DAYS_LEVEL_1, XP_DAYS
 use frozen_city::net::protocol::ClientMsg;
 
 use super::chat::ChatState;
-use super::ui::{AssignHereBtn, AssignHereLabel, BaseColor, UiBlocker};
+use super::i18n::Lang;
+use super::i18n_names;
+use super::i18n_panels;
+use super::theme::{self, BaseColor, FormFactor};
+use super::ui::{AssignHereBtn, AssignHereLabel, UiBlocker};
 use super::{GameView, NetConn, Screen, Selection};
 
 /// Client-side mirror of `fc_game::sim::xp_level` (private to the sim crate):
@@ -39,22 +43,15 @@ pub fn xp_level(xp: f32) -> u8 {
 
 /// Short "Profession Lx" tag used by both the roster rows and the detail
 /// card, e.g. "Miner L2".
-pub fn profession_level_tag(s: &Survivor) -> String {
-    format!("{} L{}", s.profession.name(), xp_level(s.xp))
+pub fn profession_level_tag(s: &Survivor, l: Lang) -> String {
+    format!("{} L{}", i18n_names::profession_name(s.profession, l), xp_level(s.xp))
 }
 
 /// Visible rows at once. Population can reach `MAX_POPULATION` (60), which
 /// doesn't fit on screen — idle survivors sort first (most actionable), the
 /// rest are summarized by a trailing "+N more" line rather than scrolling
-/// (no panel in this codebase scrolls yet).
+/// further (the modal itself scrolls via `theme::modal_panel`).
 const ROSTER_ROWS: usize = 20;
-
-const PANEL_BG: Color = Color::srgba(0.05, 0.08, 0.13, 0.98);
-const ROW_BG: Color = Color::srgb(0.16, 0.20, 0.28);
-const ROW_SELECTED: Color = Color::srgb(0.36, 0.30, 0.14);
-const UNASSIGN_BG: Color = Color::srgb(0.45, 0.16, 0.14);
-const TEXT_MAIN: Color = Color::srgb(0.90, 0.93, 0.97);
-const TEXT_DIM: Color = Color::srgb(0.62, 0.68, 0.78);
 
 /// Whether the roster modal is open (also gates world/camera input).
 #[derive(Resource, Default)]
@@ -69,6 +66,12 @@ pub struct SurvivorSelection(pub Option<u32>);
 
 #[derive(Component)]
 struct RosterRoot;
+
+#[derive(Component)]
+struct RosterTitle;
+
+#[derive(Component)]
+struct RosterSubtitle;
 
 #[derive(Component)]
 struct RosterRow(usize);
@@ -115,7 +118,13 @@ struct CardCloseBtn;
 struct CardLeaderBtn;
 
 #[derive(Component)]
+struct CardLeaderLabel;
+
+#[derive(Component)]
 struct CardUnassignBtn;
+
+#[derive(Component)]
+struct CardUnassignLabel;
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<RosterOpen>()
@@ -137,56 +146,21 @@ pub fn plugin(app: &mut App) {
         );
 }
 
-fn text(t: impl Into<String>, size: f32, color: Color) -> impl Bundle {
-    (Text::new(t.into()), TextFont::from_font_size(size), TextColor(color))
-}
-
-fn spawn_roster(mut commands: Commands) {
+fn spawn_roster(mut commands: Commands, ff: Res<FormFactor>) {
+    let ff = *ff;
     commands
-        .spawn((
-            Node {
-                display: Display::None,
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                top: Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
-            Interaction::default(),
-            UiBlocker,
-            RosterRoot,
-            DespawnOnExit(Screen::Game),
-        ))
+        .spawn((theme::scrim(ff), UiBlocker, RosterRoot, DespawnOnExit(Screen::Game)))
         .with_children(|p| {
-            p.spawn((
-                Node {
-                    width: Val::Px(420.0),
-                    max_height: Val::Px(520.0),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(4.0),
-                    padding: UiRect::all(Val::Px(16.0)),
-                    ..default()
-                },
-                BackgroundColor(PANEL_BG),
-            ))
-            .with_children(|panel| {
-                panel.spawn(text("Survivors   (P or Esc to close)", 18.0, TEXT_MAIN));
-                panel.spawn(text(
-                    "Pick a survivor, then select a building to assign them.",
-                    12.0,
-                    TEXT_DIM,
-                ));
+            p.spawn(theme::modal_panel(ff)).with_children(|panel| {
+                panel.spawn((theme::title(""), RosterTitle));
+                panel.spawn((theme::text("", theme::FS_SMALL, theme::TEXT_MUTED), RosterSubtitle));
                 for i in 0..ROSTER_ROWS {
                     panel
                         .spawn((
                             Node {
                                 display: Display::None,
                                 align_items: AlignItems::Center,
-                                column_gap: Val::Px(6.0),
+                                column_gap: Val::Px(theme::SP_SM),
                                 ..default()
                             },
                             RosterRow(i),
@@ -196,40 +170,45 @@ fn spawn_roster(mut commands: Commands) {
                                 Button,
                                 Node {
                                     flex_grow: 1.0,
-                                    padding: UiRect::axes(Val::Px(6.0), Val::Px(3.0)),
+                                    padding: UiRect::axes(Val::Px(theme::SP_SM), Val::Px(theme::SP_XS)),
+                                    border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
                                     ..default()
                                 },
-                                BackgroundColor(ROW_BG),
-                                BaseColor(ROW_BG),
+                                BackgroundColor(theme::BG_SECTION),
+                                BaseColor(theme::BG_SECTION),
                                 RosterRowBtn { row: i, survivor: None },
                             ))
                             .with_children(|btn| {
-                                btn.spawn((text("", 13.0, TEXT_MAIN), RosterName(i)));
+                                btn.spawn((
+                                    theme::text("", theme::FS_SMALL, theme::TEXT_PRIMARY),
+                                    RosterName(i),
+                                ));
                             });
                             row.spawn((
-                                text("", 11.5, TEXT_DIM),
+                                theme::text("", theme::FS_MICRO, theme::TEXT_MUTED),
                                 RosterStatus(i),
                                 Node { width: Val::Px(150.0), ..default() },
                             ));
                             row.spawn((
                                 Button,
                                 Node {
-                                    width: Val::Px(24.0),
-                                    height: Val::Px(22.0),
+                                    width: Val::Px(ff.btn_h() * 0.55),
+                                    height: Val::Px(ff.btn_h() * 0.5),
                                     justify_content: JustifyContent::Center,
                                     align_items: AlignItems::Center,
+                                    border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
                                     ..default()
                                 },
-                                BackgroundColor(UNASSIGN_BG),
-                                BaseColor(UNASSIGN_BG),
+                                BackgroundColor(theme::BTN_DANGER),
+                                BaseColor(theme::BTN_DANGER),
                                 UnassignBtn { row: i, survivor: None },
                             ))
                             .with_children(|b| {
-                                b.spawn(text("x", 11.0, TEXT_MAIN));
+                                b.spawn(theme::text("x", theme::FS_MICRO, theme::TEXT_PRIMARY));
                             });
                         });
                 }
-                panel.spawn((text("", 12.0, TEXT_DIM), MoreText));
+                panel.spawn((theme::text("", theme::FS_SMALL, theme::TEXT_MUTED), MoreText));
             });
         });
 }
@@ -251,8 +230,15 @@ fn toggle_roster(
 fn update_roster(
     open: Res<RosterOpen>,
     view: Res<GameView>,
+    lang: Res<Lang>,
     mut sel: ResMut<SurvivorSelection>,
     mut root: Query<&mut Node, With<RosterRoot>>,
+    mut title: Query<&mut Text, (With<RosterTitle>, Without<RosterRow>, Without<RosterName>, Without<RosterStatus>, Without<RosterSubtitle>)>,
+    #[allow(clippy::type_complexity)]
+    mut subtitle: Query<
+        &mut Text,
+        (With<RosterSubtitle>, Without<RosterRow>, Without<RosterName>, Without<RosterStatus>, Without<RosterTitle>),
+    >,
     mut rows: Query<(&RosterRow, &mut Node), Without<RosterRoot>>,
     mut names: Query<(&RosterName, &mut Text), Without<RosterStatus>>,
     mut statuses: Query<(&RosterStatus, &mut Text), Without<RosterName>>,
@@ -261,13 +247,33 @@ fn update_roster(
     #[allow(clippy::type_complexity)]
     mut more: Query<
         (&mut Text, &mut Node),
-        (With<MoreText>, Without<RosterRoot>, Without<RosterRow>, Without<RosterName>, Without<RosterStatus>),
+        (
+            With<MoreText>,
+            Without<RosterRoot>,
+            Without<RosterRow>,
+            Without<RosterName>,
+            Without<RosterStatus>,
+            Without<RosterTitle>,
+            Without<RosterSubtitle>,
+        ),
     >,
 ) {
+    let lang = *lang;
     let display = if open.0 { Display::Flex } else { Display::None };
     for mut node in &mut root {
         if node.display != display {
             node.display = display;
+        }
+    }
+    if let Ok(mut t) = title.single_mut() {
+        let new = format!("{}   {}", i18n_panels::roster_title(lang), i18n_panels::roster_hint(lang));
+        if t.0 != new {
+            t.0 = new;
+        }
+    }
+    if let Ok(mut t) = subtitle.single_mut() {
+        if t.0 != i18n_panels::roster_subtitle(lang) {
+            t.0 = i18n_panels::roster_subtitle(lang).to_string();
         }
     }
     if !open.0 {
@@ -317,12 +323,19 @@ fn update_roster(
                 let workplace = match s.assigned_building {
                     Some(b_id) => state
                         .find_building(b_id)
-                        .map(|b| b.kind.name().to_string())
-                        .unwrap_or_else(|| "Idle".to_string()),
-                    None if s.move_target.is_some() => "Moving".to_string(),
-                    None => "Idle".to_string(),
+                        .map(|b| i18n_names::building_name(b.kind, lang).to_string())
+                        .unwrap_or_else(|| i18n_panels::status_idle(lang).to_string()),
+                    None if s.move_target.is_some() => i18n_panels::status_moving(lang).to_string(),
+                    None => i18n_panels::status_idle(lang).to_string(),
                 };
-                format!("{} — {workplace}", profession_level_tag(s))
+                // Leader gets its own status word ahead of the workplace —
+                // the settlement's one leader is always worth flagging in the
+                // list, not just on the detail card.
+                if state.leader == Some(s.id) {
+                    format!("{} — {}, {workplace}", profession_level_tag(s, lang), i18n_panels::status_leader(lang))
+                } else {
+                    format!("{} — {workplace}", profession_level_tag(s, lang))
+                }
             })
             .unwrap_or_default();
         if t.0 != new {
@@ -334,7 +347,7 @@ fn update_roster(
         if btn.survivor != survivor {
             btn.survivor = survivor;
         }
-        let want = if survivor.is_some() && survivor == sel.0 { ROW_SELECTED } else { ROW_BG };
+        let want = if survivor.is_some() && survivor == sel.0 { theme::BTN_ACTIVE } else { theme::BTN };
         if bg.0 != want {
             bg.0 = want;
         }
@@ -348,7 +361,7 @@ fn update_roster(
     if let Ok((mut t, mut node)) = more.single_mut() {
         if sorted.len() > ROSTER_ROWS {
             let n = sorted.len() - ROSTER_ROWS;
-            let label = format!("+{n} more (not shown)");
+            let label = i18n_panels::roster_more(n, lang);
             if t.0 != label {
                 t.0 = label;
             }
@@ -393,6 +406,7 @@ fn unassign_buttons(
 
 fn update_assign_here(
     view: Res<GameView>,
+    lang: Res<Lang>,
     selection: Res<Selection>,
     survivor_sel: Res<SurvivorSelection>,
     mut btns: Query<&mut Node, With<AssignHereBtn>>,
@@ -415,7 +429,7 @@ fn update_assign_here(
     if !show {
         return;
     }
-    let label = format!("Assign {} here", survivor.unwrap().name);
+    let label = i18n_panels::assign_here(&survivor.unwrap().name, *lang);
     if let Ok(mut t) = labels.single_mut() {
         if t.0 != label {
             t.0 = label;
@@ -453,11 +467,12 @@ fn spawn_card(mut commands: Commands) {
                 top: Val::Px(546.0),
                 width: Val::Px(236.0),
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(6.0),
-                padding: UiRect::all(Val::Px(10.0)),
+                row_gap: Val::Px(theme::SP_SM),
+                padding: UiRect::all(Val::Px(theme::SP_SM)),
+                border_radius: BorderRadius::all(Val::Px(theme::RAD_PANEL)),
                 ..default()
             },
-            BackgroundColor(PANEL_BG),
+            BackgroundColor(theme::BG_PANEL),
             Interaction::default(),
             UiBlocker,
             CardRoot,
@@ -466,14 +481,18 @@ fn spawn_card(mut commands: Commands) {
         .with_children(|p| {
             p.spawn(Node {
                 align_items: AlignItems::Center,
-                column_gap: Val::Px(6.0),
+                column_gap: Val::Px(theme::SP_SM),
                 ..default()
             })
             .with_children(|row| {
-                row.spawn((text("", 15.0, TEXT_MAIN), CardText::Name, Node {
-                    flex_grow: 1.0,
-                    ..default()
-                }));
+                row.spawn((
+                    theme::text("", theme::FS_BODY, theme::TEXT_PRIMARY),
+                    CardText::Name,
+                    Node {
+                        flex_grow: 1.0,
+                        ..default()
+                    },
+                ));
                 row.spawn((
                     Button,
                     Node {
@@ -481,17 +500,18 @@ fn spawn_card(mut commands: Commands) {
                         height: Val::Px(22.0),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
+                        border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
                         ..default()
                     },
-                    BackgroundColor(ROW_BG),
-                    BaseColor(ROW_BG),
+                    BackgroundColor(theme::BTN),
+                    BaseColor(theme::BTN),
                     CardCloseBtn,
                 ))
                 .with_children(|b| {
-                    b.spawn(text("x", 12.0, TEXT_MAIN));
+                    b.spawn(theme::text("x", theme::FS_MICRO, theme::TEXT_PRIMARY));
                 });
             });
-            p.spawn((text("", 12.0, TEXT_DIM), CardText::Stats));
+            p.spawn((theme::text("", theme::FS_SMALL, theme::TEXT_MUTED), CardText::Stats));
             p.spawn((
                 Button,
                 Node {
@@ -500,14 +520,15 @@ fn spawn_card(mut commands: Commands) {
                     height: Val::Px(28.0),
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
+                    border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
                     ..default()
                 },
-                BackgroundColor(Color::srgb(0.30, 0.26, 0.10)),
-                BaseColor(Color::srgb(0.30, 0.26, 0.10)),
+                BackgroundColor(theme::BTN_ACTIVE),
+                BaseColor(theme::BTN_ACTIVE),
                 CardLeaderBtn,
             ))
             .with_children(|b| {
-                b.spawn(text("Make Leader", 12.5, TEXT_MAIN));
+                b.spawn((theme::text("", theme::FS_SMALL, theme::TEXT_PRIMARY), CardLeaderLabel));
             });
             p.spawn((
                 Button,
@@ -517,14 +538,15 @@ fn spawn_card(mut commands: Commands) {
                     height: Val::Px(28.0),
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
+                    border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
                     ..default()
                 },
-                BackgroundColor(UNASSIGN_BG),
-                BaseColor(UNASSIGN_BG),
+                BackgroundColor(theme::BTN_DANGER),
+                BaseColor(theme::BTN_DANGER),
                 CardUnassignBtn,
             ))
             .with_children(|b| {
-                b.spawn(text("Unassign", 12.5, TEXT_MAIN));
+                b.spawn((theme::text("", theme::FS_SMALL, theme::TEXT_PRIMARY), CardUnassignLabel));
             });
         });
 }
@@ -532,6 +554,7 @@ fn spawn_card(mut commands: Commands) {
 #[allow(clippy::too_many_arguments)]
 fn update_card(
     view: Res<GameView>,
+    lang: Res<Lang>,
     roster_open: Res<RosterOpen>,
     mut sel: ResMut<SurvivorSelection>,
     mut root: Query<&mut Node, With<CardRoot>>,
@@ -541,11 +564,20 @@ fn update_card(
         &mut Node,
         (With<CardLeaderBtn>, Without<CardRoot>, Without<CardUnassignBtn>),
     >,
+    mut leader_label: Query<
+        &mut Text,
+        (With<CardLeaderLabel>, Without<CardText>, Without<CardUnassignLabel>),
+    >,
     mut unassign_btn: Query<
         &mut Node,
         (With<CardUnassignBtn>, Without<CardRoot>, Without<CardLeaderBtn>),
     >,
+    mut unassign_label: Query<
+        &mut Text,
+        (With<CardUnassignLabel>, Without<CardText>, Without<CardLeaderLabel>),
+    >,
 ) {
+    let lang = *lang;
     let Some(state) = view.state.as_ref() else { return };
 
     // Drop the selection if that survivor no longer exists (died).
@@ -575,22 +607,33 @@ fn update_card(
                 let workplace = match s.assigned_building {
                     Some(b_id) => state
                         .find_building(b_id)
-                        .map(|b| b.kind.name().to_string())
-                        .unwrap_or_else(|| "Idle".to_string()),
-                    None if s.move_target.is_some() => "Moving".to_string(),
-                    None => "Idle".to_string(),
+                        .map(|b| i18n_names::building_name(b.kind, lang).to_string())
+                        .unwrap_or_else(|| i18n_panels::status_idle(lang).to_string()),
+                    None if s.move_target.is_some() => i18n_panels::status_moving(lang).to_string(),
+                    None => i18n_panels::status_idle(lang).to_string(),
                 };
-                let leader_tag = if state.leader == Some(s.id) { "  (Leader)" } else { "" };
+                let leader_tag = if state.leader == Some(s.id) { i18n_panels::leader_tag(lang) } else { "" };
                 format!(
-                    "{}{leader_tag}\nHP {:.0}   Hunger {:.0}\nWorking: {workplace}",
-                    profession_level_tag(s),
-                    s.hp,
-                    s.hunger,
+                    "{}{leader_tag}\n{}\n{}",
+                    profession_level_tag(s, lang),
+                    i18n_panels::card_stats_line(s.hp, s.hunger, lang),
+                    i18n_panels::card_working(&workplace, lang),
                 )
             }
         };
         if t.0 != new {
             t.0 = new;
+        }
+    }
+
+    if let Ok(mut t) = leader_label.single_mut() {
+        if t.0 != i18n_panels::make_leader(lang) {
+            t.0 = i18n_panels::make_leader(lang).to_string();
+        }
+    }
+    if let Ok(mut t) = unassign_label.single_mut() {
+        if t.0 != i18n_panels::unassign(lang) {
+            t.0 = i18n_panels::unassign(lang).to_string();
         }
     }
 
