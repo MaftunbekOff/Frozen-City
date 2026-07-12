@@ -339,8 +339,8 @@ qoldirildi (quyida).
 - [x] **Hub mashg'ulotlari (v1)** (2026-07-12): **vitrina (Showcase)** —
       social panelda har do'stning shahar statistikasi (kun/aholi/bino/Tunnel
       belgisi), `RefreshShowcase` → saqlov faylidan o'qiladi (5s cooldown,
-      faqat do'stlarga — maxfiylik). E'lonlar taxtasi/savdo — keyinroq,
-      dizayn ochiq.
+      faqat do'stlarga — maxfiylik; o'qish tick thread'idan tashqarida,
+      alohida thread'da). E'lonlar taxtasi/savdo — keyinroq, dizayn ochiq.
 
 **Muhim texnik asos:** saqlash formati versiyalangan — hozir `FCWORLD3`
 (2026-07-12: `Building.owner_account` + `central_ledger` uchun); `FCWORLD2`
@@ -375,7 +375,9 @@ bo'g'in, va deploy'dan oldin haqiqiy production saqlovlar nusxasini
       tugma) → `Invited` bildirishnomasi + qabul qilsa `VisitFriend` bilan
       egasining shaxsiy olamiga ulanadi (`InviteBook`, 15 min TTL). Taklif
       endi nishonning **shaxsiy olamiga ham** yetib boradi
-      (`WorldManager::deliver_to_account`) — do'st hub'da turishi shart emas.
+      (`WorldManager::deliver_to_account`) — do'st hub'da turishi shart emas;
+      hub'da yetkazilganda shaxsiy olamga TAKRORLANMAYDI (ikki qurilmali
+      akkaunt bitta taklifni ikki marta ko'rmaydi).
 - [x] **Mehmon huquqlari** (V0.2 rollar ustiga): olam egaligi endi **akkauntga
       mahkamlangan** (`ServerConfig::owner_account` — tashrifchi birinchi
       kirib ham Owner bo'lolmaydi); egasi `GuestPermission`ni belgilaydi
@@ -469,14 +471,14 @@ bo'g'in, va deploy'dan oldin haqiqiy production saqlovlar nusxasini
 
 **Keyingi konkret qadamlar (V1.0 yo'lida, 2026-07-12 holatiga):**
 
-1. **Graduatsiya UX sayqali**: Tunnel bitgach olam `Won` fazasida 45s
-   (`WORLD_RESET_AFTER`) buyruq qabul qilmaydi — o'yinchiga bu oynani
-   ko'rsatish (sanoq/xabar) yoki graduatsiya-g'alabani reset'siz qilish
-   (dizayn tanlovi).
-2. **`GameState::tile()` delta-snapshot ehtiyotkorligi**: xom protokol
-   iste'molchilari (bot/vosita) uchun o'tkir qirra — `tiles` bo'sh delta
-   snapshot'da indeksdan panik qiladi (klientning `GameView` birlashtiruvi
-   bundan himoya qiladi, lekin hujjatlash yoki `Option` qaytarish kerak).
+1. ~~**Graduatsiya UX sayqali**~~ ✅ bajarildi (2026-07-12): server endi
+   game-over (Won/Lost) davomida `ServerMsg::ResetCountdown` yuboradi
+   (soniya qiymati o'zgarganda bitta), overlay "A new expedition arrives
+   in N s." qatorini ko'rsatadi — 45s jim muzlash endi ko'rinadigan sanoq
+   (`tests/social_server_tests.rs`da e2e tasdiqlangan).
+2. ~~**`GameState::tile()` delta-snapshot ehtiyotkorligi**~~ ✅ bajarildi
+   (2026-07-12): `tile()` endi `Option<&Tile>` qaytaradi (`tiles.get`) —
+   bo'sh/delta holatda panik o'rniga `None`; chaqiruvchilar moslandi.
 3. **Lokalizatsiya (uz/en/ru)** va sozlamalar menyusi — V1.0 ro'yxatidan.
 4. **CI/CD (GitHub Actions)** — test + artefaktlar; deploy hozir serverda
    `deploy.sh` orqali.
@@ -484,3 +486,9 @@ bo'g'in, va deploy'dan oldin haqiqiy production saqlovlar nusxasini
    100 klientgacha hozirgi arxitektura o'lchab tasdiqlangan.
 6. **Markaziy olam savdo/e'lonlar taxtasi** — hissa daftari (`central_ledger`)
    endi bor, uning ustiga quriladi.
+
+Shu kunning o'zida yopilgan ikki mayda qoldiq: `Invited` endi ikki
+ulanishli akkauntga faqat bir marta boradi (markazda yetkazilsa shaxsiy
+olamga takrorlanmaydi), va `RefreshShowcase`ning saqlov-fayl o'qishlari
+tick thread'idan alohida throwaway thread'ga ko'chirildi (katta do'stlar
+ro'yxati endi olam tick'ini to'xtatmaydi).
