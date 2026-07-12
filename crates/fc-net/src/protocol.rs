@@ -193,6 +193,11 @@ pub enum ServerMsg {
     /// The sender's own `allow_offline_guests` setting (V0.6 "owner-offline
     /// entry"), sent on account join and after every `SetVisitPolicy`.
     VisitPolicy { allow_offline: bool },
+    /// Persistent worlds only: seconds left until this game-over (Won/Lost)
+    /// world auto-resets and a new expedition starts. Broadcast once per
+    /// second-value change while the world sits in game-over, so the overlay
+    /// can show a live countdown instead of a silent 45 s command freeze.
+    ResetCountdown { seconds_left: u32 },
 }
 
 /// Deflate level: fast enough to run every tick on a shared box, still gets

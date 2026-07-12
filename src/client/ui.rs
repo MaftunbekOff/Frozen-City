@@ -918,6 +918,13 @@ pub fn game_over_ui(
         }
     }
 
+    // Persistent worlds auto-reset shortly after game-over (the server
+    // freezes commands meanwhile); surface its countdown so the pause reads
+    // as "new run incoming", not a hang. Singleplayer never sends one.
+    let countdown = view
+        .reset_countdown
+        .map(|s| format!("\nA new expedition arrives in {s} s."))
+        .unwrap_or_default();
     for (mut text, mut color, kind) in &mut texts {
         let (new, col) = match (kind, state.phase) {
             (GoText::Title, GamePhase::Won) if state.graduated => (
@@ -934,7 +941,7 @@ pub fn game_over_ui(
             ),
             (GoText::Info, GamePhase::Won) if state.graduated => (
                 format!(
-                    "Day {} — the Tunnel broke through. The Global World awaits!\nWood {}   Coal {}   Food {}",
+                    "Day {} — the Tunnel broke through. The Global World awaits!\nWood {}   Coal {}   Food {}{countdown}",
                     state.day(),
                     state.stock.wood as i64,
                     state.stock.coal as i64,
@@ -944,7 +951,7 @@ pub fn game_over_ui(
             ),
             (GoText::Info, _) => (
                 format!(
-                    "Day {} — population {}.\nWood {}   Coal {}   Food {}",
+                    "Day {} — population {}.\nWood {}   Coal {}   Food {}{countdown}",
                     state.day(),
                     state.survivors.len(),
                     state.stock.wood as i64,

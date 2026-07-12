@@ -8,6 +8,7 @@ use std::sync::Mutex;
 
 use bevy::prelude::*;
 
+use frozen_city::game::types::GamePhase;
 use frozen_city::net::client::ClientConn;
 use frozen_city::net::protocol::{ClientMsg, ServerMsg};
 
@@ -51,6 +52,7 @@ pub fn pump_net(
                 session.attempts = 0;
                 view.tiles = state.tiles.clone();
                 view.tiles_version += 1;
+                view.reset_countdown = None;
                 view.state = Some(state);
                 view.version += 1;
             }
@@ -80,6 +82,11 @@ pub fn pump_net(
                     if !included.techs {
                         state.techs = prev.techs.clone();
                     }
+                }
+                // A Running snapshot means the reset happened (or never was):
+                // drop any stale countdown so the next game-over starts clean.
+                if state.phase == GamePhase::Running {
+                    view.reset_countdown = None;
                 }
                 view.state = Some(state);
                 view.version += 1;
@@ -122,6 +129,9 @@ pub fn pump_net(
             }
             ServerMsg::VisitPolicy { allow_offline } => {
                 social.visit_policy = Some(allow_offline);
+            }
+            ServerMsg::ResetCountdown { seconds_left } => {
+                view.reset_countdown = Some(seconds_left);
             }
         }
     }

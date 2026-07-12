@@ -22,7 +22,8 @@ use tungstenite::Message;
 
 use fc_game::sim;
 use fc_game::types::{
-    GamePhase, GameState, Mission, PlayerCommand, PlayerInfo, Ping, Role, Survivor, Tech, TICK_MS,
+    GamePhase, GameState, LedgerEntry, Mission, PlayerCommand, PlayerInfo, Ping, Role, Survivor,
+    Tech, TICK_MS,
 };
 use crate::accounts;
 use crate::client::ClientConn;
@@ -1046,13 +1047,14 @@ fn social_for(state: &GameState, account: i64) -> ServerMsg {
 
 /// `ServerMsg::Showcase` for `account` (V0.5 "hub activities v1"): one entry
 /// per friend, read on demand from that friend's personal-world save file —
-/// fine at this scale (a handful of friends, a rare click), not something the
-/// tick loop ever does. A friend with no save yet (never played, or the file
-/// simply isn't there) is silently skipped rather than fabricating a row.
-/// When `state` IS the central world, each entry's `central_contribution` is
-/// filled in for free from the ledger already sitting in memory; elsewhere
-/// (a personal world has no global view) it's `None`.
-fn showcase_for(state: &GameState, account: i64) -> ServerMsg {
+/// disk I/O, so the tick loop never calls this directly; it snapshots the
+/// two bits of sim state needed here (`central`, the ledger) and runs this
+/// on a throwaway thread (see the `RefreshShowcase` handler). A friend with
+/// no save yet (never played, or the file simply isn't there) is silently
+/// skipped rather than fabricating a row. When the requesting world IS the
+/// central one, each entry's `central_contribution` is filled in from its
+/// ledger; elsewhere (a personal world has no global view) it's `None`.
+fn showcase_for(central: bool, ledger: &[LedgerEntry], account: i64) -> ServerMsg {
     let entries = accounts::friends_list(account)
         .into_iter()
         .filter_map(|(fid, fname)| {
@@ -1065,7 +1067,13 @@ fn showcase_for(state: &GameState, account: i64) -> ServerMsg {
                 population: friend_state.survivors.len() as u32,
                 buildings: friend_state.buildings.len() as u32,
                 graduated: friend_state.graduated,
-                central_contribution: state.central.then(|| state.ledger_for(fid)),
+                central_contribution: central.then(|| {
+                    ledger
+                        .iter()
+                        .find(|e| e.account == fid)
+                        .map(|e| e.totals)
+                        .unwrap_or_default()
+                }),
             })
         })
         .collect();
@@ -1178,6 +1186,10 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
     let mut printed_events: u64 = 0;
     let mut printed_chat: u64 = 0;
     let mut game_over_since: Option<Instant> = None;
+    // The `ResetCountdown { seconds_left }` value last broadcast (None while
+    // the world runs), so the countdown goes out once per second-value
+    // change rather than every tick.
+    let mut last_countdown_sent: Option<u32> = None;
     // What the last broadcast tick's `State` message carried, so the next
     // one can skip these quiet-most-ticks collections when nothing changed
     // (see `protocol::Included`). `events`/`chat` reuse the monotonic
@@ -1497,19 +1509,26 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                                         };
                                         // Deliver to the target if they're
                                         // right here in the central world...
+                                        let mut delivered_centrally = false;
                                         for (cid, out) in &clients {
                                             if player_of.get(cid).is_some_and(|p| targets.contains(p)) {
                                                 let _ = out.send(invited_msg.clone());
+                                                delivered_centrally = true;
                                             }
                                         }
-                                        // ...AND, regardless, to their own
-                                        // PERSONAL world too (V0.6 "guest
+                                        // ...or, FAILING that, to their own
+                                        // PERSONAL world (V0.6 "guest
                                         // without onboarding" — a friend
                                         // doesn't have to be standing in the
                                         // hub at this exact moment to be
-                                        // invited into it).
-                                        if let Some(wm) = config.world_manager.as_ref() {
-                                            wm.deliver_to_account(target, invited_msg);
+                                        // invited into it). Never both: an
+                                        // account connected here AND at home
+                                        // (two devices) would get the same
+                                        // invite popup twice.
+                                        if !delivered_centrally {
+                                            if let Some(wm) = config.world_manager.as_ref() {
+                                                wm.deliver_to_account(target, invited_msg);
+                                            }
                                         }
                                         book.invite(host_acc, target);
                                         if let Some(out) = clients.get(&client) {
@@ -1565,7 +1584,22 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                             ClientMsg::RefreshShowcase => {
                                 if let Some(acc) = state.player_account(pid) {
                                     if let Some(out) = clients.get(&client) {
-                                        let _ = out.send(showcase_for(&state, acc));
+                                        // One save-file read per friend —
+                                        // disk I/O that must not run on this
+                                        // thread (a long friends list would
+                                        // stall every tick of this world).
+                                        // The per-connection SHOWCASE_COOLDOWN
+                                        // bounds how often these spawn; a
+                                        // failed spawn just skips the reply
+                                        // (better than a stalled world).
+                                        let out = out.clone();
+                                        let central = state.central;
+                                        let ledger = state.central_ledger.clone();
+                                        let _ = thread::Builder::new()
+                                            .name("fc-showcase".into())
+                                            .spawn(move || {
+                                                let _ = out.send(showcase_for(central, &ledger, acc));
+                                            });
                                     }
                                 }
                             }
@@ -1747,6 +1781,27 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
             // a client joins mid-cycle it sees exactly the tile/no-tile
             // pattern it would have if the broadcast had never stopped.
             if !clients.is_empty() {
+                // While a persistent world sits in game-over, tell everyone
+                // how long until the automatic reset (`WORLD_RESET_AFTER`):
+                // the overlay turns the silent command freeze into a visible
+                // countdown. `game_over_since` is only ever Some on the
+                // persistent game-over path, so this sends nothing elsewhere.
+                let countdown = game_over_since.map(|since| {
+                    WORLD_RESET_AFTER
+                        .saturating_sub(now.duration_since(since))
+                        .as_secs_f32()
+                        .ceil() as u32
+                });
+                if countdown != last_countdown_sent {
+                    last_countdown_sent = countdown;
+                    if let Some(seconds_left) = countdown {
+                        // Send failures mean a dead client; the `State` loop
+                        // right below detects and disconnects those.
+                        for out in clients.values() {
+                            let _ = out.send(ServerMsg::ResetCountdown { seconds_left });
+                        }
+                    }
+                }
                 let included = Included {
                     tiles: state.tick % TILES_EVERY_N_TICKS == 0,
                     events: state.total_events != last_sent_events,

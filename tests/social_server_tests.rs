@@ -14,7 +14,7 @@
 use std::time::{Duration, Instant};
 
 use frozen_city::game::sim;
-use frozen_city::game::types::GameState;
+use frozen_city::game::types::{GamePhase, GameState};
 use frozen_city::net::accounts;
 use frozen_city::net::client::{self, ClientConn};
 use frozen_city::net::persist;
@@ -130,6 +130,34 @@ fn wait_invited(conn: &ClientConn) -> (i64, String) {
     panic!("no Invited within 10s");
 }
 
+/// True if no `Invited` arrives within `dur` — used to confirm the dedup
+/// actually suppressed the second copy of an invite.
+fn no_invited_within(conn: &ClientConn, dur: Duration) -> bool {
+    let deadline = Instant::now() + dur;
+    while Instant::now() < deadline {
+        match conn.recv_timeout(Duration::from_millis(200)) {
+            Ok(ServerMsg::Invited { .. }) => return false,
+            Ok(_) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(_) => return true,
+        }
+    }
+    true
+}
+
+fn wait_reset_countdown(conn: &ClientConn) -> u32 {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        match conn.recv_timeout(Duration::from_millis(500)) {
+            Ok(ServerMsg::ResetCountdown { seconds_left }) => return seconds_left,
+            Ok(_) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(e) => panic!("connection died before ResetCountdown: {e:?}"),
+        }
+    }
+    panic!("no ResetCountdown within 10s");
+}
+
 fn wait_showcase(conn: &ClientConn) -> Vec<frozen_city::net::protocol::ShowcaseEntry> {
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
@@ -236,9 +264,12 @@ fn visit_policy_invite_delivery_and_showcase() {
     friendly_world.graduated = true;
     persist::save_at(&friendly_world, worlds_dir.join("2.bin").to_str().unwrap()).unwrap();
     // Stranger (account 3): also graduated, so it can reach central, but
-    // never befriended by Host — proves the Showcase privacy rule.
+    // never befriended by Host — proves the Showcase privacy rule. Crafted
+    // already-Lost so the reset-countdown section below starts in game-over
+    // without a playthrough.
     let mut stranger_world = sim::new_game(333, 12);
     stranger_world.graduated = true;
+    stranger_world.phase = GamePhase::Lost;
     persist::save_at(&stranger_world, worlds_dir.join("3.bin").to_str().unwrap()).unwrap();
 
     let wm = WorldManager::new(700, 12, false);
@@ -262,6 +293,10 @@ fn visit_policy_invite_delivery_and_showcase() {
 
     host_central.send(ClientMsg::Invite { account: 2 });
     wait_invited(&friendly_central);
+    // Friendly leaves central here: the cross-world delivery section below
+    // relies on Friendly NOT being centrally connected (a centrally-delivered
+    // invite deliberately skips the personal world — see the dedup section).
+    drop(friendly_central);
 
     // Host now leaves EVERYTHING (both central and — since Host never had a
     // personal-world connection open — the personal world was never even
@@ -316,6 +351,26 @@ fn visit_policy_invite_delivery_and_showcase() {
     let (invited_host, invited_name) = wait_invited(&friendly_home);
     assert_eq!(invited_host, 1);
     assert_eq!(invited_name, "Host");
+
+    // === Invite dedup: Friendly is now connected BOTH at home and centrally
+    // (two devices). A fresh invite must reach the central connection only —
+    // never both, or one human sees the same popup twice. === .
+    let friendly_central2 =
+        client::connect_tcp_with(&addr, enter_central_msg("fc900002", "pw-friendly"))
+            .expect("friendly enters central while still connected at home");
+    recv_welcome(&friendly_central2);
+    wait_state(&host_central2, |s| s.players.iter().any(|p| p.account == Some(2)));
+    host_central2.send(ClientMsg::Invite { account: 2 });
+    wait_invited(&friendly_central2);
+    assert!(
+        no_invited_within(&friendly_central2, Duration::from_millis(800)),
+        "the central connection must get the invite exactly once"
+    );
+    assert!(
+        no_invited_within(&friendly_home, Duration::from_millis(800)),
+        "an invite delivered centrally must not also land in the personal world"
+    );
+    drop(friendly_central2);
     drop(friendly_home);
     drop(host_central2);
 
@@ -358,6 +413,25 @@ fn visit_policy_invite_delivery_and_showcase() {
         no_showcase_within(&host_home2, Duration::from_millis(800)),
         "an immediate second RefreshShowcase on the same connection must be rate-limited"
     );
+
+    // === Reset countdown: Stranger's crafted save is already Lost, so a
+    // login lands straight in game-over — the world must announce how long
+    // until its automatic reset, and the countdown must actually tick down.
+    // === .
+    let stranger_home = client::connect_tcp_with(&addr, login_msg("fc900003", "pw-stranger"))
+        .expect("stranger logs into their game-over world");
+    recv_welcome(&stranger_home);
+    let first = wait_reset_countdown(&stranger_home);
+    assert!(
+        (1..=45).contains(&first),
+        "countdown must fit WORLD_RESET_AFTER (45s), got {first}"
+    );
+    let second = wait_reset_countdown(&stranger_home);
+    assert!(
+        second < first,
+        "countdown must decrease across broadcasts, got {first} then {second}"
+    );
+    drop(stranger_home);
 
     handle.stop();
     handle.join();

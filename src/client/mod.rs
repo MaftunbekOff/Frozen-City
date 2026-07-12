@@ -120,6 +120,10 @@ pub struct GameView {
     pub tiles_version: u64,
     pub disconnected: bool,
     pub error: Option<String>,
+    /// Seconds until this persistent game-over world auto-resets (from
+    /// `ServerMsg::ResetCountdown`); `None` while the game runs, or on a
+    /// server that never resets (singleplayer sends no countdown).
+    pub reset_countdown: Option<u32>,
 }
 
 /// Credentials for an account sign-in, kept in memory only for the life of
