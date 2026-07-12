@@ -113,6 +113,11 @@ fn blizzard_makes_it_colder() {
 #[test]
 fn caravan_accept_adds_survivors_and_costs_food() {
     let mut state = sim::new_game(SEED, 12);
+    // V0.7: RespondEvent is only accepted with a living leader (see
+    // `apply_command`'s `RespondEvent` arm) — this test predates leaders and
+    // is exercising the accept mechanics themselves, not the gate, so give
+    // it a leader.
+    state.leader = Some(state.survivors[0].id);
     state.stock.wood = 500.0;
     state.stock.food = 100.0;
 
@@ -143,6 +148,9 @@ fn caravan_accept_adds_survivors_and_costs_food() {
 #[test]
 fn caravan_decline_changes_nothing() {
     let mut state = sim::new_game(SEED, 12);
+    // V0.7: RespondEvent needs a living leader — see the comment in
+    // `caravan_accept_adds_survivors_and_costs_food`.
+    state.leader = Some(state.survivors[0].id);
     let pop_before = state.survivors.len();
     let food_before = state.stock.food;
     state.pending_event = Some(CaravanOffer { count: 3, food_cost: 12, expires: state.tick + 100 });
@@ -171,6 +179,9 @@ fn caravan_accept_respects_capacity_and_food() {
     // Case A: no housing at all -> no room for anyone, but the offer is
     // still resolved (pending cleared) and no food is spent.
     let mut state = sim::new_game(SEED, 12);
+    // V0.7: RespondEvent needs a living leader — see the comment in
+    // `caravan_accept_adds_survivors_and_costs_food`.
+    state.leader = Some(state.survivors[0].id);
     state.stock.food = 1000.0;
     let pop_before = state.survivors.len();
     state.pending_event = Some(CaravanOffer { count: 5, food_cost: 20, expires: state.tick + 100 });
@@ -188,6 +199,7 @@ fn caravan_accept_respects_capacity_and_food() {
     // Case B: plenty of housing but not enough food -> still no survivors
     // added, even though there would have been room.
     let mut state2 = sim::new_game(SEED, 12);
+    state2.leader = Some(state2.survivors[0].id);
     state2.stock.wood = 500.0;
     for _ in 0..3 {
         let (x, y) = find_spot(&state2, BuildingKind::Tent);
@@ -241,6 +253,9 @@ fn caravan_accept_charges_only_for_admitted_refugees() {
     let mut state = sim::new_game(5, 12);
     // Only room for 1 more (no tents -> capacity 0, so space = 0 + 2 - pop).
     state.survivors.truncate(1);
+    // V0.7: RespondEvent needs a living leader — see the comment in
+    // `caravan_accept_adds_survivors_and_costs_food`.
+    state.leader = Some(state.survivors[0].id);
     state.stock.food = 100.0;
     // Offer 3 refugees; only 1 can be housed, so the city must pay for 1, not 3.
     state.pending_event = Some(CaravanOffer {

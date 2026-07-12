@@ -110,6 +110,9 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
         next_id,
         rng: rng.0,
         central_ledger: Vec::new(),
+        leader: None,
+        mourning_until: 0,
+        morale: MORALE_START,
     };
     push_event(
         &mut state,
@@ -187,6 +190,7 @@ fn blob_walk(
 fn new_survivor(rng: &mut Rng, next_id: &mut u32) -> Survivor {
     let id = *next_id;
     *next_id += 1;
+    let (x, y) = GameState::spawn_position(id);
     Survivor {
         id,
         name: NAMES[rng.below(NAMES.len() as u32) as usize].to_string(),
@@ -194,6 +198,16 @@ fn new_survivor(rng: &mut Rng, next_id: &mut u32) -> Survivor {
         hunger: 20.0 + rng.below(21) as f32,
         assigned_building: None,
         owner: None,
+        x,
+        y,
+        move_target: None,
+        // Drawn from the same sim RNG stream as name/hp/hunger — deterministic
+        // per-seed like everything else `new_survivor` sets, and distinct
+        // from `Profession::from_id_hash` (which only exists for migrated
+        // saves with no RNG stream to draw from).
+        profession: Profession::ALL[rng.below(Profession::ALL.len() as u32) as usize],
+        xp: 0.0,
+        trained_kind: None,
     }
 }
 
@@ -375,6 +389,10 @@ pub fn inject_migrants(
         state.next_id += 1;
         s.assigned_building = None;
         s.owner = Some(account);
+        // Re-id'd, so re-spawn near the arriving world's furnace too — the
+        // old position was relative to the personal world they left.
+        (s.x, s.y) = GameState::spawn_position(s.id);
+        s.move_target = None;
         state.survivors.push(s);
         settled += 1;
     }
@@ -684,6 +702,7 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                     if target.workers >= target.kind.max_workers() {
                         return;
                     }
+                    let new_kind = target.kind;
                     if let Some(prev_id) = prev {
                         if let Some(b) = state.buildings.iter_mut().find(|b| b.id == prev_id) {
                             b.workers = b.workers.saturating_sub(1);
@@ -693,6 +712,15 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                         b.workers += 1;
                     }
                     state.survivors[s_idx].assigned_building = Some(*new_id);
+                    // A different building KIND resets training progress —
+                    // reassigning within the same kind (e.g. one Sawmill to
+                    // another) keeps it, since the trade is what's learned,
+                    // not the specific building.
+                    let s = &mut state.survivors[s_idx];
+                    if s.trained_kind != Some(new_kind) {
+                        s.trained_kind = Some(new_kind);
+                        s.xp = 0.0;
+                    }
                 }
                 None => {
                     let Some(prev_id) = prev else { return };
@@ -700,7 +728,37 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                         b.workers = b.workers.saturating_sub(1);
                     }
                     state.survivors[s_idx].assigned_building = None;
+                    // Plain unassignment does NOT reset xp/trained_kind —
+                    // only an assignment to a genuinely different kind does
+                    // (see the `Some(new_id)` arm above). A temporarily
+                    // idled survivor keeps their training.
                 }
+            }
+        }
+        PlayerCommand::MoveSurvivor { survivor, x, y } => {
+            if !in_bounds(*x as i32, *y as i32) {
+                return;
+            }
+            let Some(s_idx) = state.survivors.iter().position(|s| s.id == *survivor) else {
+                return;
+            };
+            // Walking a survivor is a manual override: they become idle
+            // (unassigned from work) exactly like `AssignSurvivor { building:
+            // None }` does, freeing whatever slot they held.
+            if let Some(prev_id) = state.survivors[s_idx].assigned_building {
+                if let Some(b) = state.buildings.iter_mut().find(|b| b.id == prev_id) {
+                    b.workers = b.workers.saturating_sub(1);
+                }
+            }
+            let s = &mut state.survivors[s_idx];
+            s.assigned_building = None;
+            s.move_target = Some((*x, *y));
+        }
+        PlayerCommand::SetLeader { survivor } => {
+            if state.survivors.iter().any(|s| s.id == *survivor) {
+                state.leader = Some(*survivor);
+                let name = state.survivors.iter().find(|s| s.id == *survivor).unwrap().name.clone();
+                push_event(state, format!("{} has been chosen as leader.", name));
             }
         }
         PlayerCommand::SetFurnaceLevel { level } => {
@@ -741,6 +799,13 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
             }
         }
         PlayerCommand::RespondEvent { accept } => {
+            // V0.7: a caravan choice needs someone to actually make the
+            // call. Without a living leader, player input is ignored and the
+            // offer is left standing to auto-resolve to reject at its
+            // existing deadline (`tick`'s pending-event expiry, unchanged).
+            if !state.leader_alive() {
+                return;
+            }
             if let Some(offer) = state.pending_event.take() {
                 if *accept {
                     let pop = state.survivors.len() as i32;
@@ -766,6 +831,36 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                 }
             }
         }
+    }
+}
+
+/// A single named survivor's production share at the building they're
+/// assigned to, in the same "1.0 = one anonymous worker" units `AdjustWorkers`
+/// headcount uses. Composes the profession-match bonus with the XP/level
+/// bonus (see `xp_level` / `XP_LEVEL_BONUS_PER_LEVEL`) — both are per-survivor
+/// multipliers layered on top of the flat baseline of 1.0.
+fn survivor_contribution(s: &Survivor, kind: BuildingKind) -> f32 {
+    let profession_factor =
+        if s.profession.matching_building() == kind { PROFESSION_MATCH_BONUS } else { 1.0 };
+    let level_factor = if s.trained_kind == Some(kind) {
+        1.0 + xp_level(s.xp) as f32 * XP_LEVEL_BONUS_PER_LEVEL
+    } else {
+        1.0
+    };
+    profession_factor * level_factor
+}
+
+/// XP level (0..=XP_MAX_LEVEL) from accrued in-game work-days, thresholded by
+/// `XP_DAYS_LEVEL_*` (cumulative totals, not per-level slices).
+fn xp_level(xp: f32) -> u8 {
+    if xp >= XP_DAYS_LEVEL_3 {
+        3
+    } else if xp >= XP_DAYS_LEVEL_2 {
+        2
+    } else if xp >= XP_DAYS_LEVEL_1 {
+        1
+    } else {
+        0
     }
 }
 
@@ -847,15 +942,13 @@ pub fn tick(state: &mut GameState) {
     }
 
     // --- Production ---
-    let tools_factor = if state.has_tech(Tech::Tools) {
-        TECH_TOOLS_PRODUCTION
-    } else {
-        1.0
-    };
+    // Colony-wide multipliers (tools/leader/morale) composed once per tick,
+    // not once per building — see `GameState::colony_production_multiplier`.
+    let colony_factor = state.colony_production_multiplier();
     for i in 0..state.buildings.len() {
-        let (kind, bx, by, workers, owner_account) = {
+        let (b_id, kind, bx, by, workers, owner_account) = {
             let b = &state.buildings[i];
-            (b.kind, b.x, b.y, b.workers, b.owner_account)
+            (b.id, b.kind, b.x, b.y, b.workers, b.owner_account)
         };
         if workers == 0 {
             continue;
@@ -864,7 +957,22 @@ pub fn tick(state: &mut GameState) {
         if per_day == 0.0 {
             continue;
         }
-        let amount = workers as f32 * per_day / TICKS_PER_DAY as f32 * tools_factor;
+        // Effective worker-units: named survivors assigned here each
+        // contribute their own profession/XP-boosted share; any remaining
+        // anonymous headcount (workers beyond the named ones, filled via
+        // `AdjustWorkers`) contributes a flat 1.0 each, same as before this
+        // feature existed. With zero named assignments (every existing
+        // balance test) this sum is exactly `workers as f32` — unchanged.
+        let mut units = 0.0f32;
+        let mut named = 0u8;
+        for s in &state.survivors {
+            if s.assigned_building == Some(b_id) {
+                named += 1;
+                units += survivor_contribution(s, kind);
+            }
+        }
+        units += (workers.saturating_sub(named)) as f32;
+        let amount = units * per_day / TICKS_PER_DAY as f32 * colony_factor;
         // Central-world economy v1: credit whatever this building actually
         // adds to the shared stock this tick to its owning account's ledger
         // — measured as an actual delta (not just `amount`) so Sawmill/
@@ -939,8 +1047,23 @@ pub fn tick(state: &mut GameState) {
     }
     let tph = TICKS_PER_DAY as f32 / 24.0; // ticks per in-game hour
     let hunger_per_tick = 100.0 / TICKS_PER_DAY as f32;
-    let hospital_workers: u32 = state.buildings.iter()
-        .filter(|b| b.kind == BuildingKind::Hospital).map(|b| b.workers as u32).sum();
+    // Hospital effect strength has a real scalar hook (`care_per_tick`
+    // below), so Medic/XP bonuses apply here exactly like a production
+    // building: named Hospital workers contribute their boosted share,
+    // remaining anonymous headcount contributes 1.0 each (identical to plain
+    // `hospital_workers` when nobody is named — same neutrality property as
+    // the main production loop). Kitchen's effect is a flat boolean toggle
+    // (`kitchen_staffed`, `KITCHEN_FOOD_EFFICIENCY`) with no scalar to boost,
+    // so a matching Cook currently grants nothing — documented, not a bug.
+    let mut hospital_units = 0.0f32;
+    for b in state.buildings.iter().filter(|b| b.kind == BuildingKind::Hospital) {
+        let named: Vec<&Survivor> =
+            state.survivors.iter().filter(|s| s.assigned_building == Some(b.id)).collect();
+        for s in &named {
+            hospital_units += survivor_contribution(s, BuildingKind::Hospital);
+        }
+        hospital_units += b.workers.saturating_sub(named.len() as u8) as f32;
+    }
     let kitchen_staffed = state.buildings.iter()
         .any(|b| b.kind == BuildingKind::Kitchen && b.workers > 0);
     let medicine_factor = if state.has_tech(Tech::Medicine) {
@@ -948,7 +1071,7 @@ pub fn tick(state: &mut GameState) {
     } else {
         1.0
     };
-    let care_per_tick = hospital_workers as f32 * HOSPITAL_CARE_PER_WORKER_DAY
+    let care_per_tick = hospital_units * HOSPITAL_CARE_PER_WORKER_DAY
         / TICKS_PER_DAY as f32
         * medicine_factor;
     let rationing_factor = if state.has_tech(Tech::Rationing) {
@@ -967,22 +1090,71 @@ pub fn tick(state: &mut GameState) {
     let mut deaths: Vec<(u32, String, &'static str)> = Vec::new();
     let disease = state.disease_active();
 
+    // --- Movement + XP accrual: needs a building lookup snapshot taken
+    // before the loop below (can't borrow `state.buildings` immutably while
+    // iterating `state.survivors` mutably). `central` settlers move and earn
+    // XP too — a settler's assigned building keeps working while their owner
+    // is away, so there's no reason their position/training should freeze.
+    let building_lookup: std::collections::HashMap<u32, (BuildingKind, u8, u8, u8)> = state
+        .buildings
+        .iter()
+        .map(|b| (b.id, (b.kind, b.x, b.y, b.workers)))
+        .collect();
+    for s in state.survivors.iter_mut() {
+        // --- Movement: move_target (player-issued walk) takes priority over
+        // the assigned building's location; with neither, stand put.
+        let goal = s.move_target.map(|(x, y)| (x as f32 + 0.5, y as f32 + 0.5)).or_else(|| {
+            s.assigned_building
+                .and_then(|id| building_lookup.get(&id))
+                .map(|(_, bx, by, _)| (*bx as f32 + 0.5, *by as f32 + 0.5))
+        });
+        if let Some((gx, gy)) = goal {
+            let (dx, dy) = (gx - s.x, gy - s.y);
+            let dist = (dx * dx + dy * dy).sqrt();
+            if dist <= ARRIVAL_EPSILON {
+                s.x = gx;
+                s.y = gy;
+                s.move_target = None; // arrived: clear a walk goal, then stand idle
+            } else {
+                s.x += dx / dist * SURVIVOR_SPEED_PER_TICK;
+                s.y += dy / dist * SURVIVOR_SPEED_PER_TICK;
+            }
+        }
+
+        // --- XP: accrues while assigned to a building that's actually
+        // staffed/working (at least one worker, which — since this survivor
+        // is one of them — is always true when they're assigned; the check
+        // guards the theoretical case of a stale assignment surviving a
+        // clamp). The kind-switch reset happens at assignment time in
+        // `apply_command` (`AssignSurvivor`), not here — by the time `tick`
+        // sees it, `trained_kind` already matches the current building.
+        if let Some((kind, _, _, workers)) = s.assigned_building.and_then(|id| building_lookup.get(&id)) {
+            if *workers > 0 && s.trained_kind == Some(*kind) {
+                s.xp += 1.0 / TICKS_PER_DAY as f32;
+            }
+        }
+    }
+
     // Central-world settlers are a presence, not mouths to feed: they never
     // hunger, freeze, sicken or die (their owner may be offline for weeks —
     // returning to a starved-out group would make migration pointless).
-    // Everything above (production, furnace) still runs so an assigned
-    // settler keeps contributing to the communal stock.
+    // Everything above (production, furnace, movement, XP) still runs so an
+    // assigned settler keeps contributing to the communal stock and training.
     if state.central {
         state.rng = rng.0;
         state.event_rng = erng.0;
         return;
     }
 
+    let mut starving_present = false;
     for (i, s) in state.survivors.iter_mut().enumerate() {
         s.hunger = (s.hunger + hunger_per_tick).min(120.0);
         if s.hunger >= 25.0 && state.stock.food >= portion {
             state.stock.food -= portion;
             s.hunger = (s.hunger - 0.4).max(0.0);
+        }
+        if s.hunger >= 80.0 {
+            starving_present = true;
         }
 
         let bonus = if lit && i < warm_slots {
@@ -1022,6 +1194,42 @@ pub fn tick(state: &mut GameState) {
         }
     }
 
+    // --- Morale: smooth per-tick version of the per-day adjustments in the
+    // brief (each rate divided by TICKS_PER_DAY so a day's worth of ticks
+    // sums to the stated daily amount). Death penalties are applied
+    // separately, once per death, in the block below — they're an event, not
+    // a rate. Every input here is a per-tick snapshot already computed above
+    // (staffed Kitchen/Hospital, leader, blizzard) or just finished
+    // (starving_present), so this reads as "what happened THIS tick".
+    {
+        let per_tick = |per_day: f32| per_day / TICKS_PER_DAY as f32;
+        let mut delta = 0.0f32;
+        if starving_present {
+            delta -= per_tick(MORALE_STARVATION_PER_DAY);
+        }
+        if state.blizzard_active() {
+            delta -= per_tick(MORALE_BLIZZARD_PER_DAY);
+        }
+        if kitchen_staffed {
+            delta += per_tick(MORALE_KITCHEN_PER_DAY);
+        }
+        // Hospital "staffed" for morale purposes mirrors the Kitchen check
+        // above (any worker present), independent of the profession/XP-
+        // boosted `hospital_units` used for the healing rate itself.
+        if state.buildings.iter().any(|b| b.kind == BuildingKind::Hospital && b.workers > 0) {
+            delta += per_tick(MORALE_HOSPITAL_PER_DAY);
+        }
+        if state.leader_alive() {
+            delta += per_tick(MORALE_LEADER_PER_DAY);
+        }
+        // Slow drift toward the baseline, on top of the specific adjustments
+        // above — moves at most `MORALE_DRIFT_PER_DAY` worth per day, and
+        // never overshoots past the baseline in one tick.
+        let drift_cap = per_tick(MORALE_DRIFT_PER_DAY);
+        let toward_baseline = (MORALE_BASELINE - state.morale).clamp(-drift_cap, drift_cap);
+        state.morale = (state.morale + delta + toward_baseline).clamp(0.0, 100.0);
+    }
+
     if !deaths.is_empty() {
         // Free each dying survivor's own named slot before they're removed,
         // so the building they worked at loses exactly its own vacancy —
@@ -1034,7 +1242,19 @@ pub fn tick(state: &mut GameState) {
                 }
             }
         }
+        // The leader's death starts mourning instead of just clearing the
+        // seat — checked before the removal below so `leader` still points
+        // at a real (if about-to-die) survivor here.
+        if let Some(leader_id) = state.leader {
+            if let Some((_, name, _)) = deaths.iter().find(|(id, _, _)| *id == leader_id) {
+                let name = name.clone();
+                state.leader = None;
+                state.mourning_until = state.tick + MOURNING_DURATION_TICKS;
+                push_event(state, format!("The leader {} has died - the city mourns.", name));
+            }
+        }
         state.survivors.retain(|s| s.hp > 0.0);
+        state.morale = (state.morale - MORALE_DEATH_PENALTY * deaths.len() as f32).clamp(0.0, 100.0);
         for (_, name, cause) in deaths {
             push_event(state, format!("{} has {}.", name, cause));
         }

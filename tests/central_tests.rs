@@ -42,6 +42,12 @@ fn central_settlers_never_hunger_or_die() {
         hunger: 119.0,
         assigned_building: None,
         owner: None,
+        x: 0.0,
+        y: 0.0,
+        move_target: None,
+        profession: Profession::from_id_hash(1),
+        xp: 0.0,
+        trained_kind: None,
     }];
     sim::inject_migrants(&mut state, 42, "Aziz", migrants);
     state.stock.food = 0.0;
@@ -67,6 +73,12 @@ fn inject_reids_sets_owner_and_caps_per_account() {
         hunger: 10.0,
         assigned_building: Some(7), // stale reference from the source world
         owner: None,
+        x: 0.0,
+        y: 0.0,
+        move_target: None,
+        profession: Profession::from_id_hash(id),
+        xp: 0.0,
+        trained_kind: None,
     };
 
     // Two batches from "different personal worlds" with clashing ids.
@@ -148,6 +160,12 @@ fn central_authority_follows_settler_ownership() {
         hunger: 10.0,
         assigned_building: None,
         owner: None,
+        x: 0.0,
+        y: 0.0,
+        move_target: None,
+        profession: Profession::from_id_hash(id),
+        xp: 0.0,
+        trained_kind: None,
     };
     sim::inject_migrants(&mut state, 1, "Aziz", vec![mk(1)]);
     sim::inject_migrants(&mut state, 2, "Vali", vec![mk(2)]);

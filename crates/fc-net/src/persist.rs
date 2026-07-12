@@ -17,16 +17,19 @@ pub const DEFAULT_SAVE_PATH: &str = "/var/lib/frozen-city/world.bin";
 
 /// Version header every save is written with since the format grew fields
 /// (V2: `Survivor::owner`, `PlayerInfo::account`, `GameState::central`; V3:
-/// `Building::owner_account`, `GameState::central_ledger`). Bincode is
-/// positional, so without a header there'd be no way to tell one version's
+/// `Building::owner_account`, `GameState::central_ledger`; V4: survivor
+/// position/movement, leader/mourning, professions, xp/levels, morale — see
+/// the V0.7 "survivor management" fields on `Survivor`/`GameState`). Bincode
+/// is positional, so without a header there'd be no way to tell one version's
 /// file from another's — and misreading one version as another would
 /// "collapse to None" in `load_at` and silently wipe a production world on
 /// the first deploy after a format change. Files WITHOUT any recognized
 /// prefix are decoded through the frozen V1 mirror (`legacy.rs`) and
-/// migrated all the way to V3; files with `MAGIC_V2` decode through the V2
-/// mirror and migrate one hop to V3.
+/// migrated all the way to V4; files with `MAGIC_V2`/`MAGIC_V3` decode
+/// through the matching mirror and migrate the rest of the way.
 const MAGIC_V2: &[u8; 8] = b"FCWORLD2";
 const MAGIC_V3: &[u8; 8] = b"FCWORLD3";
+const MAGIC_V4: &[u8; 8] = b"FCWORLD4";
 
 fn resolve_path() -> String {
     std::env::var("FC_WORLD_SAVE").unwrap_or_else(|_| DEFAULT_SAVE_PATH.to_string())
@@ -56,8 +59,8 @@ pub fn save_at(state: &GameState, path: &str) -> io::Result<()> {
     }
     let body =
         bincode::serialize(state).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    let mut bytes = Vec::with_capacity(MAGIC_V3.len() + body.len());
-    bytes.extend_from_slice(MAGIC_V3);
+    let mut bytes = Vec::with_capacity(MAGIC_V4.len() + body.len());
+    bytes.extend_from_slice(MAGIC_V4);
     bytes.extend_from_slice(&body);
     // Write to a sibling temp file and rename over the target: a kill mid-write
     // (the exact moment this feature exists to survive) leaves the previous,
@@ -71,20 +74,27 @@ pub fn save_at(state: &GameState, path: &str) -> io::Result<()> {
 
 pub fn load_at(path: &str) -> Option<GameState> {
     let bytes = fs::read(path).ok()?;
-    if let Some(body) = bytes.strip_prefix(MAGIC_V3.as_slice()) {
+    if let Some(body) = bytes.strip_prefix(MAGIC_V4.as_slice()) {
         return bincode::deserialize(body).ok();
+    }
+    if let Some(body) = bytes.strip_prefix(MAGIC_V3.as_slice()) {
+        // V3 (pre-survivor-management): decode through the frozen V3 mirror
+        // and migrate one hop to V4. The next autosave rewrites it as V4.
+        return bincode::deserialize::<crate::legacy::GameStateV3>(body)
+            .ok()
+            .map(GameState::from);
     }
     if let Some(body) = bytes.strip_prefix(MAGIC_V2.as_slice()) {
         // V2 (pre-account-ownership/contribution-ledger): decode through the
-        // frozen V2 mirror and migrate one hop to V3. The next autosave
-        // rewrites it as V3.
+        // frozen V2 mirror and migrate two hops to V4. The next autosave
+        // rewrites it as V4.
         return bincode::deserialize::<crate::legacy::GameStateV2>(body)
             .ok()
             .map(GameState::from);
     }
     // No recognized header: a save written before versioning existed at
     // all — decode it through the frozen V1 mirror and migrate all the way
-    // to V3. The next autosave rewrites it as V3.
+    // to V4. The next autosave rewrites it as V4.
     bincode::deserialize::<crate::legacy::GameStateV1>(&bytes)
         .ok()
         .map(GameState::from)
@@ -221,9 +231,9 @@ mod tests {
         );
         assert!(loaded.central_ledger.is_empty(), "V1 predates the contribution ledger");
 
-        // And once re-saved (V3, with header), it round-trips as-is.
+        // And once re-saved (V4, with header), it round-trips as-is.
         save_at(&loaded, &path).unwrap();
-        assert_eq!(load_at(&path).expect("V3 reload"), loaded);
+        assert_eq!(load_at(&path).expect("V4 reload"), loaded);
         fs::remove_file(&path).ok();
     }
 
@@ -255,7 +265,7 @@ mod tests {
                     owner: b.owner,
                 })
                 .collect(),
-            survivors: modern.survivors.clone(),
+            survivors: modern.survivors.iter().map(crate::legacy::SurvivorV3::from).collect(),
             stock: modern.stock,
             furnace_level: modern.furnace_level,
             furnace_lit: modern.furnace_lit,
@@ -298,9 +308,92 @@ mod tests {
         );
         assert!(loaded.central_ledger.is_empty(), "V2 predates the contribution ledger");
 
-        // And once re-saved (V3, with header), it round-trips as-is.
+        // And once re-saved (V4, with header), it round-trips as-is.
         save_at(&loaded, &path).unwrap();
-        assert_eq!(load_at(&path).expect("V3 reload"), loaded);
+        assert_eq!(load_at(&path).expect("V4 reload"), loaded);
+        fs::remove_file(&path).ok();
+    }
+
+    /// A world saved under `FCWORLD3` (pre-survivor-management: no
+    /// positions/movement, no leader/mourning, no professions/xp, no morale)
+    /// must load and migrate one hop to V4 with the defaults the brief
+    /// specifies: furnace-adjacent spawn position, no walk target, profession
+    /// from the id hash, xp 0 / no trained kind, no leader, no mourning in
+    /// progress, and morale starting fresh — same non-negotiable "never
+    /// collapses to None" guarantee as V1/V2.
+    #[test]
+    fn v3_save_migrates() {
+        use crate::legacy::{GameStateV3, SurvivorV3};
+
+        let path = throwaway_path("v3-migrate");
+        let mut modern = sim::new_game(31, 12);
+        sim::player_joined(&mut modern, 4, "Dilnoza");
+        modern.graduated = true;
+        let v3 = GameStateV3 {
+            tick: modern.tick,
+            win_days: modern.win_days,
+            tiles: modern.tiles.clone(),
+            buildings: modern.buildings.clone(),
+            survivors: modern.survivors.iter().map(SurvivorV3::from).collect(),
+            stock: modern.stock,
+            furnace_level: modern.furnace_level,
+            furnace_lit: modern.furnace_lit,
+            cold_snap: modern.cold_snap,
+            players: modern.players.clone(),
+            phase: modern.phase,
+            events: modern.events.clone(),
+            total_events: modern.total_events,
+            chat: modern.chat.clone(),
+            total_chat: modern.total_chat,
+            pings: modern.pings.clone(),
+            missions: modern.missions.clone(),
+            tunnel: modern.tunnel,
+            graduated: modern.graduated,
+            central: modern.central,
+            techs: modern.techs.clone(),
+            disease_until: modern.disease_until,
+            blizzard_until: modern.blizzard_until,
+            pending_event: modern.pending_event,
+            event_rng: modern.event_rng,
+            guest_perm: modern.guest_perm,
+            owner_id: modern.owner_id,
+            next_id: modern.next_id,
+            rng: modern.rng,
+            central_ledger: modern.central_ledger.clone(),
+        };
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(MAGIC_V3);
+        bytes.extend_from_slice(&bincode::serialize(&v3).unwrap());
+        fs::write(&path, bytes).unwrap();
+
+        let loaded = load_at(&path).expect("V3 save must migrate, never wipe");
+        assert_eq!(loaded.survivors.len(), modern.survivors.len());
+        assert_eq!(loaded.players, modern.players);
+        assert!(loaded.graduated, "graduation must survive migration");
+        assert_eq!(loaded.tiles, modern.tiles);
+        assert_eq!(loaded.stock, modern.stock);
+        assert_eq!(loaded.buildings, modern.buildings, "V3 already has owner_account");
+
+        assert_eq!(loaded.leader, None, "V3 predates leadership");
+        assert_eq!(loaded.mourning_until, 0, "V3 predates mourning");
+        assert_eq!(loaded.morale, fc_game::types::MORALE_START, "V3 predates morale");
+        for s in &loaded.survivors {
+            assert_eq!(s.move_target, None, "V3 predates movement");
+            assert_eq!(s.xp, 0.0, "V3 predates xp");
+            assert_eq!(s.trained_kind, None, "V3 predates training");
+            assert_eq!(
+                s.profession,
+                fc_game::types::Profession::from_id_hash(s.id),
+                "migrated professions must be deterministic from the id"
+            );
+            let (fx, fy) = GameState::furnace_center();
+            let d = ((s.x - fx).powi(2) + (s.y - fy).powi(2)).sqrt();
+            assert!(d < 10.0, "V3 survivors should migrate to a furnace-adjacent spawn, got ({}, {})", s.x, s.y);
+        }
+
+        // And once re-saved (V4, with header), it round-trips as-is.
+        save_at(&loaded, &path).unwrap();
+        assert_eq!(load_at(&path).expect("V4 reload"), loaded);
         fs::remove_file(&path).ok();
     }
 

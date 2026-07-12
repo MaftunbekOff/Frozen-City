@@ -7,7 +7,7 @@
 
 use frozen_city::game::sim;
 use frozen_city::game::types::*;
-use frozen_city::net::legacy::{BuildingV2, GameStateV2};
+use frozen_city::net::legacy::{BuildingV2, GameStateV2, SurvivorV3};
 use frozen_city::net::persist;
 
 fn find_spot(state: &GameState, kind: BuildingKind) -> (u8, u8) {
@@ -22,6 +22,7 @@ fn find_spot(state: &GameState, kind: BuildingKind) -> (u8, u8) {
 }
 
 fn settler(id: u32) -> Survivor {
+    let (x, y) = GameState::spawn_position(id);
     Survivor {
         id,
         name: format!("S{id}"),
@@ -29,6 +30,12 @@ fn settler(id: u32) -> Survivor {
         hunger: 10.0,
         assigned_building: None,
         owner: None,
+        x,
+        y,
+        move_target: None,
+        profession: Profession::from_id_hash(id),
+        xp: 0.0,
+        trained_kind: None,
     }
 }
 
@@ -277,7 +284,7 @@ fn v2_mirror_migrates_to_v3_with_none_owner_account_and_empty_ledger() {
                 owner: b.owner,
             })
             .collect(),
-        survivors: modern.survivors.clone(),
+        survivors: modern.survivors.iter().map(SurvivorV3::from).collect(),
         stock: modern.stock,
         furnace_level: modern.furnace_level,
         furnace_lit: modern.furnace_lit,
@@ -344,7 +351,7 @@ fn v2_file_on_disk_round_trips_through_persist_load_at() {
                 owner: b.owner,
             })
             .collect(),
-        survivors: modern.survivors.clone(),
+        survivors: modern.survivors.iter().map(SurvivorV3::from).collect(),
         stock: modern.stock,
         furnace_level: modern.furnace_level,
         furnace_lit: modern.furnace_lit,

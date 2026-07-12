@@ -34,6 +34,10 @@ pub enum HudField {
     Temp,
     Furnace,
     Events,
+    /// V0.7: colony morale, banded to match `GameState::morale_multiplier`'s
+    /// four tiers, plus a short "Mourning -15%" indicator while the city
+    /// mourns a dead leader (`GameState::mourning_active`).
+    Morale,
 }
 
 #[derive(Component)]
@@ -178,6 +182,7 @@ pub fn spawn_hud(mut commands: Commands) {
                 ..default()
             });
             p.spawn((text("Furnace L1", 15.0, TEXT_MAIN), HudField::Furnace));
+            p.spawn((text("Morale --", 15.0, TEXT_MAIN), HudField::Morale));
             p.spawn((
                 Button,
                 Node {
@@ -520,6 +525,7 @@ pub(crate) struct HudCache {
     temp: Option<(i32, bool)>,
     furnace: Option<(u8, bool)>,
     events: Option<u64>,
+    morale: Option<(i32, bool)>,
 }
 
 pub fn hud_update(
@@ -605,6 +611,30 @@ pub fn hud_update(
                         state.furnace_level as f32 * FURNACE_COAL_PER_DAY_PER_LEVEL,
                         status
                     );
+                }
+            }
+            HudField::Morale => {
+                let mourning = state.mourning_active();
+                let key = (state.morale.round() as i32, mourning);
+                if cache.morale != Some(key) {
+                    cache.morale = Some(key);
+                    // Four-tier band matching `GameState::morale_multiplier`'s
+                    // thresholds exactly, so the HUD symbol always agrees with
+                    // the actual production multiplier in effect.
+                    let (tier, tier_color) = if state.morale < 25.0 {
+                        ("!!", Color::srgb(0.90, 0.30, 0.25))
+                    } else if state.morale < 50.0 {
+                        ("!", Color::srgb(0.92, 0.62, 0.28))
+                    } else if state.morale <= 75.0 {
+                        ("=", Color::srgb(0.85, 0.88, 0.60))
+                    } else {
+                        ("+", Color::srgb(0.55, 0.90, 0.50))
+                    };
+                    if let Some(mut c) = color {
+                        c.0 = if mourning { Color::srgb(0.70, 0.55, 0.85) } else { tier_color };
+                    }
+                    let mourn_tag = if mourning { "  Mourning -15%" } else { "" };
+                    text.0 = format!("Morale {:.0} [{tier}]{mourn_tag}", state.morale);
                 }
             }
             HudField::Events => {

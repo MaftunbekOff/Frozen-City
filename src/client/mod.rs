@@ -256,6 +256,14 @@ pub struct BuildMode(pub Option<BuildingKind>);
 #[derive(Resource, Default)]
 pub struct Selection(pub Option<u32>);
 
+/// Small inbox of freshly-issued `MoveSurvivor` destinations (tile coords),
+/// drained by `render::spawn_move_ping` to spawn the brief confirmation ring.
+/// Written by `input::build_input`/`touch::touch_control` right after they
+/// send the command — the same "resource inbox" shape `SocialState::bubbles`
+/// uses, picked over a Bevy `Message` type since no custom one exists here.
+#[derive(Resource, Default)]
+pub struct MoveOrderQueue(pub Vec<(u8, u8)>);
+
 /// True while the mouse is over any interactive UI region.
 #[derive(Resource, Default)]
 pub struct UiHover(pub bool);
@@ -371,6 +379,7 @@ impl Plugin for ClientPlugin {
             .init_resource::<BuildMode>()
             .init_resource::<Selection>()
             .init_resource::<UiHover>()
+            .init_resource::<MoveOrderQueue>()
             .init_resource::<render::TerrainViz>()
             .init_resource::<render::BuildingViz>()
             .init_resource::<render::SurvivorViz>()
@@ -421,6 +430,10 @@ impl Plugin for ClientPlugin {
                     render::animate_effects,
                     render::animate_smoke,
                     render::animate_survivors,
+                    render::animate_survivor_selection,
+                    render::sync_leader_crown,
+                    render::spawn_move_ping,
+                    render::animate_move_pings,
                     render::animate_spawn,
                     render::animate_blizzard_overlay,
                     render::sync_player_cursors,

@@ -15,7 +15,10 @@ use bevy::prelude::*;
 use frozen_city::game::types::{GamePhase, PlayerCommand};
 use frozen_city::net::protocol::ClientMsg;
 
-use super::input::{ground_from_screen, CamRig, MAX_DIST, MAX_PITCH, MIN_DIST, MIN_PITCH};
+use super::input::{
+    ground_from_screen, resolve_world_click, CamRig, MAX_DIST, MAX_PITCH, MIN_DIST, MIN_PITCH,
+};
+use super::roster::SurvivorSelection;
 use super::*;
 
 /// A tap moves less than this many logical pixels.
@@ -57,6 +60,8 @@ pub fn touch_control(
     net: Res<NetConn>,
     build: Res<BuildMode>,
     mut selection: ResMut<Selection>,
+    mut survivor_sel: ResMut<SurvivorSelection>,
+    mut move_queue: ResMut<MoveOrderQueue>,
     camera: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     chat: Res<super::chat::ChatState>,
     social: Res<super::social::SocialOpen>,
@@ -167,6 +172,7 @@ pub fn touch_control(
         let Some((tx, ty)) = world_to_tile(ground) else {
             if build.0.is_none() {
                 selection.0 = None;
+                survivor_sel.0 = None;
             }
             continue;
         };
@@ -175,7 +181,15 @@ pub fn touch_control(
                 net.send(ClientMsg::Cmd(PlayerCommand::Place { kind, x: tx, y: ty }));
             }
         } else {
-            selection.0 = state.building_at(tx, ty).map(|b| b.id);
+            resolve_world_click(
+                state,
+                view.player_id,
+                ground,
+                &net,
+                &mut selection,
+                &mut survivor_sel,
+                &mut move_queue,
+            );
         }
     }
 

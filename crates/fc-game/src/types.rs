@@ -41,6 +41,55 @@ pub const WOOD_FUEL_PENALTY: f32 = 1.5;
 pub const DEMOLISH_REFUND: f32 = 0.4;
 pub const TENT_CAPACITY: usize = 4;
 
+// --- V0.7: survivor management (positions/movement, leader, professions,
+// XP/levels, morale) ---
+
+/// Constant walking speed for server-authoritative survivor movement, in
+/// tiles per real second. The map is open (no obstacles), so movement is a
+/// straight line toward the current goal — no pathfinding needed.
+pub const SURVIVOR_SPEED_TILES_PER_SEC: f32 = 2.5;
+/// Distance covered per tick at [`SURVIVOR_SPEED_TILES_PER_SEC`], derived
+/// from [`TICK_MS`] so the two constants can never drift apart.
+pub const SURVIVOR_SPEED_PER_TICK: f32 = SURVIVOR_SPEED_TILES_PER_SEC * (TICK_MS as f32 / 1000.0);
+/// How close (in tiles) a survivor must get to their goal to snap to it and
+/// stop, so they don't perpetually overshoot-and-correct in a tiny jitter.
+pub const ARRIVAL_EPSILON: f32 = SURVIVOR_SPEED_PER_TICK;
+
+/// Colony-wide production multiplier while a leader is alive.
+pub const LEADER_PRODUCTION_BONUS: f32 = 1.08;
+/// Colony-wide production multiplier while the city mourns a dead leader.
+pub const MOURNING_PRODUCTION_PENALTY: f32 = 0.85;
+/// A dead leader's city mourns for one full in-game day before command
+/// authority over the caravan choice reverts to "nobody's here to decide".
+pub const MOURNING_DURATION_TICKS: u64 = TICKS_PER_DAY;
+
+/// Production bonus when a survivor's profession matches the building kind
+/// they're working (e.g. a Lumberjack in a Sawmill).
+pub const PROFESSION_MATCH_BONUS: f32 = 1.25;
+
+/// In-game days of work at the same building kind to reach each XP level.
+/// Level N requires the CUMULATIVE total below (not N's slice alone).
+pub const XP_DAYS_LEVEL_1: f32 = 1.0;
+pub const XP_DAYS_LEVEL_2: f32 = 3.0;
+pub const XP_DAYS_LEVEL_3: f32 = 6.0;
+/// Per-level contribution multiplier bonus (level 1 -> +5%, 2 -> +10%, 3 -> +15%).
+pub const XP_LEVEL_BONUS_PER_LEVEL: f32 = 0.05;
+pub const XP_MAX_LEVEL: u8 = 3;
+
+/// Morale starts here on a fresh world and is what every existing balance
+/// test implicitly assumes (multiplier 1.0 — see `morale_multiplier`), so a
+/// new world's production math is unchanged by this feature.
+pub const MORALE_START: f32 = 70.0;
+/// Morale drifts toward this baseline (±1/day) absent any other adjustment.
+pub const MORALE_BASELINE: f32 = 60.0;
+pub const MORALE_DEATH_PENALTY: f32 = 10.0;
+pub const MORALE_STARVATION_PER_DAY: f32 = 3.0;
+pub const MORALE_BLIZZARD_PER_DAY: f32 = 2.0;
+pub const MORALE_KITCHEN_PER_DAY: f32 = 2.0;
+pub const MORALE_HOSPITAL_PER_DAY: f32 = 2.0;
+pub const MORALE_LEADER_PER_DAY: f32 = 1.0;
+pub const MORALE_DRIFT_PER_DAY: f32 = 1.0;
+
 /// Rolling chat log length kept in the snapshot.
 pub const MAX_CHAT: usize = 40;
 /// Longest chat message accepted (characters, after sanitizing).
@@ -189,6 +238,67 @@ impl BuildingKind {
     }
 }
 
+/// A survivor's trade. Assigned once at spawn (deterministically, from the
+/// sim RNG) and never changes. Grants [`PROFESSION_MATCH_BONUS`] production
+/// when the survivor works at the matching `BuildingKind`.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Profession {
+    Lumberjack,
+    Miner,
+    Hunter,
+    Farmer,
+    Medic,
+    Cook,
+}
+
+impl Profession {
+    pub const ALL: [Profession; 6] = [
+        Profession::Lumberjack,
+        Profession::Miner,
+        Profession::Hunter,
+        Profession::Farmer,
+        Profession::Medic,
+        Profession::Cook,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Profession::Lumberjack => "Lumberjack",
+            Profession::Miner => "Miner",
+            Profession::Hunter => "Hunter",
+            Profession::Farmer => "Farmer",
+            Profession::Medic => "Medic",
+            Profession::Cook => "Cook",
+        }
+    }
+
+    /// The building kind this profession is a specialist at, if any.
+    pub fn matching_building(self) -> BuildingKind {
+        match self {
+            Profession::Lumberjack => BuildingKind::Sawmill,
+            Profession::Miner => BuildingKind::CoalMine,
+            Profession::Hunter => BuildingKind::HunterHut,
+            Profession::Farmer => BuildingKind::Greenhouse,
+            Profession::Medic => BuildingKind::Hospital,
+            Profession::Cook => BuildingKind::Kitchen,
+        }
+    }
+
+    /// Deterministic profession from a survivor id, used for migrated saves
+    /// (V3 -> V4) that predate professions: no RNG stream to draw from, so
+    /// the id itself is hashed instead. Kept separate from the spawn-time RNG
+    /// path so a save's migration result never depends on load order.
+    pub fn from_id_hash(id: u32) -> Profession {
+        // Same SplitMix64 finalizer `rng::Rng` uses, applied once to the id —
+        // cheap, well-distributed, and needs no RNG state of its own.
+        let mut z = id as u64 ^ 0x9E37_79B9_7F4A_7C15;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^= z >> 31;
+        Profession::ALL[(z as usize) % Profession::ALL.len()]
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Building {
     pub id: u32,
@@ -226,6 +336,28 @@ pub struct Survivor {
     /// personal/shared worlds; `Some` only for settlers brought through the
     /// Tunnel into the central world, where only their owner may command them.
     pub owner: Option<i64>,
+    /// Server-authoritative position in tile coordinates (V0.7). The client
+    /// renders survivors here instead of picking its own idle position.
+    pub x: f32,
+    pub y: f32,
+    /// A player-issued walk destination (`MoveSurvivor`). Takes priority over
+    /// the survivor's assigned-building goal every tick until they arrive,
+    /// at which point it's cleared and they stand idle there. Issuing this
+    /// command also unassigns the survivor from work — see `MoveSurvivor`.
+    pub move_target: Option<(u8, u8)>,
+    /// Trade assigned once at spawn (or derived deterministically for
+    /// migrated saves); grants `PROFESSION_MATCH_BONUS` at the matching
+    /// building kind.
+    pub profession: Profession,
+    /// Accrued experience at `trained_kind`. Resets to 0 whenever the
+    /// survivor is (re)assigned to a DIFFERENT building kind than the one
+    /// they were accruing at.
+    pub xp: f32,
+    /// The building kind `xp` is being accrued toward, if any (`None` when
+    /// never assigned, or immediately after unassignment — xp is only reset
+    /// on a kind CHANGE, not on a plain unassign, so a temporarily idled
+    /// survivor doesn't lose progress).
+    pub trained_kind: Option<BuildingKind>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq)]
@@ -534,6 +666,16 @@ pub enum PlayerCommand {
     Research { tech: Tech },
     /// Answer a pending event choice (e.g. a refugee caravan).
     RespondEvent { accept: bool },
+    /// V0.7: walk a named survivor to a tile under player control. Unassigns
+    /// them from work (a manually walked survivor becomes idle) — see the
+    /// `move_target` field doc on `Survivor`.
+    /// (This and everything below it: appended in order, never reordered —
+    /// bincode enum indices are positional.)
+    MoveSurvivor { survivor: u32, x: u8, y: u8 },
+    /// V0.7: appoint a survivor as the city's leader. Owner-only in
+    /// owned worlds; refused outright in the central world (no single
+    /// leader for the shared city — see `GameState::leader`).
+    SetLeader { survivor: u32 },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -599,6 +741,18 @@ pub struct GameState {
     /// Central world only: per-account contribution ledger (see
     /// [`ContributionTotals`]). Always empty in personal/guest worlds.
     pub central_ledger: Vec<LedgerEntry>,
+    /// The city's leader (V0.7), by survivor id. `None` in the central world
+    /// (the shared city has no single leader) and in any world that hasn't
+    /// appointed one. While alive: `LEADER_PRODUCTION_BONUS`.
+    pub leader: Option<u32>,
+    /// Tick until which the city mourns a dead leader (0 = none / not
+    /// mourning). During mourning: `MOURNING_PRODUCTION_PENALTY`, and the
+    /// caravan choice auto-resolves to reject instead of accepting input.
+    pub mourning_until: u64,
+    /// 0..=100 colony morale (V0.7), starting at `MORALE_START`. Feeds
+    /// `morale_multiplier` into the same production math as every other
+    /// colony-wide multiplier.
+    pub morale: f32,
 }
 
 pub fn tile_index(x: u8, y: u8) -> usize {
@@ -714,6 +868,73 @@ impl GameState {
         self.tick < self.blizzard_until
     }
 
+    /// Whether the appointed leader is still among the living. `false` for
+    /// the central world (no leader is ever set there) and for any world
+    /// with no leader appointed.
+    pub fn leader_alive(&self) -> bool {
+        self.leader.is_some_and(|id| self.survivors.iter().any(|s| s.id == id))
+    }
+
+    pub fn mourning_active(&self) -> bool {
+        self.tick < self.mourning_until
+    }
+
+    /// Colony-wide production multiplier from leadership: a bonus while the
+    /// leader lives, a penalty while the city mourns a dead one, identity
+    /// otherwise. Mutually exclusive by construction (`mourning_until` is
+    /// only ever set at the moment `leader` is cleared).
+    pub fn leader_multiplier(&self) -> f32 {
+        if self.leader_alive() {
+            LEADER_PRODUCTION_BONUS
+        } else if self.mourning_active() {
+            MOURNING_PRODUCTION_PENALTY
+        } else {
+            1.0
+        }
+    }
+
+    /// Colony-wide production multiplier from morale (banded, see
+    /// `MORALE_START`'s doc comment for why a fresh world's multiplier must
+    /// be exactly 1.0).
+    pub fn morale_multiplier(&self) -> f32 {
+        if self.morale < 25.0 {
+            0.8
+        } else if self.morale < 50.0 {
+            0.9
+        } else if self.morale <= 75.0 {
+            1.0
+        } else {
+            1.1
+        }
+    }
+
+    /// Every colony-wide (not per-survivor) production multiplier, composed
+    /// in one place so new ones can't be forgotten at a call site. Order
+    /// doesn't matter mathematically (plain multiplication), but is fixed
+    /// here as tools -> leader -> morale to match the brief.
+    pub fn colony_production_multiplier(&self) -> f32 {
+        let tools = if self.has_tech(Tech::Tools) { TECH_TOOLS_PRODUCTION } else { 1.0 };
+        tools * self.leader_multiplier() * self.morale_multiplier()
+    }
+
+    /// Deterministic per-id spawn offset near the furnace, used both for
+    /// brand-new survivors and for migrated saves that predate positions
+    /// (V3 -> V4): small, stable, and collision-free enough to just spread
+    /// people out without needing real pathfinding-aware placement.
+    pub fn spawn_position(id: u32) -> (f32, f32) {
+        let (fx, fy) = Self::furnace_center();
+        // Same SplitMix64 finalizer as `Profession::from_id_hash`, salted
+        // differently so the two derived values aren't correlated.
+        let mut z = (id as u64 ^ 0xA5A5_5A5A_1234_ABCD) ^ 0x9E37_79B9_7F4A_7C15;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^= z >> 31;
+        let angle = (z as u32 % 360) as f32 * std::f32::consts::PI / 180.0;
+        let radius = 1.5 + ((z >> 9) as u32 % 100) as f32 / 100.0 * 2.5; // 1.5..=4.0
+        let (x, y) = (fx + angle.cos() * radius, fy + angle.sin() * radius);
+        (x.clamp(0.0, MAP_W as f32 - 0.01), y.clamp(0.0, MAP_H as f32 - 0.01))
+    }
+
     /// Whether any connected player currently owns the world.
     pub fn owner_present(&self) -> bool {
         self.players.iter().any(|p| p.role == Role::Owner)
@@ -792,9 +1013,21 @@ impl GameState {
                             .find(|s| s.id == *survivor)
                             .is_some_and(|s| s.owner == account)
                 }
+                // Mirrors `AssignSurvivor` exactly: walking a settler is just
+                // as much "commanding your own settler" as staffing them is.
+                PlayerCommand::MoveSurvivor { survivor, .. } => {
+                    account.is_some()
+                        && self
+                            .survivors
+                            .iter()
+                            .find(|s| s.id == *survivor)
+                            .is_some_and(|s| s.owner == account)
+                }
                 // The anonymous +/- pool can't tell whose settler it would
                 // move, so it has no meaning where every settler is owned.
                 PlayerCommand::AdjustWorkers { .. } => false,
+                // The shared city has no single leader — see `GameState::leader`.
+                PlayerCommand::SetLeader { .. } => false,
                 // Communal fixtures and personal-world progression have no
                 // per-player authority in the central world.
                 PlayerCommand::SetFurnaceLevel { .. }
@@ -818,6 +1051,7 @@ impl GameState {
                 PlayerCommand::Place { .. }
                 | PlayerCommand::AdjustWorkers { .. }
                 | PlayerCommand::AssignSurvivor { .. }
+                | PlayerCommand::MoveSurvivor { .. }
                 | PlayerCommand::InvestTunnel
                 | PlayerCommand::Research { .. }
                 | PlayerCommand::RespondEvent { .. } => true,
@@ -827,7 +1061,9 @@ impl GameState {
                     .find_building(*building)
                     .map(|b| b.owner == Some(pid))
                     .unwrap_or(false),
-                PlayerCommand::SetFurnaceLevel { .. } => false,
+                // Owner-only admin, same tier as `SetFurnaceLevel`: appointing
+                // a leader is a whole-city decision, not routine co-op upkeep.
+                PlayerCommand::SetFurnaceLevel { .. } | PlayerCommand::SetLeader { .. } => false,
             },
         }
     }

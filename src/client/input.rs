@@ -4,12 +4,84 @@ use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseSc
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
-use frozen_city::game::types::{BuildingKind, GamePhase, PlayerCommand};
+use frozen_city::game::types::{BuildingKind, GamePhase, GameState, PlayerCommand};
 use frozen_city::net::protocol::ClientMsg;
 
 use super::chat::ChatState;
 use super::render::GhostMarker;
+use super::roster::SurvivorSelection;
 use super::*;
+
+/// A world-space click closer than this to a survivor's sim position selects
+/// them instead of whatever building (or empty ground) is under the cursor —
+/// "aholiga bosish ... bino tanlashdan ustunroq bo'lsin agar survivor yaqin
+/// bo'lsa" from the brief. Generous enough to forgive imprecise taps on
+/// mobile, small enough that tightly packed buildings still pick cleanly.
+pub const SURVIVOR_PICK_RADIUS: f32 = 0.6;
+
+/// Nearest survivor (by sim position, world-space distance) to `world`, if
+/// any is within `SURVIVOR_PICK_RADIUS` — the "raycast" for survivor
+/// selection is really just a closest-point pick against each survivor's
+/// authoritative tile position, which is all a flat-ground scene needs.
+pub fn pick_survivor(state: &GameState, world: Vec3) -> Option<u32> {
+    state
+        .survivors
+        .iter()
+        .map(|s| (s.id, super::tilef_to_world((s.x, s.y)).distance(world)))
+        .filter(|(_, d)| *d <= SURVIVOR_PICK_RADIUS)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(id, _)| id)
+}
+
+/// Shared click-resolution logic for desktop (`build_input`) and touch
+/// (`touch::touch_control`): a click/tap on a survivor selects them (only
+/// your own settlers in the central world, mirroring `can_issue`); with a
+/// survivor already selected, a click on empty ground (no survivor, no
+/// building) issues `MoveSurvivor` there and queues the confirmation ping;
+/// otherwise it falls back to ordinary building selection/deselection.
+pub fn resolve_world_click(
+    state: &GameState,
+    me: Option<u64>,
+    world: Vec3,
+    net: &NetConn,
+    selection: &mut Selection,
+    survivor_sel: &mut SurvivorSelection,
+    move_queue: &mut MoveOrderQueue,
+) {
+    let my_account = me
+        .and_then(|pid| state.players.iter().find(|p| p.id == pid))
+        .and_then(|p| p.account);
+    let commandable = |id: u32| -> bool {
+        if !state.central {
+            return true;
+        }
+        my_account.is_some()
+            && state.survivors.iter().find(|s| s.id == id).is_some_and(|s| s.owner == my_account)
+    };
+
+    if let Some(id) = pick_survivor(state, world).filter(|&id| commandable(id)) {
+        survivor_sel.0 = if survivor_sel.0 == Some(id) { None } else { Some(id) };
+        return;
+    }
+
+    let tile = world_to_tile(world);
+    let building = tile.and_then(|(tx, ty)| state.building_at(tx, ty));
+
+    // A survivor is selected and the click landed on open ground (no
+    // building): issue the walk order there — "aholi tanlangan holatda
+    // bo'sh yerga bosish" from the brief. A click on a BUILDING instead
+    // falls through to ordinary building selection below, closing the
+    // survivor card exactly like the explicit X button would ("boshqa
+    // joyga bosish ... yopadi").
+    if let (Some(id), Some((tx, ty)), None) = (survivor_sel.0, tile, building) {
+        net.send(ClientMsg::Cmd(PlayerCommand::MoveSurvivor { survivor: id, x: tx, y: ty }));
+        move_queue.0.push((tx, ty));
+        return;
+    }
+
+    survivor_sel.0 = None;
+    selection.0 = building.map(|b| b.id);
+}
 
 pub const MIN_DIST: f32 = 7.0;
 pub const MAX_DIST: f32 = 60.0;
@@ -146,6 +218,7 @@ pub fn cursor_ground(
     ground_from_screen(camera, cam_transform, window.cursor_position()?)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_input(
     keys: Res<ButtonInput<KeyCode>>,
     buttons: Res<ButtonInput<MouseButton>>,
@@ -154,6 +227,8 @@ pub fn build_input(
     net: Res<NetConn>,
     mut build: ResMut<BuildMode>,
     mut selection: ResMut<Selection>,
+    mut survivor_sel: ResMut<SurvivorSelection>,
+    mut move_queue: ResMut<MoveOrderQueue>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     window: Query<&Window, With<PrimaryWindow>>,
     camera: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
@@ -186,12 +261,14 @@ pub fn build_input(
     if keys.just_pressed(KeyCode::Escape) {
         build.0 = None;
         selection.0 = None;
+        survivor_sel.0 = None;
     }
     if buttons.just_pressed(MouseButton::Right) {
         if build.0.is_some() {
             build.0 = None;
         } else {
             selection.0 = None;
+            survivor_sel.0 = None;
         }
     }
 
@@ -263,9 +340,15 @@ pub fn build_input(
                 }
             }
         } else if let Some(world) = cursor {
-            selection.0 = world_to_tile(world)
-                .and_then(|(tx, ty)| state.building_at(tx, ty))
-                .map(|b| b.id);
+            resolve_world_click(
+                state,
+                view.player_id,
+                world,
+                &net,
+                &mut selection,
+                &mut survivor_sel,
+                &mut move_queue,
+            );
         }
     }
 }

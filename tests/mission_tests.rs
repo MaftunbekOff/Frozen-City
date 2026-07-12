@@ -59,6 +59,7 @@ fn population_mission_completes() {
     let mut state = sim::new_game(5, 12);
     let mut next_id = state.survivors.iter().map(|s| s.id).max().unwrap_or(0) + 1;
     while state.survivors.len() < 10 {
+        let (x, y) = GameState::spawn_position(next_id);
         state.survivors.push(Survivor {
             id: next_id,
             name: "Extra".into(),
@@ -66,6 +67,12 @@ fn population_mission_completes() {
             hunger: 0.0,
             assigned_building: None,
             owner: None,
+            x,
+            y,
+            move_target: None,
+            profession: Profession::from_id_hash(next_id),
+            xp: 0.0,
+            trained_kind: None,
         });
         next_id += 1;
     }

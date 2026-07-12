@@ -6,15 +6,42 @@
 //! lives on `ui.rs`'s `SelPanelRoot` (the building panel) since it needs a
 //! building to be selected there too, but its visibility/label/click logic
 //! lives here since it also needs `SurvivorSelection`.
+//!
+//! Also owns the survivor detail card (V0.7): a small always-available panel
+//! (distinct from the roster modal, which is toggled with P) shown whenever
+//! `SurvivorSelection` is set — from a roster row click OR a world click on a
+//! survivor (`input::resolve_world_click`) — with the survivor's stats and
+//! Make Leader / Unassign actions.
 
 use bevy::prelude::*;
 
-use frozen_city::game::types::PlayerCommand;
+use frozen_city::game::types::{PlayerCommand, Survivor, XP_DAYS_LEVEL_1, XP_DAYS_LEVEL_2, XP_DAYS_LEVEL_3};
 use frozen_city::net::protocol::ClientMsg;
 
 use super::chat::ChatState;
 use super::ui::{AssignHereBtn, AssignHereLabel, BaseColor, UiBlocker};
 use super::{GameView, NetConn, Screen, Selection};
+
+/// Client-side mirror of `fc_game::sim::xp_level` (private to the sim crate):
+/// XP level (0..=3) from accrued in-game work-days, thresholded by the same
+/// public `XP_DAYS_LEVEL_*` cumulative-total constants the sim uses.
+pub fn xp_level(xp: f32) -> u8 {
+    if xp >= XP_DAYS_LEVEL_3 {
+        3
+    } else if xp >= XP_DAYS_LEVEL_2 {
+        2
+    } else if xp >= XP_DAYS_LEVEL_1 {
+        1
+    } else {
+        0
+    }
+}
+
+/// Short "Profession Lx" tag used by both the roster rows and the detail
+/// card, e.g. "Miner L2".
+pub fn profession_level_tag(s: &Survivor) -> String {
+    format!("{} L{}", s.profession.name(), xp_level(s.xp))
+}
 
 /// Visible rows at once. Population can reach `MAX_POPULATION` (60), which
 /// doesn't fit on screen — idle survivors sort first (most actionable), the
@@ -70,10 +97,30 @@ struct UnassignBtn {
 #[derive(Component)]
 struct MoreText;
 
+// ------------------------------------------------------------ detail card
+
+#[derive(Component)]
+struct CardRoot;
+
+#[derive(Component, Clone, Copy, PartialEq)]
+enum CardText {
+    Name,
+    Stats,
+}
+
+#[derive(Component)]
+struct CardCloseBtn;
+
+#[derive(Component)]
+struct CardLeaderBtn;
+
+#[derive(Component)]
+struct CardUnassignBtn;
+
 pub fn plugin(app: &mut App) {
     app.init_resource::<RosterOpen>()
         .init_resource::<SurvivorSelection>()
-        .add_systems(OnEnter(Screen::Game), spawn_roster)
+        .add_systems(OnEnter(Screen::Game), (spawn_roster, spawn_card))
         .add_systems(
             Update,
             (
@@ -83,6 +130,8 @@ pub fn plugin(app: &mut App) {
                 unassign_buttons,
                 update_assign_here,
                 assign_here_button,
+                update_card,
+                card_buttons,
             )
                 .run_if(in_state(Screen::Game)),
         );
@@ -115,7 +164,7 @@ fn spawn_roster(mut commands: Commands) {
         .with_children(|p| {
             p.spawn((
                 Node {
-                    width: Val::Px(360.0),
+                    width: Val::Px(420.0),
                     max_height: Val::Px(520.0),
                     flex_direction: FlexDirection::Column,
                     row_gap: Val::Px(4.0),
@@ -160,7 +209,7 @@ fn spawn_roster(mut commands: Commands) {
                             row.spawn((
                                 text("", 11.5, TEXT_DIM),
                                 RosterStatus(i),
-                                Node { width: Val::Px(88.0), ..default() },
+                                Node { width: Val::Px(150.0), ..default() },
                             ));
                             row.spawn((
                                 Button,
@@ -264,12 +313,16 @@ fn update_roster(
     for (status, mut t) in &mut statuses {
         let new = sorted
             .get(status.0)
-            .map(|s| match s.assigned_building {
-                Some(b_id) => state
-                    .find_building(b_id)
-                    .map(|b| b.kind.name().to_string())
-                    .unwrap_or_else(|| "Idle".to_string()),
-                None => "Idle".to_string(),
+            .map(|s| {
+                let workplace = match s.assigned_building {
+                    Some(b_id) => state
+                        .find_building(b_id)
+                        .map(|b| b.kind.name().to_string())
+                        .unwrap_or_else(|| "Idle".to_string()),
+                    None if s.move_target.is_some() => "Moving".to_string(),
+                    None => "Idle".to_string(),
+                };
+                format!("{} — {workplace}", profession_level_tag(s))
             })
             .unwrap_or_default();
         if t.0 != new {
@@ -383,5 +436,205 @@ fn assign_here_button(
         let (Some(building), Some(survivor)) = (selection.0, survivor_sel.0) else { continue };
         net.send(ClientMsg::Cmd(PlayerCommand::AssignSurvivor { survivor, building: Some(building) }));
         survivor_sel.0 = None;
+    }
+}
+
+/// Survivor detail card: shown whenever `SurvivorSelection` is set, whether
+/// from a roster row click or a world click on a survivor
+/// (`input::resolve_world_click`). Sits below the players panel (`roles.rs`,
+/// which ends around y=536) in the same left-side column.
+fn spawn_card(mut commands: Commands) {
+    commands
+        .spawn((
+            Node {
+                display: Display::None,
+                position_type: PositionType::Absolute,
+                left: Val::Px(12.0),
+                top: Val::Px(546.0),
+                width: Val::Px(236.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(6.0),
+                padding: UiRect::all(Val::Px(10.0)),
+                ..default()
+            },
+            BackgroundColor(PANEL_BG),
+            Interaction::default(),
+            UiBlocker,
+            CardRoot,
+            DespawnOnExit(Screen::Game),
+        ))
+        .with_children(|p| {
+            p.spawn(Node {
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(6.0),
+                ..default()
+            })
+            .with_children(|row| {
+                row.spawn((text("", 15.0, TEXT_MAIN), CardText::Name, Node {
+                    flex_grow: 1.0,
+                    ..default()
+                }));
+                row.spawn((
+                    Button,
+                    Node {
+                        width: Val::Px(22.0),
+                        height: Val::Px(22.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundColor(ROW_BG),
+                    BaseColor(ROW_BG),
+                    CardCloseBtn,
+                ))
+                .with_children(|b| {
+                    b.spawn(text("x", 12.0, TEXT_MAIN));
+                });
+            });
+            p.spawn((text("", 12.0, TEXT_DIM), CardText::Stats));
+            p.spawn((
+                Button,
+                Node {
+                    display: Display::None,
+                    width: Val::Px(216.0),
+                    height: Val::Px(28.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.30, 0.26, 0.10)),
+                BaseColor(Color::srgb(0.30, 0.26, 0.10)),
+                CardLeaderBtn,
+            ))
+            .with_children(|b| {
+                b.spawn(text("Make Leader", 12.5, TEXT_MAIN));
+            });
+            p.spawn((
+                Button,
+                Node {
+                    display: Display::None,
+                    width: Val::Px(216.0),
+                    height: Val::Px(28.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(UNASSIGN_BG),
+                BaseColor(UNASSIGN_BG),
+                CardUnassignBtn,
+            ))
+            .with_children(|b| {
+                b.spawn(text("Unassign", 12.5, TEXT_MAIN));
+            });
+        });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn update_card(
+    view: Res<GameView>,
+    roster_open: Res<RosterOpen>,
+    mut sel: ResMut<SurvivorSelection>,
+    mut root: Query<&mut Node, With<CardRoot>>,
+    #[allow(clippy::type_complexity)]
+    mut texts: Query<(&mut Text, &CardText), (Without<CardCloseBtn>, Without<CardLeaderBtn>)>,
+    mut leader_btn: Query<
+        &mut Node,
+        (With<CardLeaderBtn>, Without<CardRoot>, Without<CardUnassignBtn>),
+    >,
+    mut unassign_btn: Query<
+        &mut Node,
+        (With<CardUnassignBtn>, Without<CardRoot>, Without<CardLeaderBtn>),
+    >,
+) {
+    let Some(state) = view.state.as_ref() else { return };
+
+    // Drop the selection if that survivor no longer exists (died).
+    if let Some(id) = sel.0 {
+        if !state.survivors.iter().any(|s| s.id == id) {
+            sel.0 = None;
+        }
+    }
+
+    let survivor = sel.0.and_then(|id| state.survivors.iter().find(|s| s.id == id));
+    // Hidden while the roster modal is open: it's spawned after (so drawn
+    // over) this card, and its full-screen backdrop would otherwise leave the
+    // card visually stacked underneath a translucent overlay.
+    let show = survivor.is_some() && !roster_open.0;
+    let d = if show { Display::Flex } else { Display::None };
+    for mut node in &mut root {
+        if node.display != d {
+            node.display = d;
+        }
+    }
+    let Some(s) = survivor else { return };
+
+    for (mut t, kind) in &mut texts {
+        let new = match kind {
+            CardText::Name => s.name.clone(),
+            CardText::Stats => {
+                let workplace = match s.assigned_building {
+                    Some(b_id) => state
+                        .find_building(b_id)
+                        .map(|b| b.kind.name().to_string())
+                        .unwrap_or_else(|| "Idle".to_string()),
+                    None if s.move_target.is_some() => "Moving".to_string(),
+                    None => "Idle".to_string(),
+                };
+                let leader_tag = if state.leader == Some(s.id) { "  (Leader)" } else { "" };
+                format!(
+                    "{}{leader_tag}\nHP {:.0}   Hunger {:.0}\nWorking: {workplace}",
+                    profession_level_tag(s),
+                    s.hp,
+                    s.hunger,
+                )
+            }
+        };
+        if t.0 != new {
+            t.0 = new;
+        }
+    }
+
+    // "Make Leader": owner-gated, and never offered in the central world
+    // (`can_issue` refuses `SetLeader` there outright — see
+    // `GameState::can_issue`'s central-world branch). Hidden entirely rather
+    // than shown-disabled, matching how `AssignHereBtn` hides when inapplicable.
+    let me = view.player_id.unwrap_or(0);
+    let can_lead = !state.central
+        && state.can_issue(me, &PlayerCommand::SetLeader { survivor: s.id })
+        && state.leader != Some(s.id);
+    if let Ok(mut node) = leader_btn.single_mut() {
+        let want = if can_lead { Display::Flex } else { Display::None };
+        if node.display != want {
+            node.display = want;
+        }
+    }
+
+    let can_unassign = s.assigned_building.is_some();
+    if let Ok(mut node) = unassign_btn.single_mut() {
+        let want = if can_unassign { Display::Flex } else { Display::None };
+        if node.display != want {
+            node.display = want;
+        }
+    }
+}
+
+fn card_buttons(
+    net: Res<NetConn>,
+    mut sel: ResMut<SurvivorSelection>,
+    close: Query<&Interaction, (Changed<Interaction>, With<CardCloseBtn>)>,
+    leader: Query<&Interaction, (Changed<Interaction>, With<CardLeaderBtn>)>,
+    unassign: Query<&Interaction, (Changed<Interaction>, With<CardUnassignBtn>)>,
+) {
+    if close.iter().any(|i| *i == Interaction::Pressed) {
+        sel.0 = None;
+        return;
+    }
+    let Some(survivor) = sel.0 else { return };
+    if leader.iter().any(|i| *i == Interaction::Pressed) {
+        net.send(ClientMsg::Cmd(PlayerCommand::SetLeader { survivor }));
+    }
+    if unassign.iter().any(|i| *i == Interaction::Pressed) {
+        net.send(ClientMsg::Cmd(PlayerCommand::AssignSurvivor { survivor, building: None }));
+        sel.0 = None;
     }
 }
