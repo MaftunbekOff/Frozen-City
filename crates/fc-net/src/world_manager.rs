@@ -12,9 +12,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use crate::game::types::CENTRAL_MIGRANTS_PER_ACCOUNT;
-use crate::net::protocol::ServerMsg;
-use crate::net::server::{join, sim_loop, ServerConfig, ToServer};
+use fc_game::types::CENTRAL_MIGRANTS_PER_ACCOUNT;
+use crate::protocol::ServerMsg;
+use crate::server::{join, sim_loop, ServerConfig, ToServer};
 
 /// Base directory for per-account world saves, one `{account_id}.bin` file
 /// each. Overridable via `FC_ACCOUNT_WORLDS_DIR`, mainly so tests can point
@@ -166,7 +166,7 @@ impl WorldManager {
         if !self.invites.valid(host, visitor) {
             return Err(VisitError::NoInvite);
         }
-        let allow_offline = crate::net::accounts::visit_policy(host);
+        let allow_offline = crate::accounts::visit_policy(host);
         let existing = {
             let worlds = self.worlds.lock().unwrap();
             worlds.get(&host).map(|h| h.tx.clone())

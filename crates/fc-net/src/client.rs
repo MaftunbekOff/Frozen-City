@@ -4,7 +4,7 @@
 
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 
-use crate::net::protocol::{ClientMsg, ServerMsg};
+use crate::protocol::{ClientMsg, ServerMsg};
 
 pub enum ClientConn {
     /// Channel pair, pumped by threads (TCP) or wired straight into the
@@ -30,7 +30,7 @@ impl ClientConn {
                 let _ = tx.send(msg);
             }
             #[cfg(target_arch = "wasm32")]
-            ClientConn::WebSocket { slot, .. } => crate::net::ws::send(*slot, &msg),
+            ClientConn::WebSocket { slot, .. } => crate::ws::send(*slot, &msg),
         }
     }
 
@@ -43,7 +43,7 @@ impl ClientConn {
         let (rx, closed) = match self {
             ClientConn::Channels { rx, .. } => (rx, false),
             #[cfg(target_arch = "wasm32")]
-            ClientConn::WebSocket { slot, rx } => (rx, crate::net::ws::is_closed(*slot)),
+            ClientConn::WebSocket { slot, rx } => (rx, crate::ws::is_closed(*slot)),
         };
         let mut out = Vec::new();
         loop {
@@ -82,7 +82,7 @@ impl ClientConn {
 impl Drop for ClientConn {
     fn drop(&mut self) {
         if let ClientConn::WebSocket { slot, .. } = self {
-            crate::net::ws::close(*slot);
+            crate::ws::close(*slot);
         }
     }
 }
@@ -112,7 +112,7 @@ pub fn connect_tcp_with(addr: &str, hello: ClientMsg) -> std::io::Result<ClientC
     use std::thread;
     use std::time::Duration;
 
-    use crate::net::protocol::{read_frame, write_frame};
+    use crate::protocol::{read_frame, write_frame};
 
     let sock_addr = addr
         .to_socket_addrs()?

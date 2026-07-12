@@ -12,7 +12,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::game::types::{
+use fc_game::types::{
     Building, CaravanOffer, ChatLine, GameEvent, GamePhase, GameState, GuestPermission, Mission,
     Ping, PlayerInfo, Role, Stockpile, Survivor, Tech, Tile, TunnelState,
 };
@@ -43,7 +43,7 @@ pub struct PlayerInfoV1 {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct BuildingV2 {
     pub id: u32,
-    pub kind: crate::game::types::BuildingKind,
+    pub kind: fc_game::types::BuildingKind,
     pub x: u8,
     pub y: u8,
     pub workers: u8,

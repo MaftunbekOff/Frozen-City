@@ -6,7 +6,7 @@ use std::io::{self, Read, Write};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::game::types::{GameState, PlayerCommand};
+use fc_game::types::{GameState, PlayerCommand};
 
 /// Hard cap on a single frame; a full snapshot is ~40 KB, so this is generous.
 pub const MAX_FRAME: u32 = 8 * 1024 * 1024;
@@ -30,7 +30,7 @@ pub enum ClientMsg {
     /// Drop a transient map marker at world tile coordinates (Alt+click).
     Ping { x: f32, y: f32 },
     /// Owner-only: change what guests are allowed to do. Ignored from guests.
-    SetGuestPermission { perm: crate::game::types::GuestPermission },
+    SetGuestPermission { perm: fc_game::types::GuestPermission },
     /// Owner-only: remove a guest from the world by player id. Ignored from guests.
     Kick { target: u64 },
     /// Alternative to `Hello` as the first message on a connection: sign in
@@ -136,7 +136,7 @@ pub struct ShowcaseEntry {
     /// This account's central-world contribution totals, when cheaply
     /// available (the requester's own central-world `GameState` already has
     /// them in memory; `None` when the requester isn't asking from there).
-    pub central_contribution: Option<crate::game::types::ContributionTotals>,
+    pub central_contribution: Option<fc_game::types::ContributionTotals>,
 }
 
 /// Which of `GameState`'s pricier collection fields actually ride along on a

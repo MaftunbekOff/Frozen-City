@@ -5,22 +5,30 @@
 
 ## 1. Umumiy ko'rinish
 
-Kod uchta qatlamga bo'lingan, quyi qatlamlar yuqorisiga bog'liq emas:
+Kod uchta qatlamga bo'lingan, quyi qatlamlar yuqorisiga bog'liq emas. Bu
+Cargo WORKSPACE: `game` va `net` alohida, jismoniy ajratilgan modul
+crate'lari (`crates/fc-game`, `crates/fc-net`) sifatida yashaydi; ildiz paket
+(`frozen_city`) ularni `src/lib.rs` orqali `pub use fc_game as game; pub use
+fc_net as net;` bilan qayta eksport qiladi — shu sabab kod bazasidagi (va
+testlardagi) barcha `frozen_city::game::...` / `frozen_city::net::...`
+yo'llar o'zgarishsiz qoladi.
 
-- **`src/game/`** — sof, deterministik simulyatsiya. Bevy'ga bog'liqlik yo'q:
-  test qilinadi, dedicated serverda thread sifatida, brauzerda esa Bevy tizimi
-  sifatida (threadsiz) ishlaydi. Yagona haqiqat manbai — `GameState`.
-- **`src/net/`** — simni tarmoqqa chiqaradi: wire protokol (bincode + deflate),
-  TCP/WebSocket/HTTP server, akkaunt autentifikatsiyasi, diskka saqlash
-  (versiyalangan), per-akkaunt olam menejeri.
+- **`crates/fc-game/src/`** (paket `fc-game`, crate nomi `fc_game`) — sof,
+  deterministik simulyatsiya. Bevy'ga bog'liqlik yo'q: test qilinadi,
+  dedicated serverda thread sifatida, brauzerda esa Bevy tizimi sifatida
+  (threadsiz) ishlaydi. Yagona haqiqat manbai — `GameState`.
+- **`crates/fc-net/src/`** (paket `fc-net`, crate nomi `fc_net`) — simni
+  tarmoqqa chiqaradi: wire protokol (bincode + deflate), TCP/WebSocket/HTTP
+  server, akkaunt autentifikatsiyasi, diskka saqlash (versiyalangan),
+  per-akkaunt olam menejeri. `fc-game`ga bog'liq, Bevy'ga bog'liq emas.
 - **`src/client/`** — Bevy 0.19 client: 3D protsedural render, UI/HUD, kirish,
   chat, minimap, audio — hammasi faqat `net`dan kelgan `GameState`
   snapshot'larini o'qiydi, o'zi hech qanday o'yin mantig'ini hisoblamaydi.
 
 `src/main.rs` — CLI parsing + Bevy `App` qurish (native/wasm) yoki
 `--server` rejimida to'g'ridan-to'g'ri `net::server`ni headless ishga tushirish.
-`src/lib.rs` faqat `game` va `net`ni eksport qiladi (`client` — binary-only
-modul, `main.rs` ichida).
+`src/lib.rs` faqat `game` va `net`ni (`fc-game`/`fc-net` orqali) eksport
+qiladi (`client` — binary-only modul, `main.rs` ichida).
 
 ### Oqim diagrammasi
 
@@ -41,7 +49,7 @@ modul, `main.rs` ichida).
       │        BITTA TCP PORT (4595) — protokol sniffing      │
       │  handle_socket: birinchi 4 bayt "GET " bo'lsa HTTP/WS,│
       │  aks holda native frame protokoli                     │
-      │        (net/server.rs: accept_loop → handle_*)        │
+      │        (fc-net's server.rs: accept_loop → handle_*)     │
       └───────────────────────────┬────────────────────────────┘
                                   │ ToServer::{Join,Msg,Leave,...}
                                   ▼
@@ -69,26 +77,26 @@ thread) boradi. Akkaunt bilan kirish (`Login`/`EnterCentral`) esa
 
 ## 2. Modullar
 
-### `src/game/` — sof simulyatsiya (Bevy'siz)
+### `crates/fc-game/src/` — sof simulyatsiya (Bevy'siz, paket `fc-game`)
 
 | Fayl | Mas'uliyat | Asosiy tiplar/funksiyalar | Kim ishlatadi |
 |---|---|---|---|
-| `types.rs` | Butun sim ma'lumot modeli: xarita, binolar, aholi, buyruqlar, ruxsat mantig'i | `GameState` (yagona haqiqat manbai — `tick`, `tiles`, `buildings`, `survivors`, `stock`, `players`, `phase`, `missions`, `tunnel`, `techs`, `central`, `graduated`, ...), `Survivor` (`hp`/`hunger`/`assigned_building`/`owner: Option<i64>` — akkaunt egaligi), `Building`, `PlayerInfo`, `PlayerCommand` (enum: `Place`/`Demolish`/`AdjustWorkers`/`AssignSurvivor`/`SetFurnaceLevel`/`InvestTunnel`/`Research`/`RespondEvent`), `GameState::can_issue` (buyruq ruxsatining **yagona** tekshiruv nuqtasi — server ham, sim ham, client UI ham shundan foydalanadi) | `sim.rs`, `net/server.rs`, `net/protocol.rs`, butun `client/` |
-| `sim.rs` | Determinstik state-mashina: xarita generatsiyasi, tick mantig'i, buyruq qo'llash | `new_game(seed, win_days)` (shaxsiy/umumiy olam), `new_game_central(seed)` (markaziy olam — aholisiz, missiyasiz), `tick(state)` (har 200ms: ochlik/harorat/ishlab-chiqarish/voqealar — `central` bo'lsa ochlik/o'lim/g'alaba/voqealar o'tkazib yuboriladi), `apply_command(state, player, cmd)` (`can_issue`ni tekshirib bajaradi), `extract_migrants`/`inject_migrants` (Tunnel orqali ko'chish), `player_joined_as`/`player_rejoined`/`kick_player` | `net/server.rs` (`sim_loop`), `client/local_server.rs` (wasm inline), barcha `tests/*.rs` |
+| `types.rs` | Butun sim ma'lumot modeli: xarita, binolar, aholi, buyruqlar, ruxsat mantig'i | `GameState` (yagona haqiqat manbai — `tick`, `tiles`, `buildings`, `survivors`, `stock`, `players`, `phase`, `missions`, `tunnel`, `techs`, `central`, `graduated`, ...), `Survivor` (`hp`/`hunger`/`assigned_building`/`owner: Option<i64>` — akkaunt egaligi), `Building`, `PlayerInfo`, `PlayerCommand` (enum: `Place`/`Demolish`/`AdjustWorkers`/`AssignSurvivor`/`SetFurnaceLevel`/`InvestTunnel`/`Research`/`RespondEvent`), `GameState::can_issue` (buyruq ruxsatining **yagona** tekshiruv nuqtasi — server ham, sim ham, client UI ham shundan foydalanadi) | `sim.rs`, `fc-net` (`server.rs`, `protocol.rs`), butun `client/` |
+| `sim.rs` | Determinstik state-mashina: xarita generatsiyasi, tick mantig'i, buyruq qo'llash | `new_game(seed, win_days)` (shaxsiy/umumiy olam), `new_game_central(seed)` (markaziy olam — aholisiz, missiyasiz), `tick(state)` (har 200ms: ochlik/harorat/ishlab-chiqarish/voqealar — `central` bo'lsa ochlik/o'lim/g'alaba/voqealar o'tkazib yuboriladi), `apply_command(state, player, cmd)` (`can_issue`ni tekshirib bajaradi), `extract_migrants`/`inject_migrants` (Tunnel orqali ko'chish), `player_joined_as`/`player_rejoined`/`kick_player` | `fc-net`'s `server.rs` (`sim_loop`), `client/local_server.rs` (wasm inline), barcha `tests/*.rs` |
 | `rng.rs` | Determinstik RNG | `Rng` (SplitMix64, `u64` state — `GameState.rng`/`event_rng` ichida saqlanadi, shu bilan butun sim bitta seed'dan takrorlanadi) | `sim.rs` (mapgen, voqealar), testlar |
 
-### `src/net/` — protokol, server, persistensiya
+### `crates/fc-net/src/` — protokol, server, persistensiya (paket `fc-net`, `fc-game`ga bog'liq)
 
 | Fayl | Mas'uliyat | Asosiy tiplar/funksiyalar | Kim ishlatadi |
 |---|---|---|---|
-| `protocol.rs` | Wire format | `ClientMsg` (`Hello`/`Cmd`/`Cursor`/`Chat`/`Ping`/`SetGuestPermission`/`Kick`/`Login`/`EnterCentral`), `ServerMsg` (`Welcome`/`State`/`AuthFailed`), `Included` (delta-snapshot bayroqlari), `encode`/`decode` (bincode + `miniz_oxide` deflate), `write_frame`/`read_frame` (4-bayt little-endian uzunlik prefiksi). **MUHIM:** bincode positional bo'lgani uchun `ClientMsg`/`ServerMsg` enum variantlari **faqat OXIRIGA** qo'shiladi — o'rtaga qo'shish yoki tartibni o'zgartirish eski client/saqlovlarni buzadi | `net/server.rs`, `net/client.rs`, `net/ws.rs`, `net/legacy.rs` (saqlashda ham xuddi shu tamoyil) |
+| `protocol.rs` | Wire format | `ClientMsg` (`Hello`/`Cmd`/`Cursor`/`Chat`/`Ping`/`SetGuestPermission`/`Kick`/`Login`/`EnterCentral`), `ServerMsg` (`Welcome`/`State`/`AuthFailed`), `Included` (delta-snapshot bayroqlari), `encode`/`decode` (bincode + `miniz_oxide` deflate), `write_frame`/`read_frame` (4-bayt little-endian uzunlik prefiksi). **MUHIM:** bincode positional bo'lgani uchun `ClientMsg`/`ServerMsg` enum variantlari **faqat OXIRIGA** qo'shiladi — o'rtaga qo'shish yoki tartibni o'zgartirish eski client/saqlovlarni buzadi | `server.rs`, `client.rs`, `ws.rs`, `legacy.rs` (saqlashda ham xuddi shu tamoyil) |
 | `server.rs` | TCP/WS/HTTP qabul qilish + sim_loop + persistensiya orkestratsiyasi | `sim_loop` (asosiy tick tsikli — `pub(crate)`, `world_manager.rs` ham qayta ishlatadi), `accept_loop`/`handle_socket` (4-bayt sniffing: `"GET "` → HTTP/WS, aks holda native), `route_first_msg` (Hello/Login/EnterCentral marshrutlash), `RateLimiter` (Cmd 30/s, Chat 4/s, Ping 6/s, Cursor 60/s), sessiya tokenlari (`fresh_token()` — OS CSPRNG, har reconnect'da rotatsiya), `ServerConfig`/`ServerHandle`, `MAX_CONNECTIONS=128`, auto-reset (`WORLD_RESET_AFTER`), avtosaqlash (`AUTOSAVE_INTERVAL=20s`) | `main.rs` (`run_dedicated`), `client/menu.rs` (host/singleplayer in-process), `world_manager.rs` |
-| `world_manager.rs` | Akkaunt → shaxsiy olam marshrutlash, lazy-spawn/idle-evict | `WorldManager::join_account` (login → akkauntning o'z `sim_loop` thread'i, birinchi so'rovda spawn qilinadi), `enter_central` (Tunnel bitirgan akkauntni markaziy olamga kiritadi, `extract_migrants`/`inject_migrants` orqali aholi ko'chiradi, `CENTRAL_MIGRANTS_PER_ACCOUNT=5`gacha), idle-evict 300s'dan keyin (`IDLE_SHUTDOWN`), `MAX_ACCOUNT_WORLDS=200` cap (markaziy olam bundan mustasno) | `main.rs` (`run_dedicated`, faqat asosiy region), `net/server.rs::route_first_msg` |
-| `accounts.rs` | Akkaunt autentifikatsiyasi (SQLite, o'qish-only) | `authenticate(login, password)` → `(account_id, display_name)` yoki `None` (barcha xato holatlar — DB yo'q, login topilmadi, parol xato — bir xil `None`ga tushadi, enumeration oldini olish uchun), bcrypt tekshiruvi | `net/server.rs::route_first_msg` |
-| `persist.rs` | Diskka saqlash/yuklash, versiyalangan format | `save_at`/`load_at` (`MAGIC_V2 = b"FCWORLD2"` header + bincode; atomik yozish: temp fayl + rename), magic'siz fayl `legacy.rs`dagi V1 ko'zgu orqali o'qiladi va migratsiya qilinadi | `net/server.rs` (`sim_loop`, `save_world`), `net/world_manager.rs`, `examples/checksave.rs` |
+| `world_manager.rs` | Akkaunt → shaxsiy olam marshrutlash, lazy-spawn/idle-evict | `WorldManager::join_account` (login → akkauntning o'z `sim_loop` thread'i, birinchi so'rovda spawn qilinadi), `enter_central` (Tunnel bitirgan akkauntni markaziy olamga kiritadi, `extract_migrants`/`inject_migrants` orqali aholi ko'chiradi, `CENTRAL_MIGRANTS_PER_ACCOUNT=5`gacha), idle-evict 300s'dan keyin (`IDLE_SHUTDOWN`), `MAX_ACCOUNT_WORLDS=200` cap (markaziy olam bundan mustasno) | `main.rs` (`run_dedicated`, faqat asosiy region), `server.rs::route_first_msg` |
+| `accounts.rs` | Akkaunt autentifikatsiyasi (SQLite, o'qish-only) | `authenticate(login, password)` → `(account_id, display_name)` yoki `None` (barcha xato holatlar — DB yo'q, login topilmadi, parol xato — bir xil `None`ga tushadi, enumeration oldini olish uchun), bcrypt tekshiruvi | `server.rs::route_first_msg` |
+| `persist.rs` | Diskka saqlash/yuklash, versiyalangan format | `save_at`/`load_at` (`MAGIC_V2 = b"FCWORLD2"` header + bincode; atomik yozish: temp fayl + rename), magic'siz fayl `legacy.rs`dagi V1 ko'zgu orqali o'qiladi va migratsiya qilinadi | `server.rs` (`sim_loop`, `save_world`), `world_manager.rs`, `examples/checksave.rs` |
 | `legacy.rs` | V1 (markaziy-olamgacha) format ko'zgusi — **hech qachon o'zgartirilmaydi** | `GameStateV1`/`SurvivorV1`/`PlayerInfoV1` (V1 layout aynan), `impl From<GameStateV1> for GameState` (yangi maydonlarga default: `owner: None`, `account: None`, `central: false`) | `persist.rs::load_at` (magic yo'q fayllar uchun) |
-| `client.rs` | Client-tomon ulanish abstraktsiyasi | `ClientConn` enum (`Channels` — TCP pump thread yoki in-process kanal; `WebSocket` — faqat wasm), `connect_tcp`/`connect_tcp_with` (native TCP + reader/writer thread'lar), `poll()`/`send()` | `client/menu.rs`, `client/net_sync.rs`, `net/server.rs::connect_local` |
-| `ws.rs` | Brauzer WebSocket transporti (**faqat wasm**) | `connect`/`connect_with` (`web_sys::WebSocket`, thread-local `SOCKETS` registr — JS qiymatlari `Send` emas), `send`/`is_closed`/`close` | `net/client.rs::ClientConn::WebSocket` (wasm branch) |
+| `client.rs` | Client-tomon ulanish abstraktsiyasi | `ClientConn` enum (`Channels` — TCP pump thread yoki in-process kanal; `WebSocket` — faqat wasm), `connect_tcp`/`connect_tcp_with` (native TCP + reader/writer thread'lar), `poll()`/`send()` | `client/menu.rs`, `client/net_sync.rs`, `server.rs::connect_local` |
+| `ws.rs` | Brauzer WebSocket transporti (**faqat wasm**) | `connect`/`connect_with` (`web_sys::WebSocket`, thread-local `SOCKETS` registr — JS qiymatlari `Send` emas), `send`/`is_closed`/`close` | `client.rs::ClientConn::WebSocket` (wasm branch) |
 
 ### `src/client/` — Bevy 0.19 render/UI/input
 
@@ -156,14 +164,14 @@ V0.6) do'stlarini o'z shaxsiy olamiga taklif qiladi.
 
 (To'liq ro'yxat: [ROADMAP.md](ROADMAP.md) "Doimiy tamoyillar" bo'limi.)
 
-1. `src/game/` Bevy'siz qoladi — sim sof funksiya, WASM'da ham ishlaydi.
+1. `crates/fc-game/` Bevy'siz qoladi — sim sof funksiya, WASM'da ham ishlaydi.
 2. Determinizm buzilmaydi — har mexanika `--seed` bilan takrorlanadi.
 3. Yakka o'yin = xuddi shu server (in-process, alohida kod yo'li yo'q).
 4. Shaxsiy olam sim'i arzon qolsin — minglab olam parallel ishlashi kerak.
 5. Har feature test bilan keladi (sim-invariant yoki e2e).
 6. Bitta port printsipi — TCP + WS + HTTP birgalikda, deploy sodda.
 7. **`src/client/`ga tegadigan har o'zgarish smoke-test bilan tasdiqlanadi.**
-   `cargo test` faqat `src/game`/`src/net` sof mantiqni tekshiradi — Bevy
+   `cargo test` faqat `fc-game`/`fc-net` sof mantiqni tekshiradi — Bevy
    client (ECS/render) hech qachon haqiqatda ishga tushirilmaydi, shuning
    uchun runtime-only xatolar (masalan ECS query-conflict) testlardan sizib
    o'tishi mumkin. Shu sabab `deploy.sh`da majburiy bosqich bor:
@@ -171,7 +179,7 @@ V0.6) do'stlarini o'z shaxsiy olamiga taklif qiladi.
    siz bo'lsa deploy web-build bosqichigacha yetib bormay to'xtaydi.
 
 **Saqlash-format migratsiya qoidasi:** `GameState`ga yangi maydon qo'shishdan
-OLDIN — yangi versiya magic (`persist.rs`, hozir `FCWORLD2`) + `net/legacy.rs`
+OLDIN — yangi versiya magic (`persist.rs`, hozir `FCWORLD2`) + `fc-net`ning `legacy.rs`
 zanjiriga yangi bo'g'in (eski struktura muzlatilgan holicha qoladi, `From`
 impl bilan migratsiya) qo'shilishi shart, va deploy'dan oldin haqiqiy
 production saqlovlar nusxasi `examples/checksave.rs` bilan tekshiriladi.

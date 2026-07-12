@@ -20,18 +20,18 @@ use std::time::{Duration, Instant};
 
 use tungstenite::Message;
 
-use crate::game::sim;
-use crate::game::types::{
+use fc_game::sim;
+use fc_game::types::{
     GamePhase, GameState, Mission, PlayerCommand, PlayerInfo, Ping, Role, Survivor, Tech, TICK_MS,
 };
-use crate::net::accounts;
-use crate::net::client::ClientConn;
-use crate::net::persist;
-use crate::net::protocol::{
+use crate::accounts;
+use crate::client::ClientConn;
+use crate::persist;
+use crate::protocol::{
     decode, encode, read_frame, write_frame, ClientMsg, FriendInfo, Included, ServerMsg,
     ShowcaseEntry, MAX_FRAME, TILES_EVERY_N_TICKS,
 };
-use crate::net::world_manager::InviteBook;
+use crate::world_manager::InviteBook;
 
 /// Directory the built-in HTTP server serves the web build from.
 const WEB_ROOT: &str = "web";
@@ -145,7 +145,7 @@ pub struct ServerConfig {
     /// `ServerMsg::Invited` cross-world, to the target account's PERSONAL
     /// world connection (not just one currently in the central world) —
     /// see `WorldManager::deliver_to_account`.
-    pub world_manager: Option<Arc<crate::net::world_manager::WorldManager>>,
+    pub world_manager: Option<Arc<crate::world_manager::WorldManager>>,
 }
 
 /// On a persistent server, a finished world (won or lost) restarts with a
@@ -257,14 +257,14 @@ pub fn start(config: ServerConfig) -> io::Result<ServerHandle> {
 /// unchanged.
 pub fn start_with_accounts(
     config: ServerConfig,
-    world_manager: Arc<crate::net::world_manager::WorldManager>,
+    world_manager: Arc<crate::world_manager::WorldManager>,
 ) -> io::Result<ServerHandle> {
     start_inner(config, Some(world_manager))
 }
 
 fn start_inner(
     config: ServerConfig,
-    world_manager: Option<Arc<crate::net::world_manager::WorldManager>>,
+    world_manager: Option<Arc<crate::world_manager::WorldManager>>,
 ) -> io::Result<ServerHandle> {
     let (to_server_tx, to_server_rx) = channel::<ToServer>();
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -357,7 +357,7 @@ fn accept_loop(
     listener: TcpListener,
     to_server: Sender<ToServer>,
     shutdown: Arc<AtomicBool>,
-    world_manager: Option<Arc<crate::net::world_manager::WorldManager>>,
+    world_manager: Option<Arc<crate::world_manager::WorldManager>>,
 ) {
     let active = Arc::new(AtomicUsize::new(0));
     loop {
@@ -399,7 +399,7 @@ fn accept_loop(
 fn handle_socket(
     stream: TcpStream,
     to_server: Sender<ToServer>,
-    world_manager: Option<Arc<crate::net::world_manager::WorldManager>>,
+    world_manager: Option<Arc<crate::world_manager::WorldManager>>,
 ) {
     // Sockets accepted from a non-blocking listener inherit non-blocking mode
     // on Windows; everything below expects a blocking socket.
@@ -450,9 +450,9 @@ enum FirstMsgOutcome {
 fn route_first_msg(
     msg: ClientMsg,
     to_server: &Sender<ToServer>,
-    world_manager: &Option<Arc<crate::net::world_manager::WorldManager>>,
+    world_manager: &Option<Arc<crate::world_manager::WorldManager>>,
 ) -> FirstMsgOutcome {
-    use crate::net::world_manager::{CentralError, VisitError};
+    use crate::world_manager::{CentralError, VisitError};
     match msg {
         ClientMsg::Hello { name, token } => {
             let name = sanitize_name(&name);
@@ -594,7 +594,7 @@ fn route_first_msg(
 fn handle_native(
     mut stream: TcpStream,
     to_server: Sender<ToServer>,
-    world_manager: Option<Arc<crate::net::world_manager::WorldManager>>,
+    world_manager: Option<Arc<crate::world_manager::WorldManager>>,
 ) {
     // The very first frame must be Hello, Login or EnterCentral (the 10 s
     // timeout is already set). `target` is whichever world this connection
@@ -688,7 +688,7 @@ pub(crate) fn join(
 fn handle_http(
     mut stream: TcpStream,
     to_server: Sender<ToServer>,
-    world_manager: Option<Arc<crate::net::world_manager::WorldManager>>,
+    world_manager: Option<Arc<crate::world_manager::WorldManager>>,
 ) {
     // Read byte-by-byte so nothing past the head is consumed (the bytes that
     // follow the upgrade response are WebSocket frames).
@@ -757,7 +757,7 @@ fn serve_websocket(
     stream: TcpStream,
     head: Vec<u8>,
     to_server: Sender<ToServer>,
-    world_manager: Option<Arc<crate::net::world_manager::WorldManager>>,
+    world_manager: Option<Arc<crate::world_manager::WorldManager>>,
 ) {
     let prefixed = PrefixedStream {
         prefix: head,
@@ -1056,7 +1056,7 @@ fn showcase_for(state: &GameState, account: i64) -> ServerMsg {
     let entries = accounts::friends_list(account)
         .into_iter()
         .filter_map(|(fid, fname)| {
-            let path = crate::net::world_manager::account_save_path(fid);
+            let path = crate::world_manager::account_save_path(fid);
             let friend_state = persist::load_at(&path)?;
             Some(ShowcaseEntry {
                 account: fid,

@@ -8,7 +8,7 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use crate::game::types::GameState;
+use fc_game::types::GameState;
 
 /// Where the dedicated server's world is saved between restarts. Overridable
 /// via `FC_WORLD_SAVE` (same variable name pattern as `accounts::DEFAULT_DB_PATH`),
@@ -78,14 +78,14 @@ pub fn load_at(path: &str) -> Option<GameState> {
         // V2 (pre-account-ownership/contribution-ledger): decode through the
         // frozen V2 mirror and migrate one hop to V3. The next autosave
         // rewrites it as V3.
-        return bincode::deserialize::<crate::net::legacy::GameStateV2>(body)
+        return bincode::deserialize::<crate::legacy::GameStateV2>(body)
             .ok()
             .map(GameState::from);
     }
     // No recognized header: a save written before versioning existed at
     // all — decode it through the frozen V1 mirror and migrate all the way
     // to V3. The next autosave rewrites it as V3.
-    bincode::deserialize::<crate::net::legacy::GameStateV1>(&bytes)
+    bincode::deserialize::<crate::legacy::GameStateV1>(&bytes)
         .ok()
         .map(GameState::from)
 }
@@ -93,7 +93,7 @@ pub fn load_at(path: &str) -> Option<GameState> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::game::sim;
+    use fc_game::sim;
 
     fn throwaway_path(name: &str) -> String {
         std::env::temp_dir()
@@ -132,7 +132,7 @@ mod tests {
     /// a production city silently wiped on the first post-format-change boot.
     #[test]
     fn v1_save_without_header_migrates() {
-        use crate::net::legacy::{BuildingV2, GameStateV1, PlayerInfoV1, SurvivorV1};
+        use crate::legacy::{BuildingV2, GameStateV1, PlayerInfoV1, SurvivorV1};
 
         let path = throwaway_path("v1-migrate");
         // Fabricate V1 bytes exactly the way an old binary wrote them: a
@@ -232,7 +232,7 @@ mod tests {
     /// to V3, same non-negotiable "never collapses to None" guarantee as V1.
     #[test]
     fn v2_save_migrates() {
-        use crate::net::legacy::{BuildingV2, GameStateV2};
+        use crate::legacy::{BuildingV2, GameStateV2};
 
         let path = throwaway_path("v2-migrate");
         let mut modern = sim::new_game(23, 12);

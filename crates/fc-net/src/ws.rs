@@ -14,8 +14,8 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 use web_sys::{BinaryType, MessageEvent, WebSocket};
 
-use crate::net::client::ClientConn;
-use crate::net::protocol::{decode, encode, ClientMsg, ServerMsg, MAX_FRAME};
+use crate::client::ClientConn;
+use crate::protocol::{decode, encode, ClientMsg, ServerMsg, MAX_FRAME};
 
 struct Slot {
     ws: WebSocket,
