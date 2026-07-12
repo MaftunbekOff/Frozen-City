@@ -1,9 +1,19 @@
 # FROZEN CITY — Yo'l xaritasi (Roadmap)
 
 > Dolzarb rivojlanish rejasi. Dastlabki dizayn-hujjat: [PLAN.md](PLAN.md).
-> Yangilangan: 2026-07-10.
+> Yangilangan: 2026-07-12.
 
-## Hozirgi holat (V0.1 MVP + V0.2 + V0.3 — barchasi tayyor)
+## Hozirgi holat (V0.1–V0.6 — barchasi tayyor; keyingisi V1.0)
+
+**2026-07-12:** V0.4, V0.5 va V0.6 to'liq yakunlandi (batafsili har bo'limda):
+client-ichidan ro'yxatdan o'tish, social panel (do'stlar/taklif/tashrif),
+yaqin-atrof chat pufakchalari, markaziy olamda yengil avatar-rejim, akkaunt-
+asosli bino egaligi + hissa daftari (FCWORLD3 migratsiya bilan), do'stlar
+vitrinasi (Showcase), egasi-oflayn mehmon siyosati, taklifning shaxsiy olamga
+ham yetib borishi. Barcha qabul mezonlari testlarda o'lchab tasdiqlangan
+(50 parallel olam, 100 klient bitta hub'da, o'tish 0.8–0.9s). Loyiha Cargo
+workspace modullariga ajratildi: `crates/fc-game` (sof sim), `crates/fc-net`
+(protokol/server), root `frozen_city` (Bevy klient) — [ARCHITECTURE.md](ARCHITECTURE.md).
 
 M0–M7 bosqichlar yakunlangan:
 
@@ -225,19 +235,23 @@ Tunnelgacha yetaklasin.
 **Maqsad:** shaxsiy olam serverda yashaydi — istalgan qurilmadan kirsa bo'ladi,
 hech qachon yo'qolmaydi.
 
-**Holat:** asosiy qism bajarildi (2026-07-10, `world_manager.rs` — quyida) — login
-qilgan akkaunt endi umumiy olam emas, o'zining alohida saqlanadigan olamiga tushadi.
-Ochiq qolgani: client-ichidan ro'yxatdan o'tish, cross-device'ni aniq testda
-tasdiqlash, va region-mahalliylik nuance'i (pastga qarang).
+**Holat: ✅ to'liq bajarildi (2026-07-12).** Client-ichidan ro'yxatdan o'tish
+(menyuda Register rejimi, Telegram bot ham ishlayveradi), cross-device
+`tests/cross_device_e2e.rs`da isbotlangan (server restart bilan birga), 50+
+parallel shaxsiy olam yuk testi o'tdi. Faqat ko'p-region dinamik menejeri
+keyinga qoldirilgan (pastga qarang).
 
 ### Vazifalar
 
-- [~] **Akkauntlar**: rejadagidek Tunnel-bog'liq emas, Telegram bot
+- [x] **Akkauntlar**: rejadagidek Tunnel-bog'liq emas, Telegram bot
       (`bot/register_bot.py`) orqali istalgan vaqt ro'yxatdan o'tiladi — bcrypt bilan
       SQLite'da (`/var/lib/frozen-city-accounts/accounts.db`) saqlanadi, server
       `ClientMsg::Login`/`AuthFailed` bilan tekshiradi, sessiya V0.2 reconnect
-      tokeni ustiga quriladi (`src/net/accounts.rs`). Qoldi: ro'yxatdan o'tish
-      to'g'ridan-to'g'ri client ichidan (Telegram'siz).
+      tokeni ustiga quriladi (`crates/fc-net/src/accounts.rs`). ✅ **Ro'yxatdan
+      o'tish endi client ichidan ham** (2026-07-12): menyuda Register rejimi
+      (`ClientMsg::Register`, server `register_account` — bot sxemasi bilan bir
+      xil jadval, sintetik manfiy telegram_id, jarayon-keng 5/min rate-limit),
+      muvaffaqiyatda darhol o'z shaxsiy olamiga kiradi.
 - [x] **Server tomonida persistensiya, har akkaunt uchun alohida** (2026-07-10):
       `src/net/world_manager.rs` — login bo'lganda `account_id` bo'yicha alohida
       sim_loop thread lazy-spawn qilinadi, o'z faylida saqlanadi
@@ -246,32 +260,33 @@ tasdiqlash, va region-mahalliylik nuance'i (pastga qarang).
       cap. Guest (`Hello`, akkauntsiz) hamon umumiy olamga kiradi, o'zgarmagan.
       SQLite/Postgres emas, oddiy fayl-per-akkaunt — hozirgi masshtabda yetarli,
       kelajakda kerak bo'lsa almashtiriladi.
-- [~] **Cross-device**: endi ma'noli — akkaunt bilan kirgan har qanday klient
-      (brauzer/desktop) `account_id` orqali xuddi shu olamga marshrutlanadi
-      (`WorldManager::join_account`). `tests/account_world_e2e.rs` ikki
-      AKKAUNT orasidagi izolyatsiya va restart'dan omon qolishni tasdiqlaydi, lekin
-      **bitta akkauntning ikkita turli klientdan ketma-ket kirishi** ("brauzerda
-      qurib, uzilib, keyin desktopdan o'sha shaharni ko'rish") hali alohida testda
-      aniq isbotlanmagan. ~~Nuance: region-mahalliylik~~ — **yechildi (2026-07-11)**:
-      akkauntlar (va markaziy olam) faqat asosiy region processida yashaydi;
-      klient akkaunt-login/EnterCentral'ni doim `/ws`ga yo'naltiradi, region2/3
-      esa `FC_DISABLE_ACCOUNTS=1` bilan akkaunt kirishini rad etadi. Region
-      tanlash faqat mehmon co-op uchun qoldi.
-- [ ] **Olam menejeri (ko'p-region miqyosida)**: uchta region hamon 3ta **mustaqil,
-      qo'lda ishga tushirilgan** static process (alohida systemd xizmat/port,
-      brauzerda region tanlash menyusi) — bu qatlamda hali dinamik emas. E'tibor
-      bering: per-akkaunt qatlamda esa dinamik menejer (lazy-spawn/idle-evict)
-      endi bor — `world_manager.rs` shu naqshni allaqachon namoyish etadi, faqat
-      regionlar darajasida emas.
+- [x] **Cross-device**: akkaunt bilan kirgan har qanday klient (brauzer/desktop)
+      `account_id` orqali xuddi shu olamga marshrutlanadi
+      (`WorldManager::join_account`). ✅ **Aniq isbotlangan (2026-07-12)**:
+      `tests/cross_device_e2e.rs` — bitta akkaunt, ikkita ketma-ket mustaqil
+      ulanish ("ikki qurilma") bir xil shahar/binolarni ko'radi, jonli umumiy
+      olamda qurishda davom etadi, va to'liq server restart'idan keyin ham
+      uchinchi ulanish hammasini joyida topadi. ~~Nuance: region-mahalliylik~~ —
+      **yechildi (2026-07-11)**: akkauntlar (va markaziy olam) faqat asosiy
+      region processida yashaydi; klient akkaunt-login/EnterCentral'ni doim
+      `/ws`ga yo'naltiradi, region2/3 esa `FC_DISABLE_ACCOUNTS=1` bilan akkaunt
+      kirishini rad etadi. Region tanlash faqat mehmon co-op uchun qoldi.
+- [ ] **Olam menejeri (ko'p-region miqyosida)** — *ataylab V1.0+ ga qoldirildi*:
+      uchta region hamon 3ta mustaqil, qo'lda ishga tushirilgan static process.
+      50-olam yuk testi BITTA processda bemalol o'tgani uchun (quyida) dinamik
+      ko'p-region menejeri hozirgi masshtabda shart emas; per-akkaunt qatlamdagi
+      lazy-spawn/idle-evict naqshi (`world_manager.rs`) kelajakda shu qatlamga
+      ko'tariladi.
 
 ### Natija mezonlari
 
 - [x] Server restart → akkaunt olami tiklanadi (avtomatlashgan test,
       `tests/account_world_e2e.rs`) + production'da ham qo'lda tasdiqlangan.
-- [ ] Brauzerda boshlagan o'yinchi desktopdan o'sha shahriga kiradi — marshrutlash
-      logikasi buni ta'minlashi kerak, lekin aniq e2e test/qo'lda tekshiruv qoldi.
-- [ ] 50+ shaxsiy olam bitta serverda parallel (yuk testi) — `examples/loadtest.rs`
-      bor, lekin ko'p-region sig'imini o'lchash uchun, shaxsiy-olam skalasi uchun emas.
+- [x] Brauzerda boshlagan o'yinchi desktopdan o'sha shahriga kiradi —
+      `tests/cross_device_e2e.rs` (2026-07-12), restart bilan birga.
+- [x] 50+ shaxsiy olam bitta serverda parallel — `tests/scale_e2e.rs`
+      (2026-07-12): 50/50 olam mustaqil tick, join p50=800ms p99=956ms,
+      RSS 152MB (production hostida o'lchangan).
 
 ---
 
@@ -279,49 +294,72 @@ tasdiqlash, va region-mahalliylik nuance'i (pastga qarang).
 
 **Maqsad:** butun dunyo o'yinchilari uchrashadigan bitta doimiy makon.
 
-**Holat (2026-07-11):** birinchi bosqich JONLI — markaziy olam mavjud, Tunnel
-orqali kiriladi, har akkaunt o'z ko'chmanchilarini olib o'tadi va faqat ularni
-boshqaradi. Hozircha "hub" avatar-rejim emas: o'sha shahar-sim xaritasi, lekin
-o'lim/g'alabasiz doimiy makon — o'yinchi o'z aholisini binolarga qo'yadi,
-quradi, chat qiladi. Avatar/yengil rejim keyingi bosqich.
+**Holat: ✅ bajarildi (2026-07-12).** Markaziy olam + yengil avatar-rejim
+(har o'yinchi kursor tayl'i tomon yuradigan nomli figura — protokol
+o'zgarishisiz, mavjud kursor sinxronidan), do'stlar ro'yxati + social panel,
+yaqin-atrof chat pufakchalari, vitrina (Showcase), akkaunt-asosli bino
+egaligi va hissa daftari. 100-klient yuk testi va <5s o'tish o'lchab
+tasdiqlangan. To'liq gateway-shardli interest management ataylab V1.0+ ga
+qoldirildi (quyida).
 
 ### Vazifalar
 
-- [~] **Hub-rejim**: ✅ bitta doimiy markaziy olam (`sim::new_game_central`,
+- [x] **Hub-rejim**: bitta doimiy markaziy olam (`sim::new_game_central`,
       `GameState::central`): ochlik/o'lim/voqealar/g'alaba-mag'lubiyat yo'q,
       aholi faqat Tunnel orqali keladi (`extract_migrants`/`inject_migrants`,
       akkauntga 5 tagacha, qaytib kirish nusxalamaydi — cap'gacha to'ldiradi),
       **har kim faqat o'z ko'chmanchilarini boshqaradi** (`can_issue`ning
       central-tarmog'i, roster ham faqat o'znikini ko'rsatadi), Owner roli
-      yo'q (birinchi kirgan ham kick qila olmaydi). Qoldi: avatar bilan yurish
-      o'rniga hozircha shahar-sim ko'rinishi — yengil avatar-rejim keyin.
-- [ ] **Global va yaqin-atrof chat**, do'stlar ro'yxati (qo'shish/o'chirish).
-      (Oddiy umumiy chat markaziy olamda allaqachon ishlaydi — snapshot'dagi
-      mavjud chat tizimi; "yaqin-atrof" va do'stlar ro'yxati yo'q hali.)
-- [~] **Tunnel o'tish oqimi**: ✅ minimal ishlaydi — graduatsiya ekranidagi
-      "Enter the Global World" tugmasi va HUD'dagi "Global World"/"My City"
-      almashtirgichi (`PendingSwitch`: bir freym menyu orqali toza qayta
-      qurish); uzilishda reconnect `EnterCentral`ni qayta jo'natadi (shaxsiy
-      olamga tushib qolmaydi). Qoldi: yuklash ekrani/silliq o'tish animatsiyasi.
-- [ ] **Interest management**: mijoz faqat atrofidagi zonani oladi; kerak
-      bo'lganda gateway + region serverlar. Zaminiy infratuzilma qisman bor —
-      3ta mustaqil region-server (V0.4'da tasvirlangan) — lekin bu hub/avatar
-      shardlash emas, qo'lda ochilgan qo'shimcha statik olamlar.
-- [ ] **Hub mashg'ulotlari (v1)**: boshqa shaharlarning vitrinasi (statistika,
-      «tashrif»), e'lonlar taxtasi; keyinroq savdo/almashuv — dizayn ochiq.
+      yo'q. ✅ **Yengil avatar-rejim (2026-07-12)**: markaziy olamda har ulangan
+      o'yinchi nom yorlig'li low-poly figura sifatida ko'rinadi va kursor
+      tayl'i tomon yuradi (`render.rs::sync_avatars`/`animate_avatars` —
+      protokol o'zgarishisiz, mavjud kursor sinxroni ustiga); chat
+      pufakchalari avatar tepasida suzadi. ✅ **Akkaunt-asosli bino egaligi**
+      (`Building.owner_account` — faqat egasi buza oladi) va **hissa daftari**
+      (`central_ledger`: har akkauntning ishlab chiqarish/sarf hissasi,
+      deterministik) — 2026-07-12, FCWORLD3 saqlov-migratsiyasi bilan.
+- [x] **Global va yaqin-atrof chat, do'stlar ro'yxati** (2026-07-12): global
+      chat mavjud edi; endi `/l` prefiksli **yaqin-atrof chat** (`ChatLocal` →
+      12 tayl radiusdagi o'yinchilarga `Bubble`, GameState'da saqlanmaydi),
+      pufakchalar yuboruvchining avatari/kursori tepasida 7s suzib so'nadi;
+      **do'stlar ro'yxati** server-tomonda SQLite'da (`friends` jadvali,
+      qo'shish/o'chirish/ro'yxat, `Social` snapshot'i), klientda social panel
+      (`F` tugmasi yoki HUD "Friends" tugmasi — mobil uchun).
+- [x] **Tunnel o'tish oqimi**: graduatsiya ekranidagi "Enter the Global World"
+      tugmasi va HUD'dagi "Global World"/"My City" almashtirgichi
+      (`PendingSwitch`); uzilishda reconnect `EnterCentral`ni qayta jo'natadi.
+      ✅ O'tish overlay xabari qo'shildi (2026-07-12, `TransitionMsg`:
+      "Entering the Global World…" fade-in/out). O'lchangan o'tish vaqti:
+      0.78–0.89s (mezon <5s).
+- [ ] **Interest management** — *ataylab V1.0+ ga qoldirildi*: 100-klient yuk
+      testi hozirgi to'liq-snapshot + deflate yondashuvida MUAMMOSIZ o'tdi
+      (0 uzilish), ya'ni bu masshtabda zona-filtrlash hali shart emas. Yaqin-
+      atrof chat allaqachon 12-tayl radius bilan ishlaydi. Gateway + shardlash
+      1000+ concurrent'da qaytib ko'riladi.
+- [x] **Hub mashg'ulotlari (v1)** (2026-07-12): **vitrina (Showcase)** —
+      social panelda har do'stning shahar statistikasi (kun/aholi/bino/Tunnel
+      belgisi), `RefreshShowcase` → saqlov faylidan o'qiladi (5s cooldown,
+      faqat do'stlarga — maxfiylik). E'lonlar taxtasi/savdo — keyinroq,
+      dizayn ochiq.
 
-**Muhim texnik asos (2026-07-11):** saqlash formati endi versiyalangan —
-`persist.rs` har saqlovni `FCWORLD2` magic bilan yozadi; magic'siz fayl eski
-(V1) format deb `net/legacy.rs`dagi muzlatilgan ko'zgu-strukturalar orqali
-o'qilib migratsiya qilinadi. `GameState`ga maydon qo'shishdan OLDIN har doim:
-yangi versiya magic + legacy zanjiriga yangi bo'g'in, va deploy'dan oldin
-haqiqiy production saqlovlar nusxasini `examples/checksave.rs` bilan tekshirish.
+**Muhim texnik asos:** saqlash formati versiyalangan — hozir `FCWORLD3`
+(2026-07-12: `Building.owner_account` + `central_ledger` uchun); `FCWORLD2`
+va magic'siz (V1) fayllar `fc-net/src/legacy.rs`dagi muzlatilgan V1/V2
+ko'zgu-strukturalar orqali V1→V2→V3 zanjirida migratsiya qilinadi (uchala
+haqiqiy production saqlov nusxasida tekshirilgan). `GameState`ga maydon
+qo'shishdan OLDIN har doim: yangi versiya magic + legacy zanjiriga yangi
+bo'g'in, va deploy'dan oldin haqiqiy production saqlovlar nusxasini
+`examples/checksave.rs` bilan tekshirish.
 
 ### Natija mezonlari
 
-- 100+ concurrent avatar bitta hub'da (sun'iy yuk testi).
-- Shaxsiy olam ↔ hub o'tish < 5 soniya.
-- Do'st qo'shish ikkala tomonda ham saqlanadi (persistensiya testi).
+- [x] 100+ concurrent klient bitta hub'da — `tests/scale_e2e.rs` (2026-07-12):
+      100/100 ulandi, kuzatuv oynasida 0 uzilish, join p50=898ms.
+- [x] Shaxsiy olam ↔ hub o'tish < 5 soniya — o'lchandi: 0.78–0.89s
+      (`tests/full_cycle_e2e.rs`).
+- [x] Do'st qo'shish ikkala tomonda ham saqlanadi — SQLite `friends` jadvali,
+      server restart'dan omon qoladi (`tests/social_server_tests.rs` +
+      `accounts.rs` unit testlari).
 
 ---
 
@@ -329,22 +367,41 @@ haqiqiy production saqlovlar nusxasini `examples/checksave.rs` bilan tekshirish.
 
 **Maqsad:** vizyonning yakuniy halqasi — hub'dagi do'stni o'z olamingga olib kirish.
 
+**Holat: ✅ to'liq bajarildi (2026-07-12).**
+
 ### Vazifalar
 
-- [ ] **Taklif**: hub'da do'stga taklif yuborish → qabul qilsa, sening shaxsiy
-      olamingga ulanadi.
-- [ ] **Mehmon huquqlari** (V0.2 rollar ustiga): egasi belgilaydi — faqat ko'rish /
-      qurish mumkin / to'liq sherik. Yomon mehmonni chiqarib yuborish (kick).
-- [ ] **Egasiz kirish siyosati**: egasi oflayn bo'lsa mehmonlar kira oladimi —
-      sozlama (standart: yo'q).
-- [ ] **Onboarding'siz mehmon**: do'st hali Tunnel ochmagan bo'lsa ham taklifga
-      kira oladi (mehmonlik progressiyani bermaydi, faqat yordam).
+- [x] **Taklif**: hub'da do'stga taklif yuborish (`Invite`, social paneldagi
+      tugma) → `Invited` bildirishnomasi + qabul qilsa `VisitFriend` bilan
+      egasining shaxsiy olamiga ulanadi (`InviteBook`, 15 min TTL). Taklif
+      endi nishonning **shaxsiy olamiga ham** yetib boradi
+      (`WorldManager::deliver_to_account`) — do'st hub'da turishi shart emas.
+- [x] **Mehmon huquqlari** (V0.2 rollar ustiga): olam egaligi endi **akkauntga
+      mahkamlangan** (`ServerConfig::owner_account` — tashrifchi birinchi
+      kirib ham Owner bo'lolmaydi); egasi `GuestPermission`ni belgilaydi
+      (ViewOnly/Build/Full) va kick qiladi — tashrifchiga ham xuddi shunday
+      amal qiladi (`tests/visit_e2e.rs`da tasdiqlangan).
+- [x] **Egasiz kirish siyosati**: `allow_offline_guests` sozlamasi (standart:
+      YO'Q) — akkaunt DB'dagi server-egalik `visit_policy` jadvali,
+      `SetVisitPolicy`/`VisitPolicy` protokol jufti, social paneldagi toggle.
+      Yoqilgan bo'lsa taklif qilingan mehmon egasi oflayn olamga ham kiradi
+      (olam lazy-spawn bo'ladi), egalik baribir egasida qoladi.
+- [x] **Onboarding'siz mehmon**: Tunnel ochmagan do'st ham taklifga kira oladi
+      — `visit_friend` yo'lida graduatsiya talabi yo'q, taklif shaxsiy olamga
+      yetib borgani uchun hub'ga kira olmasligi to'siq emas
+      (`tests/visit_e2e.rs` (g)).
 
 ### Natija mezonlari
 
-- To'liq tsikl e2e testi: missiya → Tunnel → hub → taklif → mehmon binoni quradi
-  → voqeada «mehmon X qurdi» ko'rinadi.
-- Kick va huquq cheklovlari testda tasdiqlanadi.
+- [x] To'liq tsikl e2e testi — `tests/full_cycle_e2e.rs` (2026-07-12): jonli
+      InvestTunnel graduatsiya → hub → taklif → mehmon tashrifi → mehmon
+      binoni quradi → voqealar lentasida mehmon nomi bilan attributsiya.
+      Eslatma: yangi graduatsiya bo'lgan olam `WORLD_RESET_AFTER` (45s)
+      qayta-boshlashgacha buyruq qabul qilmaydi (Won fazasi) — test buni
+      kutadi; UX sayqali V1.0 ro'yxatida.
+- [x] Kick va huquq cheklovlari testda tasdiqlanadi — `tests/visit_e2e.rs`:
+      taklif­siz rad, egasi-oflayn (standart) rad, Guest roli, ViewOnly
+      no-op, Build + attributsiya, kick → ulanish uziladi.
 
 ---
 
@@ -405,30 +462,25 @@ haqiqiy production saqlovlar nusxasini `examples/checksave.rs` bilan tekshirish.
 |---|---|---|
 | V0.2 Tarmoq poydevori | ✅ bajarildi | Attributsiya, rollar, reconnect — hamma ijtimoiy narsaning asosi |
 | V0.3 Missiyalar + Tunnel | ✅ bajarildi | Shaxsiy olam kontenti — o'yinchini hub'gacha yetaklaydi |
-| V0.4 Akkauntlar + doimiy olamlar | 🔶 qisman (yuqoriga qarang) | Taklif va hub uchun identity + persistensiya shart |
-| V0.5 Global Olam (hub) | 🔶 boshlandi — markaziy olam + Tunnel o'tishi + ko'chmanchi egaligi JONLI | Eng katta yangi ish: avatar rejimi + masshtab |
-| V0.6 Taklif + mehmon co-op | boshlanmagan | Vizyon halqasini yopadi; hammasi tayyor bo'lgach arzon |
+| V0.4 Akkauntlar + doimiy olamlar | ✅ bajarildi (2026-07-12) | Taklif va hub uchun identity + persistensiya shart |
+| V0.5 Global Olam (hub) | ✅ bajarildi (2026-07-12) — interest management V1.0+ ga qoldirildi | Eng katta yangi ish edi: yengil avatar rejimi + masshtab |
+| V0.6 Taklif + mehmon co-op | ✅ bajarildi (2026-07-12) | Vizyon halqasi yopildi |
 | V1.0 Sayqal + tarqatish | qisman (yuqoriga qarang) | Keng auditoriyadan oldin oxirgi qatlam |
 
-**Keyingi uchta konkret qadam (V0.4'ning haqiqatda ochiq qolgan qismi):**
+**Keyingi konkret qadamlar (V1.0 yo'lida, 2026-07-12 holatiga):**
 
-1. ✅ ~~Har akkaunt uchun alohida shaxsiy olam~~ — bajarildi, `world_manager.rs`
-   (2026-07-10, yuqoriga qarang).
-2. ✅ ~~Olam menejeri (minimal)~~ — bajarildi, per-akkaunt lazy-spawn/idle-evict
-   `world_manager.rs`da (2026-07-10). Ko'p-region qatlamidagi menejer hamon ochiq
-   (yuqoridagi "Olam menejeri (ko'p-region miqyosida)"ga qarang).
-3. **Cross-device tasdiqlash** — hali ochiq: bitta akkaunt bilan brauzerdan kirib
-   qurish, uzilib, boshqa klient/qurilmadan o'sha login bilan kirib xuddi shu
-   shaharni ko'rish — buni tasdiqlovchi aniq e2e test yoki qo'lda (headless
-   chromium) tekshiruv yozish kerak. Shu bilan birga: akkaunt ro'yxatdan o'tishni
-   Telegram botsiz, client ichidan qilish (V0.4 "Akkauntlar" qoldig'i) ham navbatda.
-
-**V0.5'ning keyingi qadamlari (markaziy olam v1'dan keyin):**
-
-- Markaziy olamda **avatar/yengil rejim** yoki hozirgi ko'chmanchi-shahar
-  modelini boyitish (dizayn tanlovi — foydalanuvchi bilan kelishiladi).
-- **Do'stlar ro'yxati** va yaqin-atrof chat.
-- Markaziy olam **iqtisodiyoti**: umumiy stock hozir "hamma uchun bitta" —
-  per-akkaunt hissa/vitrina, savdo keyinroq.
-- Markaziy olamda binolarning egaligi hozir sessiya-pid bo'yicha (buzish
-  cheklovi uchun) — akkaunt-asosli qilish kerak.
+1. **Graduatsiya UX sayqali**: Tunnel bitgach olam `Won` fazasida 45s
+   (`WORLD_RESET_AFTER`) buyruq qabul qilmaydi — o'yinchiga bu oynani
+   ko'rsatish (sanoq/xabar) yoki graduatsiya-g'alabani reset'siz qilish
+   (dizayn tanlovi).
+2. **`GameState::tile()` delta-snapshot ehtiyotkorligi**: xom protokol
+   iste'molchilari (bot/vosita) uchun o'tkir qirra — `tiles` bo'sh delta
+   snapshot'da indeksdan panik qiladi (klientning `GameView` birlashtiruvi
+   bundan himoya qiladi, lekin hujjatlash yoki `Option` qaytarish kerak).
+3. **Lokalizatsiya (uz/en/ru)** va sozlamalar menyusi — V1.0 ro'yxatidan.
+4. **CI/CD (GitHub Actions)** — test + artefaktlar; deploy hozir serverda
+   `deploy.sh` orqali.
+5. **Interest management / gateway shardlash** — 1000+ concurrent uchun;
+   100 klientgacha hozirgi arxitektura o'lchab tasdiqlangan.
+6. **Markaziy olam savdo/e'lonlar taxtasi** — hissa daftari (`central_ledger`)
+   endi bor, uning ustiga quriladi.
