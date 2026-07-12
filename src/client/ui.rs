@@ -791,7 +791,7 @@ pub fn selection_panel_update(
         BuildingKind::CoalMine => format!(
             "+{:.0} coal/day at full crew.\nDeposit remaining: {}.",
             b.kind.production_per_worker_day() * b.kind.max_workers() as f32,
-            state.tile(b.x, b.y).deposit,
+            state.tile(b.x, b.y).map_or(0, |t| t.deposit),
         ),
         BuildingKind::HunterHut => format!(
             "+{:.0} food/day at full crew.",

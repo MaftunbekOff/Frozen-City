@@ -649,8 +649,14 @@ impl GameState {
         (FURNACE_X as f32 + 1.0, FURNACE_Y as f32 + 1.0)
     }
 
-    pub fn tile(&self, x: u8, y: u8) -> &Tile {
-        &self.tiles[tile_index(x, y)]
+    /// The tile at `(x, y)`, or `None` when the coordinates are out of
+    /// bounds — or when `tiles` itself is short/empty, which is what a raw
+    /// protocol consumer holds on a delta snapshot (`Included { tiles: false }`
+    /// ships `tiles: Vec::new()`; the client's `GameView` merge refills it,
+    /// but nothing forces other consumers to). Indexing here used to panic
+    /// on exactly that case.
+    pub fn tile(&self, x: u8, y: u8) -> Option<&Tile> {
+        self.tiles.get(tile_index(x, y))
     }
 
     pub fn building_at(&self, x: u8, y: u8) -> Option<&Building> {
@@ -865,7 +871,9 @@ impl GameState {
                 if self.building_at(tx, ty).is_some() {
                     return Err("Space is occupied");
                 }
-                let tile = self.tile(tx, ty);
+                let Some(tile) = self.tile(tx, ty) else {
+                    return Err("Out of bounds");
+                };
                 match kind {
                     BuildingKind::CoalMine => {
                         if tile.terrain != Terrain::Coal || tile.deposit == 0 {

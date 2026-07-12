@@ -17,6 +17,17 @@ fn mapgen_is_deterministic() {
 }
 
 #[test]
+fn tile_lookup_survives_delta_snapshot_state() {
+    // A raw protocol consumer holds `tiles: Vec::new()` between full
+    // snapshots (`Included { tiles: false }` ships the grid empty) — tile()
+    // must answer None there, not panic on the indexing.
+    let mut state = sim::new_game(7, 12);
+    state.tiles = Vec::new();
+    assert!(state.tile(0, 0).is_none());
+    assert!(state.tile(30, 30).is_none());
+}
+
+#[test]
 fn mapgen_has_resources_and_clear_center() {
     let state = sim::new_game(7, 12);
     let forest = state
@@ -35,7 +46,7 @@ fn mapgen_has_resources_and_clear_center() {
     for y in 29..=34u8 {
         for x in 29..=34u8 {
             if GameState::dist_to_furnace(x, y) < 4.0 {
-                assert_eq!(state.tile(x, y).terrain, Terrain::Snow);
+                assert_eq!(state.tile(x, y).expect("in bounds").terrain, Terrain::Snow);
             }
         }
     }
