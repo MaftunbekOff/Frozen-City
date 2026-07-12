@@ -9,13 +9,15 @@ use bevy::prelude::*;
 use frozen_city::game::types::MAX_CHAT_LEN;
 use frozen_city::net::protocol::ClientMsg;
 
+use super::i18n::Lang;
+use super::i18n_menu as mtxt;
 use super::render::{AvatarViz, AvatarWalk, CursorMarker, CursorViz};
+use super::theme;
 use super::{player_color, GameView, NetConn, Screen};
 
 /// How many recent chat lines the on-screen log shows.
 const CHAT_LINES: usize = 7;
-const SYSTEM_COLOR: Color = Color::srgb(0.62, 0.68, 0.78);
-const INPUT_BG: Color = Color::srgba(0.02, 0.04, 0.08, 0.92);
+const SYSTEM_COLOR: Color = theme::TEXT_MUTED;
 /// How long a floating nearby-chat bubble stays over its sender before
 /// despawning, and how much of that tail is spent fading out.
 const BUBBLE_LIFETIME: f32 = 7.0;
@@ -63,7 +65,7 @@ pub fn plugin(app: &mut App) {
         );
 }
 
-fn spawn_chat_ui(mut commands: Commands) {
+fn spawn_chat_ui(mut commands: Commands, lang: Res<Lang>) {
     // Rolling log, stacked upward from just above the input box.
     commands
         .spawn((
@@ -99,9 +101,7 @@ fn spawn_chat_ui(mut commands: Commands) {
             bottom: Val::Px(148.0),
             ..default()
         },
-        Text::new("Enter to send   \"/l text\" = nearby chat (bubble, no log)   Esc cancel"),
-        TextFont::from_font_size(11.5),
-        TextColor(SYSTEM_COLOR),
+        theme::text(mtxt::chat_hint(*lang), theme::FS_MICRO, theme::TEXT_MUTED),
         ChatHintText,
         DespawnOnExit(Screen::Game),
     ));
@@ -115,20 +115,17 @@ fn spawn_chat_ui(mut commands: Commands) {
                 left: Val::Px(12.0),
                 bottom: Val::Px(120.0),
                 width: Val::Px(420.0),
-                padding: UiRect::axes(Val::Px(8.0), Val::Px(5.0)),
+                padding: UiRect::axes(Val::Px(theme::SP_SM), Val::Px(theme::SP_XS)),
+                border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
                 ..default()
             },
-            BackgroundColor(INPUT_BG),
+            BackgroundColor(theme::BG_SECTION),
             ChatInputRoot,
             DespawnOnExit(Screen::Game),
         ))
         .with_children(|p| {
-            p.spawn((
-                Text::new(""),
-                TextFont::from_font_size(14.0),
-                TextColor(Color::srgb(0.92, 0.95, 1.0)),
-                ChatInputText,
-            ));
+            p.spawn(theme::text("", theme::FS_BODY, theme::TEXT_PRIMARY))
+                .insert(ChatInputText);
         });
 }
 

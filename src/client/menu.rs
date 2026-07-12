@@ -11,18 +11,18 @@ use frozen_city::net::server::{self, ServerConfig};
 use frozen_city::net::protocol::ClientMsg;
 
 use super::i18n::{self, Lang};
-use super::ui::BaseColor;
+use super::i18n_menu as mtxt;
+use super::theme::{self, BaseColor, FormFactor};
 use super::*;
 
-const BTN_BG: Color = Color::srgb(0.14, 0.19, 0.27);
-const TEXT_MAIN: Color = Color::srgb(0.90, 0.93, 0.97);
-const TEXT_DIM: Color = Color::srgb(0.58, 0.65, 0.76);
-const FIELD_BG: Color = Color::srgba(0.02, 0.04, 0.08, 0.92);
-const FIELD_FOCUS_BG: Color = Color::srgb(0.10, 0.16, 0.26);
+/// Field-box background: idle / focused. Distinct from `theme::BG_SECTION`
+/// so the account fields still read as inputs rather than cards.
+const FIELD_BG: Color = Color::srgba(0.020, 0.040, 0.080, 0.92);
+const FIELD_FOCUS_BG: Color = Color::srgb(0.100, 0.160, 0.260);
 /// Highlight for whichever region button matches the live `join_addr` path,
 /// and (native and web alike) whichever Language/Graphics/Sound setting
 /// button matches the current preference.
-const BTN_ACTIVE: Color = Color::srgb(0.24, 0.36, 0.52);
+const BTN_ACTIVE: Color = theme::BTN_ACTIVE;
 /// Anti-runaway-buffer cap on the account fields; the server never trusts
 /// the client anyway (a login/password pair is just looked up against the
 /// accounts DB, whatever their length).
@@ -124,9 +124,10 @@ pub fn spawn_menu(
     lang: Res<Lang>,
     quality_pref: Res<QualityPref>,
     audio: Res<AudioSettings>,
+    ff: Res<FormFactor>,
 ) {
     let error = view.error.clone().unwrap_or_default();
-    build_menu(commands, &settings, error, *lang, *quality_pref, *audio);
+    build_menu(commands, &settings, error, *lang, *quality_pref, *audio, *ff);
 }
 
 /// The actual menu layout, factored out of the `spawn_menu` system so
@@ -135,6 +136,11 @@ pub fn spawn_menu(
 /// can only be obtained by the scheduler injecting them into a system's
 /// signature, not constructed by hand). Both callers pass an owned/copied
 /// snapshot of each resource, never the resource references themselves.
+///
+/// Layout: a single scrolling column (full-width on Mobile, a centered
+/// ~480px card on Tablet/Desktop) — big title, subtitle, error line, then
+/// four `theme::card` sections (Play / Account / Region / Settings) and a
+/// dim hint footer. Region only appears on wasm (see `RegionButton`'s doc).
 #[allow(clippy::too_many_arguments)]
 fn build_menu(
     mut commands: Commands,
@@ -143,7 +149,9 @@ fn build_menu(
     lang: Lang,
     quality_pref: QualityPref,
     audio: AudioSettings,
+    ff: FormFactor,
 ) {
+    let column_width = if ff.compact() { Val::Percent(100.0) } else { Val::Px(480.0) };
     commands
         .spawn((
             Node {
@@ -153,318 +161,244 @@ fn build_menu(
                 top: Val::Px(0.0),
                 bottom: Val::Px(0.0),
                 flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::Center,
+                justify_content: JustifyContent::FlexStart,
                 align_items: AlignItems::Center,
-                row_gap: Val::Px(14.0),
+                overflow: Overflow::scroll_y(),
                 ..default()
             },
             BackgroundColor(Color::srgb(0.035, 0.055, 0.095)),
+            ScrollPosition::default(),
             DespawnOnExit(Screen::Menu),
             MenuRoot,
         ))
         .with_children(|p| {
             p.spawn((
-                Text::new("FROZEN CITY"),
-                TextFont::from_font_size(58.0),
-                TextColor(Color::srgb(0.72, 0.86, 1.0)),
-            ));
-            p.spawn((
-                Text::new("A cooperative survival colony in the endless winter"),
-                TextFont::from_font_size(16.0),
-                TextColor(TEXT_DIM),
-            ));
-            p.spawn((
-                Text::new(error),
-                TextFont::from_font_size(15.0),
-                TextColor(Color::srgb(0.95, 0.40, 0.35)),
-                MenuErrorText,
-            ));
-
-            // The browser cannot listen for connections or quit the page, so
-            // it only offers Singleplayer and Join.
-            let mut buttons: Vec<(MenuAction, String)> =
-                vec![(MenuAction::Single, "Singleplayer".to_string())];
-            #[cfg(not(target_arch = "wasm32"))]
-            buttons.push((
-                MenuAction::Host,
-                format!("Host Co-op (port {})", settings.host_port),
-            ));
-            buttons.push((
-                MenuAction::Join,
-                format!("Mehmon sifatida: Join {}", settings.join_addr),
-            ));
-            #[cfg(not(target_arch = "wasm32"))]
-            buttons.push((MenuAction::Quit, "Quit".to_string()));
-            for (action, label) in buttons {
-                p.spawn((
-                    Button,
-                    Node {
-                        width: Val::Px(300.0),
-                        height: Val::Px(52.0),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
-                    BackgroundColor(BTN_BG),
-                    BaseColor(BTN_BG),
-                    action,
-                ))
-                .with_children(|b| {
-                    b.spawn((
-                        Text::new(label),
-                        TextFont::from_font_size(17.0),
-                        TextColor(TEXT_MAIN),
-                    ));
-                });
-            }
-
-            // Region picker: which reverse-proxy path (and thus which
-            // independent region-server process) Join/Kirish dial. Native
-            // desktop only ever dials a LAN address directly, so this row
-            // is browser-only.
-            #[cfg(target_arch = "wasm32")]
-            {
-                p.spawn((
-                    Text::new("Mintaqa:"),
-                    TextFont::from_font_size(13.0),
-                    TextColor(TEXT_DIM),
-                ));
-                p.spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(8.0),
-                    align_items: AlignItems::Center,
-                    ..default()
-                })
-                .with_children(|row| {
-                    for (path, label) in [
-                        ("/ws", "1-mintaqa"),
-                        ("/ws-r2", "2-mintaqa"),
-                        ("/ws-r3", "3-mintaqa"),
-                    ] {
-                        row.spawn((
-                            Button,
-                            Node {
-                                width: Val::Px(90.0),
-                                height: Val::Px(36.0),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                ..default()
-                            },
-                            BackgroundColor(BTN_BG),
-                            RegionButton(path),
-                        ))
-                        .with_children(|b| {
-                            b.spawn((
-                                Text::new(label),
-                                TextFont::from_font_size(14.0),
-                                TextColor(TEXT_MAIN),
-                            ));
-                        });
-                    }
-                });
-            }
-
-            // Settings block: language, graphics quality, sound — all shown
-            // on every platform (unlike the region picker above, which is
-            // browser-only).
-            p.spawn((
-                Text::new("Til / Language:"),
-                TextFont::from_font_size(13.0),
-                TextColor(TEXT_DIM),
-            ));
-            p.spawn(Node {
-                flex_direction: FlexDirection::Row,
-                column_gap: Val::Px(8.0),
-                align_items: AlignItems::Center,
-                ..default()
-            })
-            .with_children(|row| {
-                for l in [Lang::Uz, Lang::En, Lang::Ru] {
-                    let bg = if lang == l { BTN_ACTIVE } else { BTN_BG };
-                    row.spawn((
-                        Button,
-                        Node {
-                            width: Val::Px(90.0),
-                            height: Val::Px(36.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                        BackgroundColor(bg),
-                        LangButton(l),
-                    ))
-                    .with_children(|b| {
-                        b.spawn((
-                            Text::new(l.label()),
-                            TextFont::from_font_size(14.0),
-                            TextColor(TEXT_MAIN),
-                        ));
-                    });
-                }
-            });
-
-            p.spawn((
-                Text::new("Grafika:"),
-                TextFont::from_font_size(13.0),
-                TextColor(TEXT_DIM),
-            ));
-            p.spawn(Node {
-                flex_direction: FlexDirection::Row,
-                column_gap: Val::Px(8.0),
-                align_items: AlignItems::Center,
-                ..default()
-            })
-            .with_children(|row| {
-                for (q, label) in [
-                    (QualityPref::Auto, "Avto"),
-                    (QualityPref::Low, "Past"),
-                    (QualityPref::Medium, "O'rta"),
-                    (QualityPref::High, "Yuqori"),
-                ] {
-                    let bg = if quality_pref == q { BTN_ACTIVE } else { BTN_BG };
-                    row.spawn((
-                        Button,
-                        Node {
-                            width: Val::Px(80.0),
-                            height: Val::Px(36.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                        BackgroundColor(bg),
-                        QualityButton(q),
-                    ))
-                    .with_children(|b| {
-                        b.spawn((
-                            Text::new(label),
-                            TextFont::from_font_size(14.0),
-                            TextColor(TEXT_MAIN),
-                        ));
-                    });
-                }
-            });
-
-            p.spawn((
-                Text::new("Ovoz:"),
-                TextFont::from_font_size(13.0),
-                TextColor(TEXT_DIM),
-            ));
-            p.spawn((
-                Button,
                 Node {
-                    width: Val::Px(90.0),
-                    height: Val::Px(36.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
+                    width: column_width,
+                    max_width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Stretch,
+                    padding: UiRect::all(Val::Px(theme::SP_MD)).with_top(Val::Px(theme::SP_XL)),
+                    row_gap: Val::Px(theme::SP_LG),
                     ..default()
                 },
-                BackgroundColor(if audio.enabled { BTN_ACTIVE } else { BTN_BG }),
-                AudioToggleButton,
             ))
-            .with_children(|b| {
-                b.spawn((
-                    Text::new(if audio.enabled { "On" } else { "Off" }),
-                    TextFont::from_font_size(14.0),
-                    TextColor(TEXT_MAIN),
-                    AudioToggleLabel,
-                ));
-            });
+            .with_children(|col| {
+                col.spawn(Node {
+                    align_items: AlignItems::Center,
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(theme::SP_XS),
+                    ..default()
+                })
+                .with_children(|head| {
+                    head.spawn(theme::text(mtxt::title(lang), 50.0, theme::TEXT_PRIMARY));
+                    head.spawn(theme::text(mtxt::subtitle(lang), theme::FS_BODY, theme::ACCENT_ICE));
+                    head.spawn((theme::text(error, theme::FS_BODY, theme::DANGER), MenuErrorText));
+                });
 
-            p.spawn((
-                Text::new("Akkaunt bilan kiring, yoki shu yerdan ro'yxatdan o'ting:"),
-                TextFont::from_font_size(13.0),
-                TextColor(TEXT_DIM),
-            ));
-            p.spawn(Node {
-                flex_direction: FlexDirection::Row,
-                column_gap: Val::Px(8.0),
-                align_items: AlignItems::Center,
-                ..default()
-            })
-            .with_children(|row| {
-                // Name is register-only; its box is hidden (Display::None) in
-                // login mode by `update_login_fields`.
-                for field in [AccountField::Name, AccountField::Login, AccountField::Password] {
-                    row.spawn((
-                        Button,
-                        Node {
-                            width: Val::Px(150.0),
-                            height: Val::Px(40.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
+                // ---------------------------------------------------- Play
+                col.spawn(theme::card()).with_children(|section| {
+                    section.spawn(theme::section(mtxt::section_play(lang)));
+                    section.spawn(theme::divider());
+
+                    // The browser cannot listen for connections or quit the
+                    // page, so it only offers Singleplayer and Join.
+                    let mut buttons: Vec<(MenuAction, String)> =
+                        vec![(MenuAction::Single, mtxt::btn_singleplayer(lang).to_string())];
+                    #[cfg(not(target_arch = "wasm32"))]
+                    buttons.push((MenuAction::Host, mtxt::btn_host_coop(lang, settings.host_port)));
+                    buttons.push((MenuAction::Join, mtxt::btn_join_guest(lang, &settings.join_addr)));
+                    #[cfg(not(target_arch = "wasm32"))]
+                    buttons.push((MenuAction::Quit, mtxt::btn_quit(lang).to_string()));
+                    for (action, label) in buttons {
+                        section
+                            .spawn(theme::button(Val::Percent(100.0), ff.btn_h(), theme::BTN))
+                            .insert(action)
+                            .with_children(|b| {
+                                b.spawn(theme::text(label, theme::FS_BODY, theme::TEXT_PRIMARY));
+                            });
+                    }
+                });
+
+                // ---------------------------------------------------Account
+                col.spawn(theme::card()).with_children(|section| {
+                    section.spawn(theme::section(mtxt::section_account(lang)));
+                    section.spawn(theme::divider());
+                    section.spawn(theme::text(mtxt::account_intro(lang), theme::FS_SMALL, theme::TEXT_MUTED));
+
+                    section
+                        .spawn(Node {
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(theme::SP_SM),
                             ..default()
-                        },
-                        BackgroundColor(FIELD_BG),
-                        LoginFieldBox(field),
-                    ))
-                    .with_children(|b| {
-                        b.spawn((
-                            Text::new(""),
-                            TextFont::from_font_size(14.0),
-                            TextColor(TEXT_DIM),
-                            LoginFieldText(field),
-                        ));
-                    });
-                }
-                row.spawn((
-                    Button,
-                    Node {
-                        width: Val::Px(100.0),
-                        height: Val::Px(40.0),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
-                    BackgroundColor(BTN_BG),
-                    BaseColor(BTN_BG),
-                    AccountLoginButton,
-                ))
-                .with_children(|b| {
-                    b.spawn((
-                        Text::new("Kirish"),
-                        TextFont::from_font_size(15.0),
-                        TextColor(TEXT_MAIN),
-                        AccountLoginButtonLabel,
-                    ));
-                });
-                row.spawn((
-                    Button,
-                    Node {
-                        width: Val::Px(180.0),
-                        height: Val::Px(40.0),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
-                    BackgroundColor(FIELD_BG),
-                    BaseColor(FIELD_BG),
-                    RegisterToggleButton,
-                ))
-                .with_children(|b| {
-                    b.spawn((
-                        Text::new("Ro'yxatdan o'tish"),
-                        TextFont::from_font_size(13.0),
-                        TextColor(TEXT_DIM),
-                        RegisterToggleLabel,
-                    ));
-                });
-            });
+                        })
+                        .with_children(|fields| {
+                            // Name is register-only; its box is hidden
+                            // (Display::None) in login mode by
+                            // `update_login_fields`.
+                            for field in
+                                [AccountField::Name, AccountField::Login, AccountField::Password]
+                            {
+                                fields
+                                    .spawn((
+                                        Button,
+                                        Node {
+                                            width: Val::Percent(100.0),
+                                            height: Val::Px(ff.btn_h()),
+                                            justify_content: JustifyContent::FlexStart,
+                                            align_items: AlignItems::Center,
+                                            padding: UiRect::horizontal(Val::Px(theme::SP_MD)),
+                                            border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
+                                            ..default()
+                                        },
+                                        BackgroundColor(FIELD_BG),
+                                        LoginFieldBox(field),
+                                    ))
+                                    .with_children(|b| {
+                                        b.spawn((
+                                            theme::text("", theme::FS_BODY, theme::TEXT_MUTED),
+                                            LoginFieldText(field),
+                                        ));
+                                    });
+                            }
+                        });
 
-            p.spawn((
-                Text::new(format!(
-                    "Playing as {}   |   survive {} days   |   change with --name / --days / --join <ip:port>",
-                    settings.name, settings.win_days
-                )),
-                TextFont::from_font_size(13.0),
-                TextColor(TEXT_DIM),
-            ));
-            p.spawn((
-                Text::new(
-                    "In game: LMB place/select   RMB cancel   1-7 quick build   WASD pan   Q/E rotate   MMB tilt   wheel zoom",
-                ),
-                TextFont::from_font_size(13.0),
-                TextColor(TEXT_DIM),
-            ));
+                    section
+                        .spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            column_gap: Val::Px(theme::SP_SM),
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            row.spawn(theme::button(Val::Percent(50.0), ff.btn_h(), theme::BTN))
+                                .insert(AccountLoginButton)
+                                .with_children(|b| {
+                                    b.spawn((
+                                        theme::text(mtxt::btn_sign_in(lang), theme::FS_BODY, theme::TEXT_PRIMARY),
+                                        AccountLoginButtonLabel,
+                                    ));
+                                });
+                            row.spawn((
+                                Button,
+                                Node {
+                                    width: Val::Percent(50.0),
+                                    height: Val::Px(ff.btn_h()),
+                                    justify_content: JustifyContent::Center,
+                                    align_items: AlignItems::Center,
+                                    border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
+                                    ..default()
+                                },
+                                BackgroundColor(FIELD_BG),
+                                BaseColor(FIELD_BG),
+                                RegisterToggleButton,
+                            ))
+                            .with_children(|b| {
+                                b.spawn((
+                                    theme::text(mtxt::btn_sign_up(lang), theme::FS_SMALL, theme::TEXT_MUTED),
+                                    RegisterToggleLabel,
+                                ));
+                            });
+                        });
+                });
+
+                // ---------------------------------------------------Region
+                // Which reverse-proxy path (and thus which independent
+                // region-server process) Join/sign-in dial. Native desktop
+                // only ever dials a LAN address directly, so this section is
+                // browser-only.
+                #[cfg(target_arch = "wasm32")]
+                col.spawn(theme::card()).with_children(|section| {
+                    section.spawn(theme::section(mtxt::section_region(lang)));
+                    section.spawn(theme::divider());
+                    section.spawn(theme::text(mtxt::region_label(lang), theme::FS_SMALL, theme::TEXT_MUTED));
+                    section
+                        .spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            column_gap: Val::Px(theme::SP_SM),
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            for (n, path) in [(1u8, "/ws"), (2, "/ws-r2"), (3, "/ws-r3")] {
+                                row.spawn(theme::button(Val::Percent(100.0 / 3.0), ff.btn_h(), theme::BTN))
+                                    .insert(RegionButton(path))
+                                    .with_children(|b| {
+                                        b.spawn(theme::text(
+                                            mtxt::region_name(n, lang),
+                                            theme::FS_SMALL,
+                                            theme::TEXT_PRIMARY,
+                                        ));
+                                    });
+                            }
+                        });
+                });
+
+                // -------------------------------------------------Settings
+                col.spawn(theme::card()).with_children(|section| {
+                    section.spawn(theme::section(mtxt::section_settings(lang)));
+                    section.spawn(theme::divider());
+
+                    section.spawn(theme::text(mtxt::language_label(lang), theme::FS_SMALL, theme::TEXT_MUTED));
+                    section
+                        .spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            column_gap: Val::Px(theme::SP_SM),
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            for l in [Lang::Uz, Lang::En, Lang::Ru] {
+                                let bg = if lang == l { BTN_ACTIVE } else { theme::BTN };
+                                row.spawn(theme::button(Val::Percent(100.0 / 3.0), ff.btn_h(), bg))
+                                    .insert(LangButton(l))
+                                    .with_children(|b| {
+                                        b.spawn(theme::text(l.label(), theme::FS_SMALL, theme::TEXT_PRIMARY));
+                                    });
+                            }
+                        });
+
+                    section.spawn(theme::text(mtxt::graphics_label(lang), theme::FS_SMALL, theme::TEXT_MUTED));
+                    section
+                        .spawn(Node {
+                            flex_direction: FlexDirection::Row,
+                            column_gap: Val::Px(theme::SP_SM),
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            for (q, label) in [
+                                (QualityPref::Auto, mtxt::quality_auto(lang)),
+                                (QualityPref::Low, mtxt::quality_low(lang)),
+                                (QualityPref::Medium, mtxt::quality_medium(lang)),
+                                (QualityPref::High, mtxt::quality_high(lang)),
+                            ] {
+                                let bg = if quality_pref == q { BTN_ACTIVE } else { theme::BTN };
+                                row.spawn(theme::button(Val::Percent(25.0), ff.btn_h(), bg))
+                                    .insert(QualityButton(q))
+                                    .with_children(|b| {
+                                        b.spawn(theme::text(label, theme::FS_SMALL, theme::TEXT_PRIMARY));
+                                    });
+                            }
+                        });
+
+                    section.spawn(theme::text(mtxt::sound_label(lang), theme::FS_SMALL, theme::TEXT_MUTED));
+                    section
+                        .spawn(theme::button(
+                            Val::Percent(100.0),
+                            ff.btn_h(),
+                            if audio.enabled { BTN_ACTIVE } else { theme::BTN },
+                        ))
+                        .insert(AudioToggleButton)
+                        .with_children(|b| {
+                            let label = if audio.enabled { mtxt::sound_on(lang) } else { mtxt::sound_off(lang) };
+                            b.spawn((theme::text(label, theme::FS_SMALL, theme::TEXT_PRIMARY), AudioToggleLabel));
+                        });
+                });
+
+                col.spawn(theme::text(
+                    mtxt::hint_playing_as(lang, &settings.name, settings.win_days),
+                    theme::FS_MICRO,
+                    theme::TEXT_FAINT,
+                ));
+                col.spawn(theme::text(mtxt::hint_controls(lang), theme::FS_MICRO, theme::TEXT_FAINT));
+            });
         });
 }
 
@@ -479,6 +413,7 @@ pub fn pending_switch(
     mut session: ResMut<Session>,
     mut next: ResMut<NextState<Screen>>,
     mut error_text: Query<&mut Text, With<MenuErrorText>>,
+    lang: Res<Lang>,
 ) {
     let Some(target) = pending.0.take() else { return };
     // Only account sessions can switch worlds; a guest has neither a personal
@@ -516,10 +451,10 @@ pub fn pending_switch(
     }
     #[cfg(not(target_arch = "wasm32"))]
     let dialed = frozen_city::net::client::connect_tcp_with(&session.join_addr, first_msg)
-        .map_err(|e| format!("Could not join {}: {e}", session.join_addr));
+        .map_err(|e| mtxt::err_could_not_join(*lang, &session.join_addr, &e.to_string()));
     #[cfg(target_arch = "wasm32")]
     let dialed = frozen_city::net::ws::connect_with(&ws_url(&session.join_addr), first_msg)
-        .map_err(|e| format!("Could not join {}: {e}", session.join_addr));
+        .map_err(|e| mtxt::err_could_not_join(*lang, &session.join_addr, &e.to_string()));
     match dialed {
         Ok(conn) => {
             // A token belongs to the world that minted it; the new world
@@ -560,9 +495,11 @@ pub fn autostart(
     mut session: ResMut<Session>,
     mut next: ResMut<NextState<Screen>>,
     mut error_text: Query<&mut Text, With<MenuErrorText>>,
+    lang: Res<Lang>,
 ) {
     let Some(action) = auto.0.take() else { return };
-    let result = start_game(action, &settings, &mut net, &mut server_res, &mut view, &mut session);
+    let result =
+        start_game(action, &settings, &mut net, &mut server_res, &mut view, &mut session, *lang);
     match result {
         Ok(()) => next.set(Screen::Game),
         Err(e) => {
@@ -583,6 +520,7 @@ pub fn menu_buttons(
     mut next: ResMut<NextState<Screen>>,
     mut error_text: Query<&mut Text, With<MenuErrorText>>,
     mut exit: MessageWriter<AppExit>,
+    lang: Res<Lang>,
 ) {
     for (interaction, action) in &q {
         if *interaction != Interaction::Pressed {
@@ -597,7 +535,7 @@ pub fn menu_buttons(
                 return;
             }
         };
-        match start_game(auto, &settings, &mut net, &mut server_res, &mut view, &mut session) {
+        match start_game(auto, &settings, &mut net, &mut server_res, &mut view, &mut session, *lang) {
             Ok(()) => next.set(Screen::Game),
             Err(e) => {
                 if let Ok(mut t) = error_text.single_mut() {
@@ -629,7 +567,7 @@ pub fn region_buttons(
         let color = if settings.join_addr.ends_with(btn.0) {
             BTN_ACTIVE
         } else {
-            BTN_BG
+            theme::BTN
         };
         if bg.0 != color {
             bg.0 = color;
@@ -666,6 +604,7 @@ pub fn lang_buttons(
     view: Res<GameView>,
     quality_pref: Res<QualityPref>,
     audio: Res<AudioSettings>,
+    ff: Res<FormFactor>,
 ) {
     for (interaction, btn) in &clicked {
         if *interaction != Interaction::Pressed || btn.0 == *lang {
@@ -677,7 +616,7 @@ pub fn lang_buttons(
             commands.entity(e).despawn();
         }
         let error = view.error.clone().unwrap_or_default();
-        build_menu(commands, &settings, error, *lang, *quality_pref, *audio);
+        build_menu(commands, &settings, error, *lang, *quality_pref, *audio, *ff);
         return;
     }
 }
@@ -700,7 +639,7 @@ pub fn quality_buttons(
         }
     }
     for (btn, mut bg) in &mut all {
-        let color = if btn.0 == *pref { BTN_ACTIVE } else { BTN_BG };
+        let color = if btn.0 == *pref { BTN_ACTIVE } else { theme::BTN };
         if bg.0 != color {
             bg.0 = color;
         }
@@ -729,17 +668,18 @@ pub fn audio_toggle_button(
 /// `Interaction` never fires `Changed` on its own).
 pub fn update_settings_buttons(
     audio: Res<AudioSettings>,
+    lang: Res<Lang>,
     mut audio_bg: Query<&mut BackgroundColor, With<AudioToggleButton>>,
     mut audio_label: Query<&mut Text, With<AudioToggleLabel>>,
 ) {
     if let Ok(mut bg) = audio_bg.single_mut() {
-        let color = if audio.enabled { BTN_ACTIVE } else { BTN_BG };
+        let color = if audio.enabled { BTN_ACTIVE } else { theme::BTN };
         if bg.0 != color {
             bg.0 = color;
         }
     }
     if let Ok(mut t) = audio_label.single_mut() {
-        let label = if audio.enabled { "On" } else { "Off" };
+        let label = if audio.enabled { mtxt::sound_on(*lang) } else { mtxt::sound_off(*lang) };
         if t.0 != label {
             t.0 = label.to_string();
         }
@@ -753,6 +693,7 @@ fn start_game(
     server_res: &mut ServerRes,
     view: &mut GameView,
     session: &mut Session,
+    lang: Lang,
 ) -> Result<(), String> {
     let conn = match action {
         AutoAction::Single | AutoAction::Host => {
@@ -775,7 +716,7 @@ fn start_game(
                     world_manager: None,
                 };
                 let handle = server::start(config)
-                    .map_err(|e| format!("Could not start the server: {e}"))?;
+                    .map_err(|e| mtxt::err_could_not_start_server(lang, &e.to_string()))?;
                 let conn = server::connect_local(&handle, settings.name.clone());
                 server_res.0 = Some(handle);
                 conn
@@ -783,10 +724,7 @@ fn start_game(
             #[cfg(target_arch = "wasm32")]
             let conn = {
                 if action == AutoAction::Host {
-                    return Err(
-                        "Hosting runs on desktop or a dedicated server; the browser can only join."
-                            .to_string(),
-                    );
+                    return Err(mtxt::err_hosting_desktop_only(lang).to_string());
                 }
                 let (local, conn) =
                     super::local_server::start(seed, settings.win_days, &settings.name);
@@ -799,11 +737,11 @@ fn start_game(
             #[cfg(not(target_arch = "wasm32"))]
             let conn =
                 frozen_city::net::client::connect_tcp(&settings.join_addr, &settings.name, None)
-                    .map_err(|e| format!("Could not join {}: {e}", settings.join_addr))?;
+                    .map_err(|e| mtxt::err_could_not_join(lang, &settings.join_addr, &e.to_string()))?;
             #[cfg(target_arch = "wasm32")]
             let conn =
                 frozen_city::net::ws::connect(&ws_url(&settings.join_addr), &settings.name, None)
-                    .map_err(|e| format!("Could not join {}: {e}", settings.join_addr))?;
+                    .map_err(|e| mtxt::err_could_not_join(lang, &settings.join_addr, &e.to_string()))?;
             conn
         }
     };
@@ -849,6 +787,7 @@ pub fn login_form_keyboard(
     mut session: ResMut<Session>,
     mut next: ResMut<NextState<Screen>>,
     mut error_text: Query<&mut Text, With<MenuErrorText>>,
+    lang: Res<Lang>,
 ) {
     let Some(focus) = form.focus else {
         return;
@@ -862,7 +801,7 @@ pub fn login_form_keyboard(
                 form.focus = Some(next_field(focus, form.register));
             }
             Key::Enter if !ev.repeat => {
-                match submit(&form, &settings, &mut net, &mut view, &mut session) {
+                match submit(&form, &settings, &mut net, &mut view, &mut session, *lang) {
                     Ok(()) => next.set(Screen::Game),
                     Err(e) => {
                         if let Ok(mut t) = error_text.single_mut() {
@@ -933,12 +872,13 @@ pub fn account_login_button(
     mut session: ResMut<Session>,
     mut next: ResMut<NextState<Screen>>,
     mut error_text: Query<&mut Text, With<MenuErrorText>>,
+    lang: Res<Lang>,
 ) {
     for interaction in &q {
         if *interaction != Interaction::Pressed {
             continue;
         }
-        match submit(&form, &settings, &mut net, &mut view, &mut session) {
+        match submit(&form, &settings, &mut net, &mut view, &mut session, *lang) {
             Ok(()) => next.set(Screen::Game),
             Err(e) => {
                 if let Ok(mut t) = error_text.single_mut() {
@@ -973,11 +913,12 @@ fn submit(
     net: &mut NetConn,
     view: &mut GameView,
     session: &mut Session,
+    lang: Lang,
 ) -> Result<(), String> {
     if form.register {
-        submit_register(form, settings, net, view, session)
+        submit_register(form, settings, net, view, session, lang)
     } else {
-        submit_login(form, settings, net, view, session)
+        submit_login(form, settings, net, view, session, lang)
     }
 }
 
@@ -991,11 +932,12 @@ fn submit_login(
     net: &mut NetConn,
     view: &mut GameView,
     session: &mut Session,
+    lang: Lang,
 ) -> Result<(), String> {
     let login = form.login.trim();
     let password = form.password.trim();
     if login.is_empty() || password.is_empty() {
-        return Err("Login va parolni kiriting.".to_string());
+        return Err(mtxt::err_login_password_required(lang).to_string());
     }
     let hello = ClientMsg::Login {
         login: login.to_string(),
@@ -1010,10 +952,10 @@ fn submit_login(
     let addr = settings.join_addr.clone();
     #[cfg(not(target_arch = "wasm32"))]
     let conn = frozen_city::net::client::connect_tcp_with(&addr, hello)
-        .map_err(|e| format!("Could not join {addr}: {e}"))?;
+        .map_err(|e| mtxt::err_could_not_join(lang, &addr, &e.to_string()))?;
     #[cfg(target_arch = "wasm32")]
     let conn = frozen_city::net::ws::connect_with(&ws_url(&addr), hello)
-        .map_err(|e| format!("Could not join {addr}: {e}"))?;
+        .map_err(|e| mtxt::err_could_not_join(lang, &addr, &e.to_string()))?;
 
     *session = Session {
         join_addr: addr,
@@ -1043,12 +985,13 @@ fn submit_register(
     net: &mut NetConn,
     view: &mut GameView,
     session: &mut Session,
+    lang: Lang,
 ) -> Result<(), String> {
     let login = form.login.trim();
     let password = form.password.trim();
     let name = form.name.trim();
     if login.is_empty() || password.is_empty() || name.is_empty() {
-        return Err("Ism, login va parolni kiriting.".to_string());
+        return Err(mtxt::err_register_fields_required(lang).to_string());
     }
     let hello = ClientMsg::Register {
         login: login.to_string(),
@@ -1062,10 +1005,10 @@ fn submit_register(
     let addr = settings.join_addr.clone();
     #[cfg(not(target_arch = "wasm32"))]
     let conn = frozen_city::net::client::connect_tcp_with(&addr, hello)
-        .map_err(|e| format!("Could not join {addr}: {e}"))?;
+        .map_err(|e| mtxt::err_could_not_join(lang, &addr, &e.to_string()))?;
     #[cfg(target_arch = "wasm32")]
     let conn = frozen_city::net::ws::connect_with(&ws_url(&addr), hello)
-        .map_err(|e| format!("Could not join {addr}: {e}"))?;
+        .map_err(|e| mtxt::err_could_not_join(lang, &addr, &e.to_string()))?;
 
     // The freshly created account signs in with the same login/password the
     // player just chose — later reconnects (and Tunnel world-switches) replay
@@ -1096,6 +1039,7 @@ fn submit_register(
 /// codebase, e.g. `roster.rs::update_roster`).
 pub fn update_login_fields(
     form: Res<LoginForm>,
+    lang: Res<Lang>,
     mut boxes: Query<(&LoginFieldBox, &mut BackgroundColor, &mut Node)>,
     mut texts: Query<(&LoginFieldText, &mut Text, &mut TextColor)>,
 ) {
@@ -1119,13 +1063,15 @@ pub fn update_login_fields(
     }
     for (marker, mut text, mut color) in &mut texts {
         let (value, masked, placeholder) = match marker.0 {
-            AccountField::Login => (form.login.as_str(), false, "Login"),
-            AccountField::Password => (form.password.as_str(), true, "Parol"),
-            AccountField::Name => (form.name.as_str(), false, "Ism"),
+            AccountField::Login => (form.login.as_str(), false, mtxt::field_login_placeholder(*lang)),
+            AccountField::Password => {
+                (form.password.as_str(), true, mtxt::field_password_placeholder(*lang))
+            }
+            AccountField::Name => (form.name.as_str(), false, mtxt::field_name_placeholder(*lang)),
         };
         let focused = form.focus == Some(marker.0);
         let (new, c) = if value.is_empty() && !focused {
-            (placeholder.to_string(), TEXT_DIM)
+            (placeholder.to_string(), theme::TEXT_MUTED)
         } else {
             let shown = if masked {
                 "*".repeat(value.chars().count())
@@ -1133,7 +1079,7 @@ pub fn update_login_fields(
                 value.to_string()
             };
             let cursor = if focused { "_" } else { "" };
-            (format!("{shown}{cursor}"), TEXT_MAIN)
+            (format!("{shown}{cursor}"), theme::TEXT_PRIMARY)
         };
         if text.0 != new {
             text.0 = new;
@@ -1148,6 +1094,7 @@ pub fn update_login_fields(
 /// between the two modes.
 pub fn update_register_toggle(
     form: Res<LoginForm>,
+    lang: Res<Lang>,
     mut submit_label: Query<
         &mut Text,
         (With<AccountLoginButtonLabel>, Without<RegisterToggleLabel>),
@@ -1158,9 +1105,9 @@ pub fn update_register_toggle(
     >,
 ) {
     let (submit, toggle) = if form.register {
-        ("Ro'yxatdan o'tish", "Kirish rejimi")
+        (mtxt::btn_sign_up(*lang), mtxt::btn_switch_to_sign_in(*lang))
     } else {
-        ("Kirish", "Ro'yxatdan o'tish")
+        (mtxt::btn_sign_in(*lang), mtxt::btn_sign_up(*lang))
     };
     if let Ok(mut t) = submit_label.single_mut() {
         if t.0 != submit {
