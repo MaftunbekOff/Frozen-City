@@ -3,7 +3,13 @@
 > Dolzarb rivojlanish rejasi. Dastlabki dizayn-hujjat: [PLAN.md](PLAN.md).
 > Yangilangan: 2026-07-12.
 
-## Hozirgi holat (V0.1–V0.6 — barchasi tayyor; keyingisi V1.0)
+## Hozirgi holat (V0.1–V0.7 — barchasi tayyor; keyingisi V1.0)
+
+**2026-07-12 (kech):** V0.7 — aholi boshqaruvi — yakunlandi (rejaga keyin
+qo'shilgan bosqich, batafsili "V0.7" bo'limida): aholini tanlab yurgizish
+(`MoveSurvivor`), yetakchi tayinlash (`SetLeader`, bonus/motam), 6 kasb,
+XP/darajalar, koloniya morale, roster'da tafsilot kartasi. Saqlov FCWORLD4
+(V3→V4 migratsiya). 6 yangi test-fayl; test/clippy/wasm/smoke to'rttalasi toza.
 
 **2026-07-12:** V0.4, V0.5 va V0.6 to'liq yakunlandi (batafsili har bo'limda):
 client-ichidan ro'yxatdan o'tish, social panel (do'stlar/taklif/tashrif),
@@ -407,6 +413,51 @@ bo'g'in, va deploy'dan oldin haqiqiy production saqlovlar nusxasini
 
 ---
 
+## V0.7 — Aholi boshqaruvi (harakat, yetakchi, kasb, XP, morale)
+
+**Maqsad:** aholini anonim ish-kuchi hisoblagichidan boshqariladigan, o'ziga
+xos personajlarga aylantirish.
+
+**Holat: ✅ to'liq bajarildi (2026-07-12).** Dastlabki rejada bu bosqich yo'q
+edi (V0.6 → V1.0); alohida bosqich sifatida keyin qo'shildi.
+
+### Vazifalar
+
+- [x] **Harakat buyrug'i** (`ClientMsg::MoveSurvivor`): egasi aholini tanlab
+      xaritadagi istalgan katakka yuboradi; buyruq aholini ishdan bo'shatadi;
+      pozitsiyalar (`Survivor.x/y`) server-avtoritativ, klientda silliqlangan
+      animatsiya, touch'da ham ishlaydi (`tests/movement_tests.rs`,
+      `tests/survivor_control_e2e.rs`).
+- [x] **Yetakchi** (`ClientMsg::SetLeader`, owner-only): tirik yetakchi butun
+      shaharga +8% ishlab chiqarish (`LEADER_PRODUCTION_BONUS`); o'lsa bir
+      o'yin-kun motam −15% (`MOURNING_PRODUCTION_PENALTY`); voqealarga javob
+      (`RespondEvent`) endi tirik yetakchini talab qiladi
+      (`tests/leader_tests.rs`). Markaziy olamda yetakchi yo'q
+      (`GameState::leader = None`).
+- [x] **Kasblar**: 6 kasb (o'tinchi/konchi/ovchi/fermer/shifokor/oshpaz),
+      aholi id'sidan deterministik; kasbga mos binoda +25%
+      (`PROFESSION_MATCH_BONUS`) (`tests/profession_tests.rs`).
+- [x] **XP/darajalar**: biriktirilgan bino turida ishlaganda XP yig'iladi,
+      3 darajagacha (+5%/daraja); boshqa bino turiga o'tkazilsa XP nolga
+      qaytadi, ishdan bo'shatish esa XP'ni saqlaydi (`tests/xp_tests.rs`).
+- [x] **Koloniya morale (0–100)**: o'lim/ochlik/bo'ron pasaytiradi,
+      oshxona/kasalxona/yetakchi ko'taradi, baseline tomon drift; ishlab
+      chiqarishga ko'paytma bo'lib kiradi (`GameState::morale_multiplier`,
+      `tests/morale_tests.rs`); HUD'da ko'rsatkich.
+- [x] **Aholi tafsilot kartasi** roster panelida: kasb, daraja, holat —
+      har doim ochiladigan kichik panel (`src/client/roster.rs`).
+- [x] **Saqlov FCWORLD4**: V3→V4 migratsiya `legacy.rs` zanjirida (V1→V2→V3→V4).
+      Eski binary V4'ni o'qiy olmaydi — rollback saqlovlarni ham qaytarishni
+      talab qiladi.
+
+### Natija mezonlari
+
+- [x] To'liq release test to'plami yashil (6 yangi test-fayl bilan),
+      `clippy --all-targets` toza, wasm check toza, native smoke exit 0
+      (2026-07-12 ~14:10 UTC'da to'rttalasi tasdiqlangan).
+
+---
+
 ## V1.0 — Sayqal va tarqatish
 
 **Maqsad:** keng auditoriyaga chiqishga tayyor mahsulot.
@@ -467,6 +518,7 @@ bo'g'in, va deploy'dan oldin haqiqiy production saqlovlar nusxasini
 | V0.4 Akkauntlar + doimiy olamlar | ✅ bajarildi (2026-07-12) | Taklif va hub uchun identity + persistensiya shart |
 | V0.5 Global Olam (hub) | ✅ bajarildi (2026-07-12) — interest management V1.0+ ga qoldirildi | Eng katta yangi ish edi: yengil avatar rejimi + masshtab |
 | V0.6 Taklif + mehmon co-op | ✅ bajarildi (2026-07-12) | Vizyon halqasi yopildi |
+| V0.7 Aholi boshqaruvi | ✅ bajarildi (2026-07-12) | Aholi shaxsiylashuvi: yetakchi/kasb/XP/morale — retention chuqurligi |
 | V1.0 Sayqal + tarqatish | qisman (yuqoriga qarang) | Keng auditoriyadan oldin oxirgi qatlam |
 
 **Keyingi konkret qadamlar (V1.0 yo'lida, 2026-07-12 holatiga):**
