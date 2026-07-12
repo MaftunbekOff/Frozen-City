@@ -472,8 +472,27 @@ edi (V0.6 → V1.0); alohida bosqich sifatida keyin qo'shildi.
       materiallari (draw-call kamaytirish), release `strip`, Cargo.lock tracked,
       build-web.sh wasm o'lchamini ko'rsatadi, ✅ wasm-opt (binaryen), ✅ delta-snapshot
       + freym siqish (V0.2'da). Qoldi: bevy feature-trim.
-- [ ] **Lokalizatsiya**: uz / en / ru; accessibility (rang-ko'r palitra, shrift).
-- [ ] **Sozlamalar menyusi**: grafika darajasi, ovoz, til.
+- [~] **Lokalizatsiya** (2026-07-12): ✅ butun KLIENT UI uch tilda (uz/en/ru) —
+      i18n qatlami tashqi crate'siz (`i18n.rs` + soha kataloglari `i18n_menu/
+      i18n_hud/i18n_panels/i18n_names.rs`, har matn exhaustive-match funksiya:
+      tarjima tushib qolsa kompilyatsiya xatosi); kirill uchun DejaVu Sans Mono
+      binary'ga embed qilinib standart shrift almashtirilgan; til tanlash:
+      menyu / `?lang=` / `--lang`, tanlov saqlanadi (web localStorage, native
+      `~/.frozen-city/settings.kv`). QOLDI: server-tomonda yaratiladigan matnlar
+      (voqealar lentasi `GameEvent.text`, auth/social javoblari) — protokolga
+      message-key enum talab qiladi (append-only, saqlov ta'siri bilan) —
+      alohida keyingi qadam; accessibility (rang-ko'r palitra).
+- [x] **Sozlamalar menyusi** (2026-07-12): til / grafika darajasi
+      (Avto-Past-O'rta-Yuqori, keyingi ishga tushirishda kuchga kiradi) / ovoz
+      on-off — menyuning SOZLAMALAR bo'limida, barchasi saqlanadi.
+- [x] **UI dizayn-tizimi va moslashuvchan layout** (2026-07-12, rejadan
+      tashqari qo'shildi): `theme.rs` — yagona palitra ("muz" vizual tili),
+      tipografika/masofa shkalasi, `FormFactor` (Mobile<720/Tablet<1160/
+      Desktop) va umumiy vidjetlar (panel/scrim/card/button). Barcha UI
+      qayta ishlangan: mobilda modallar pastki-varaq (bottom sheet), qurish
+      paneli gorizontal scroll + ≥46px barmoq nishonlari, HUD ikki qatorli
+      kompakt; UiScale endi 0.8 dan pastga tushmaydi. Qayta ishlashda 3 ta
+      yashirin ECS query-konflikt smoke-gate'da ushlanib tuzatildi.
 - [ ] **CI/CD**: GitHub Actions — test + Windows/Linux/macOS/wasm artefaktlari.
 - [~] **PWA**: ✅ bosh ekranga o'rnatish (manifest + service worker + ikonkalar,
       network-first strategiya). Qoldi: Android, keyin iOS (native qadoqlash).
@@ -531,12 +550,20 @@ edi (V0.6 → V1.0); alohida bosqich sifatida keyin qo'shildi.
 2. ~~**`GameState::tile()` delta-snapshot ehtiyotkorligi**~~ ✅ bajarildi
    (2026-07-12): `tile()` endi `Option<&Tile>` qaytaradi (`tiles.get`) —
    bo'sh/delta holatda panik o'rniga `None`; chaqiruvchilar moslandi.
-3. **Lokalizatsiya (uz/en/ru)** va sozlamalar menyusi — V1.0 ro'yxatidan.
-4. **CI/CD (GitHub Actions)** — test + artefaktlar; deploy hozir serverda
+3. ~~**Lokalizatsiya (uz/en/ru)** va sozlamalar menyusi~~ ✅ bajarildi
+   (2026-07-12): klient UI to'liq uch tilda + sozlamalar (til/grafika/ovoz,
+   saqlanadi) + dizayn-tizim/responsive qayta ishlash — batafsili "V1.0"
+   bo'limida. Qoldiq: server matnlari (voqealar lentasi) protokol
+   message-key'lari orqali — quyidagi 4-band bilan birga rejalashtirilsin.
+4. **Server matnlarini lokalizatsiya qilish** — `GameEvent.text` o'rniga
+   message-key enum + parametrlar (protokol append-only, saqlovda eski
+   String'lar bilan moslik kerak); shundan keyin voqealar lentasi ham uch
+   tilda bo'ladi.
+5. **CI/CD (GitHub Actions)** — test + artefaktlar; deploy hozir serverda
    `deploy.sh` orqali.
-5. **Interest management / gateway shardlash** — 1000+ concurrent uchun;
+6. **Interest management / gateway shardlash** — 1000+ concurrent uchun;
    100 klientgacha hozirgi arxitektura o'lchab tasdiqlangan.
-6. **Markaziy olam savdo/e'lonlar taxtasi** — hissa daftari (`central_ledger`)
+7. **Markaziy olam savdo/e'lonlar taxtasi** — hissa daftari (`central_ledger`)
    endi bor, uning ustiga quriladi.
 
 Shu kunning o'zida yopilgan ikki mayda qoldiq: `Invited` endi ikki
