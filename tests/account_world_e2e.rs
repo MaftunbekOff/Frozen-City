@@ -113,6 +113,7 @@ fn start(seed: u64, wm: std::sync::Arc<WorldManager>) -> server::ServerHandle {
             central: false,
             owner_account: None,
             invites: None,
+            world_manager: None,
         },
         wm,
     )

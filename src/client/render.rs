@@ -60,6 +60,11 @@ pub struct GameAssets {
     /// One material per player-palette color for remote-player cursor
     /// markers (dimmer emissive than `ping_mats`), shared so cursors batch.
     pub cursor_mats: [Handle<StandardMaterial>; 8],
+    /// One body material per player-palette color for the central-world
+    /// light avatars (see `AvatarViz`) — a plain (non-emissive) tint so
+    /// avatars read as people, not markers; shared so avatars of the same
+    /// color batch into one draw call, same trick as `survivor_mats`.
+    pub avatar_mats: [Handle<StandardMaterial>; 8],
     /// One body material per `BuildingKind` (see `ALL_KINDS`), shared so
     /// every building of the same kind batches into one draw call.
     pub building_mats: [Handle<StandardMaterial>; 9],
@@ -111,6 +116,14 @@ pub struct CursorViz(pub HashMap<u64, (Entity, Entity)>);
 #[derive(Resource, Default)]
 pub struct PingViz(pub HashMap<(u64, u64, u32, u32), Entity>);
 
+/// Central-world light avatars: one body + one screen-space name label per
+/// connected player (including the local player — everyone sees everyone,
+/// unlike `CursorViz` which skips "me"). Only populated while
+/// `GameState.central` is true; `sync_player_cursors` keeps its normal
+/// marker-cursor behavior in every other world unchanged.
+#[derive(Resource, Default)]
+pub struct AvatarViz(pub HashMap<u64, (Entity, Entity)>);
+
 // --------------------------------------------------------------- components
 
 #[derive(Component)]
@@ -159,6 +172,26 @@ pub struct PingMarker;
 /// UI text node that follows a remote player's cursor on screen.
 #[derive(Component)]
 pub struct CursorLabel {
+    pub player: u64,
+}
+
+/// Central-world light-avatar body: walks (lerps) toward the owning
+/// player's synced cursor tile. Distinct from `CursorMarker` (which floats a
+/// marker cone above the cursor in every other world) and from `Wander`
+/// (survivor idle wandering around a fixed home) — an avatar has neither a
+/// fixed home nor autonomous wandering, it only ever chases the live cursor.
+#[derive(Component)]
+pub struct AvatarWalk {
+    pub player: u64,
+    pub target: Vec3,
+}
+
+/// UI text node that follows a central-world avatar's name on screen —
+/// same projection idea as `CursorLabel`, kept as a separate type so the two
+/// systems' queries stay disjoint (Bevy 0.19 ECS safety: no query ever needs
+/// `Without<CursorLabel>` just to also see `AvatarLabel`, they're unrelated).
+#[derive(Component)]
+pub struct AvatarLabel {
     pub player: u64,
 }
 
@@ -321,6 +354,14 @@ pub fn setup_camera_and_assets(
                 ..default()
             })
         }),
+        avatar_mats: std::array::from_fn(|i| {
+            let c = player_color(i as u8);
+            materials.add(StandardMaterial {
+                base_color: c,
+                perceptual_roughness: 0.85,
+                ..default()
+            })
+        }),
         building_mats: std::array::from_fn(|i| {
             materials.add(StandardMaterial {
                 base_color: kind_color(ALL_KINDS[i]),
@@ -402,8 +443,15 @@ pub fn enter_game(
     quality: Res<Quality>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut rig: ResMut<super::input::CamRig>,
+    mut transition: ResMut<super::TransitionMsg>,
 ) {
     *rig = super::input::CamRig::default();
+    // A pending transition message (set by whichever button requested this
+    // world switch, just before the menu-frame trip) starts its on-screen
+    // countdown now that the new world has actually loaded — see
+    // `TransitionMsg`'s doc comment for why it isn't shown during the
+    // (single-frame, too-fast-to-read) menu trip itself.
+    transition.age = 0.0;
 
     // Full-screen cold haze for blizzards. `GlobalZIndex(-1)` keeps it behind
     // the HUD (so panels stay clear) and it has no `Interaction`, so it never
@@ -1432,6 +1480,19 @@ pub fn sync_player_cursors(
     let Some(state) = view.state.as_ref() else { return };
     let me = view.player_id.unwrap_or(0);
 
+    // The central world shows light avatars instead (`sync_avatars`) — every
+    // other world keeps this marker-cursor behavior exactly as before. Tear
+    // down any leftover cursor markers so switching into the central world
+    // (a live `GameState.central` flip, not just a fresh connection) doesn't
+    // leave stale cones floating from the last non-central snapshot.
+    if state.central {
+        for (m, l) in viz.0.drain().map(|(_, v)| v) {
+            commands.entity(m).despawn();
+            commands.entity(l).despawn();
+        }
+        return;
+    }
+
     let mut targets: HashMap<u64, Vec3> = HashMap::new();
     for p in &state.players {
         if p.id == me {
@@ -1526,6 +1587,177 @@ pub fn update_cursor_labels(
             None => *vis = Visibility::Hidden,
         }
     }
+}
+
+// ------------------------------------------------------------------ avatars
+
+/// Central-world "light avatar mode": every connected player (including the
+/// local one — this is the hub, everyone should see themselves and each
+/// other as people, not just remote cursors) gets a small low-poly humanoid
+/// that walks toward their synced cursor tile, plus a name tag. Reuses the
+/// survivor capsule mesh and a shared per-color material (`avatar_mats`) so
+/// this costs nothing extra to batch. No-ops outside the central world —
+/// `sync_player_cursors` keeps ownership of every other world's visuals.
+pub fn sync_avatars(
+    mut commands: Commands,
+    view: Res<GameView>,
+    assets: Res<GameAssets>,
+    mut viz: ResMut<AvatarViz>,
+    mut walkers: Query<&mut AvatarWalk>,
+) {
+    let Some(state) = view.state.as_ref() else { return };
+    if !state.central {
+        // Not the central world: drop any leftover avatars (mirrors the
+        // cleanup `sync_player_cursors` does in the opposite direction).
+        if !viz.0.is_empty() {
+            for (body, label) in viz.0.drain().map(|(_, v)| v) {
+                commands.entity(body).despawn();
+                commands.entity(label).despawn();
+            }
+        }
+        return;
+    }
+
+    let mut targets: HashMap<u64, Vec3> = HashMap::new();
+    for p in &state.players {
+        if let Some(c) = p.cursor {
+            targets.insert(p.id, tilef_to_world(c));
+        }
+    }
+
+    for p in &state.players {
+        let Some(&target) = targets.get(&p.id) else { continue };
+        if viz.0.contains_key(&p.id) {
+            continue;
+        }
+        let mat = assets.avatar_mats[(p.color as usize) % assets.avatar_mats.len()].clone();
+        let body = commands
+            .spawn((
+                Mesh3d(assets.capsule.clone()),
+                MeshMaterial3d(mat),
+                Transform::from_translation(target + Vec3::Y * 0.24),
+                AvatarWalk { player: p.id, target },
+                DespawnOnExit(Screen::Game),
+            ))
+            .id();
+        let label = commands
+            .spawn((
+                Text::new(p.name.clone()),
+                TextFont::from_font_size(12.0),
+                TextColor(player_color(p.color)),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(-1000.0),
+                    top: Val::Px(-1000.0),
+                    ..default()
+                },
+                AvatarLabel { player: p.id },
+                DespawnOnExit(Screen::Game),
+            ))
+            .id();
+        viz.0.insert(p.id, (body, label));
+    }
+
+    let gone: Vec<u64> = viz
+        .0
+        .keys()
+        .filter(|id| !targets.contains_key(id))
+        .copied()
+        .collect();
+    for id in gone {
+        if let Some((body, label)) = viz.0.remove(&id) {
+            commands.entity(body).despawn();
+            commands.entity(label).despawn();
+        }
+    }
+
+    // Refresh each walker's chase target (position itself is smoothed in
+    // `animate_avatars`, same split as `sync_player_cursors`/its `q` loop).
+    for mut walker in &mut walkers {
+        if let Some(&target) = targets.get(&walker.player) {
+            walker.target = target;
+        }
+    }
+}
+
+/// Smoothly walks each avatar body toward its current target tile — a
+/// straightforward exponential lerp, same shape as the cursor marker's blend
+/// in `sync_player_cursors`, plus a gentle walking bob.
+pub fn animate_avatars(
+    time: Res<Time>,
+    mut q: Query<(&AvatarWalk, &mut Transform)>,
+) {
+    let blend = 1.0 - (-8.0 * time.delta_secs()).exp();
+    let bob = (time.elapsed_secs() * 6.0).sin().abs() * 0.03;
+    for (walker, mut tr) in &mut q {
+        let goal = walker.target + Vec3::Y * (0.24 + bob);
+        tr.translation = tr.translation.lerp(goal, blend);
+    }
+}
+
+/// Project avatar name tags into screen space — identical idea to
+/// `update_cursor_labels`, kept as its own system since it reads disjoint
+/// component types (`AvatarWalk`/`AvatarLabel` vs `CursorMarker`/
+/// `CursorLabel`), so there is no query-conflict risk between the two.
+pub fn update_avatar_labels(
+    camera: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    bodies: Query<(&AvatarWalk, &Transform)>,
+    mut labels: Query<(&AvatarLabel, &mut Node, &mut Visibility)>,
+) {
+    let Ok((cam, cam_gt)) = camera.single() else { return };
+    let mut screen: HashMap<u64, Option<Vec2>> = HashMap::new();
+    for (w, tr) in &bodies {
+        screen.insert(
+            w.player,
+            cam.world_to_viewport(cam_gt, tr.translation + Vec3::Y * 0.35)
+                .ok(),
+        );
+    }
+    for (label, mut node, mut vis) in &mut labels {
+        match screen.get(&label.player).copied().flatten() {
+            Some(p) => {
+                *vis = Visibility::Visible;
+                node.left = Val::Px(p.x - 20.0);
+                node.top = Val::Px(p.y - 34.0);
+            }
+            None => *vis = Visibility::Hidden,
+        }
+    }
+}
+
+/// World position to anchor a chat bubble above `player`: their rendered
+/// central-world avatar or remote-cursor marker if one currently exists
+/// (smoothed, so the bubble tracks their walk/cursor motion), else a direct
+/// lookup of their last-known cursor tile from the snapshot itself — the
+/// fallback that covers the *local* player (whose own position is never
+/// rendered as a marker/avatar-of-self outside the central world, since
+/// `sync_player_cursors` intentionally skips "me") and anyone whose
+/// marker/avatar entity hasn't spawned yet this frame. Used by `chat.rs`'s
+/// `render_bubbles` — "bubbles from yourself also render" per the spec.
+pub fn sender_anchor(
+    player: u64,
+    state: &GameState,
+    avatars: &AvatarViz,
+    cursors: &CursorViz,
+    avatar_q: &Query<&Transform, With<AvatarWalk>>,
+    cursor_q: &Query<&Transform, With<CursorMarker>>,
+) -> Option<Vec3> {
+    if let Some((body, _)) = avatars.0.get(&player) {
+        if let Ok(tr) = avatar_q.get(*body) {
+            return Some(tr.translation);
+        }
+    }
+    if let Some((marker, _)) = cursors.0.get(&player) {
+        if let Ok(tr) = cursor_q.get(*marker) {
+            return Some(tr.translation);
+        }
+    }
+    state
+        .players
+        .iter()
+        .find(|p| p.id == player)
+        .and_then(|p| p.cursor)
+        .map(tilef_to_world)
 }
 
 // -------------------------------------------------------------------- pings

@@ -91,7 +91,9 @@ pub fn tick(mut server: ResMut<ServerRes>, time: Res<Time>) {
                         | ClientMsg::AddFriend { .. }
                         | ClientMsg::RemoveFriend { .. }
                         | ClientMsg::RefreshSocial
-                        | ClientMsg::Invite { .. },
+                        | ClientMsg::Invite { .. }
+                        | ClientMsg::RefreshShowcase
+                        | ClientMsg::SetVisitPolicy { .. },
                     ) => {}
                     // Singleplayer is a solo owner: no guests to gate or kick.
                     Ok(ClientMsg::SetGuestPermission { .. } | ClientMsg::Kick { .. }) => {}

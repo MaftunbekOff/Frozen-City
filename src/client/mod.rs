@@ -27,6 +27,7 @@ pub mod render;
 pub mod research;
 pub mod roles;
 pub mod roster;
+pub mod social;
 pub mod touch;
 pub mod ui;
 
@@ -188,6 +189,12 @@ pub struct SocialState {
     pub invite: Option<(i64, String)>,
     /// Inbox of bubbles not yet rendered; the social UI drains this.
     pub bubbles: Vec<BubbleEvent>,
+    /// Friends' personal-world stats (`ServerMsg::Showcase`), refreshed
+    /// alongside the friends list; rows match `friends` by `account`.
+    pub showcase: Vec<frozen_city::net::protocol::ShowcaseEntry>,
+    /// This account's own offline-guest setting (`ServerMsg::VisitPolicy`);
+    /// `None` until the server reports it, i.e. for guest sessions.
+    pub visit_policy: Option<bool>,
 }
 
 /// A world switch requested from inside the game (the Tunnel buttons in
@@ -197,6 +204,40 @@ pub struct SocialState {
 /// `menu::pending_switch`, which dials and re-enters `Screen::Game`.
 #[derive(Resource, Default)]
 pub struct PendingSwitch(pub Option<WorldTarget>);
+
+/// A short human-readable line describing the world switch in flight, set by
+/// whichever button requests one alongside `PendingSwitch` (the two are set
+/// together everywhere `PendingSwitch` is written — see `ui.rs`'s Tunnel/
+/// world-switch buttons and `social.rs`'s Visit/Accept/Home buttons).
+/// Rendered by `ui::transition_overlay` for a couple of seconds after the
+/// new world loads — the actual dial+rebuild is a same-frame trip through
+/// `Screen::Menu` (see `PendingSwitch`'s doc comment), too fast to read
+/// anything shown only during it, so the message is carried forward and
+/// faded out once the game scene is back up rather than shown during the
+/// blink-and-you-miss-it menu frame itself.
+#[derive(Resource, Default)]
+pub struct TransitionMsg {
+    pub text: Option<String>,
+    /// Seconds since `Screen::Game` was (re-)entered with a message pending;
+    /// reset to 0 in `render::enter_game` and counted up in
+    /// `ui::transition_overlay`, which clears `text` once it expires.
+    pub age: f32,
+}
+
+impl WorldTarget {
+    /// The overlay line shown while switching to this target — phrased from
+    /// the traveler's point of view, matching the task's examples.
+    pub fn transition_label(self, friend_name: Option<&str>) -> String {
+        match self {
+            WorldTarget::Personal => "Returning to your city...".to_string(),
+            WorldTarget::Central => "Entering the Global World...".to_string(),
+            WorldTarget::Visit(_) => match friend_name {
+                Some(name) => format!("Visiting {name}..."),
+                None => "Visiting...".to_string(),
+            },
+        }
+    }
+}
 
 impl GameView {
     /// State with the cached tile grid guaranteed to be present.
@@ -319,6 +360,7 @@ impl Plugin for ClientPlugin {
             .init_resource::<GameView>()
             .init_resource::<Session>()
             .init_resource::<PendingSwitch>()
+            .init_resource::<TransitionMsg>()
             .init_resource::<SocialState>()
             .init_resource::<menu::LoginForm>()
             .init_resource::<net_sync::Reconnecting>()
@@ -329,6 +371,7 @@ impl Plugin for ClientPlugin {
             .init_resource::<render::BuildingViz>()
             .init_resource::<render::SurvivorViz>()
             .init_resource::<render::CursorViz>()
+            .init_resource::<render::AvatarViz>()
             .init_resource::<render::PingViz>()
             .add_systems(Startup, render::setup_camera_and_assets)
             // Menu.
@@ -344,14 +387,16 @@ impl Plugin for ClientPlugin {
                     menu::login_field_focus,
                     menu::login_form_keyboard,
                     menu::account_login_button,
+                    menu::register_toggle_button,
                     menu::update_login_fields,
+                    menu::update_register_toggle,
                     ui::generic_button_hover,
                 )
                     .run_if(in_state(Screen::Menu)),
             )
             // Game lifecycle.
             .add_systems(OnEnter(Screen::Game), (render::enter_game, ui::spawn_hud))
-            .add_systems(OnExit(Screen::Game), teardown_game)
+            .add_systems(OnExit(Screen::Game), (teardown_game, teardown_social))
             // Snapshot intake + world sync (ordered).
             .add_systems(
                 Update,
@@ -376,6 +421,9 @@ impl Plugin for ClientPlugin {
                     render::animate_blizzard_overlay,
                     render::sync_player_cursors,
                     render::update_cursor_labels,
+                    render::sync_avatars,
+                    render::animate_avatars,
+                    render::update_avatar_labels,
                     render::sync_pings,
                     render::snow_fall,
                 )
@@ -408,6 +456,7 @@ impl Plugin for ClientPlugin {
                     ui::selection_panel_buttons,
                     ui::game_over_ui,
                     ui::world_switch_button,
+                    ui::transition_overlay,
                     ui::generic_button_hover,
                     net_sync::watch_disconnect,
                 )
@@ -421,6 +470,7 @@ impl Plugin for ClientPlugin {
         app.add_plugins(missions::plugin);
         app.add_plugins(research::plugin);
         app.add_plugins(events::plugin);
+        app.add_plugins(social::plugin);
         app.add_plugins(audio::plugin);
         #[cfg(target_arch = "wasm32")]
         app.add_plugins(local_server::plugin);
@@ -483,6 +533,20 @@ fn teardown_game(
     *research = Default::default();
     *roster_open = Default::default();
     *roster_sel = Default::default();
+}
+
+/// Split out of `teardown_game` purely because Bevy caps how many
+/// `SystemParam`s a single system function may take (~16) and that one was
+/// already at the limit — same reset-per-session purpose, just a second
+/// system on the same `OnExit(Screen::Game)` schedule.
+fn teardown_social(
+    mut avatars: ResMut<render::AvatarViz>,
+    mut social_open: ResMut<social::SocialOpen>,
+) {
+    *avatars = Default::default();
+    // Close the social modal so a new game doesn't start with it stuck open
+    // (which would silently swallow world/camera input, same as chat/research).
+    *social_open = Default::default();
 }
 
 /// In `--smoke` mode, exit automatically after a few seconds of rendering.

@@ -67,6 +67,7 @@ fn start_persistent(seed: u64) -> server::ServerHandle {
         central: false,
         owner_account: None,
         invites: None,
+        world_manager: None,
     })
     .expect("server starts")
 }

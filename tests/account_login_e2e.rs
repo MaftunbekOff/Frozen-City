@@ -78,6 +78,7 @@ fn account_login_flow() {
         central: false,
         owner_account: None,
         invites: None,
+        world_manager: None,
     })
     .expect("server starts");
     let port = handle.addr.expect("bound addr").port();

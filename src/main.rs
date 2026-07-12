@@ -250,6 +250,7 @@ fn run_dedicated(cli: &Cli) {
             central: false,
             owner_account: None,
             invites: None,
+            world_manager: None,
         },
         world_manager.clone(),
     ) {

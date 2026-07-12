@@ -29,7 +29,7 @@ use crate::net::client::ClientConn;
 use crate::net::persist;
 use crate::net::protocol::{
     decode, encode, read_frame, write_frame, ClientMsg, FriendInfo, Included, ServerMsg,
-    MAX_FRAME, TILES_EVERY_N_TICKS,
+    ShowcaseEntry, MAX_FRAME, TILES_EVERY_N_TICKS,
 };
 use crate::net::world_manager::InviteBook;
 
@@ -141,6 +141,11 @@ pub struct ServerConfig {
     /// Present only on the central world: where an `Invite` records the
     /// standing permission that `WorldManager::visit_friend` later checks.
     pub invites: Option<Arc<InviteBook>>,
+    /// Present only on the central world: lets an `Invite` deliver
+    /// `ServerMsg::Invited` cross-world, to the target account's PERSONAL
+    /// world connection (not just one currently in the central world) —
+    /// see `WorldManager::deliver_to_account`.
+    pub world_manager: Option<Arc<crate::net::world_manager::WorldManager>>,
 }
 
 /// On a persistent server, a finished world (won or lost) restarts with a
@@ -199,6 +204,18 @@ pub enum ToServer {
     OwnerOnline {
         owner: i64,
         reply: Sender<bool>,
+    },
+    /// Deliver `msg` to every currently-connected client whose session
+    /// authenticated as `account`, in WHICHEVER world receives this —
+    /// cross-world push (e.g. `ServerMsg::Invited` reaching a target's own
+    /// personal world, not just one they happen to be in centrally right
+    /// now). A no-op if that account isn't connected here. Boxed: `ServerMsg`
+    /// embeds a full `GameState` in some variants, and this is the only
+    /// `ToServer` variant that would otherwise blow up every other variant's
+    /// size (they're all small control fields/channels).
+    DeliverServerMsg {
+        account: i64,
+        msg: Box<ServerMsg>,
     },
 }
 
@@ -936,6 +953,11 @@ struct RateLimiter {
     chat: u32,
     ping: u32,
     cursor: u32,
+    /// Last time `RefreshShowcase` was allowed — a separate, longer-period
+    /// throttle (not the 1 s sliding window above): showcase reads a
+    /// friend's save file from disk per entry, so it's capped independently
+    /// at roughly human "opened the panel" cadence, not command-flood scale.
+    last_showcase: Option<Instant>,
 }
 
 impl RateLimiter {
@@ -946,6 +968,7 @@ impl RateLimiter {
             chat: 0,
             ping: 0,
             cursor: 0,
+            last_showcase: None,
         }
     }
 
@@ -984,7 +1007,22 @@ impl RateLimiter {
         self.cursor += 1;
         self.cursor <= 60
     }
+
+    /// At most one `RefreshShowcase` per [`SHOWCASE_COOLDOWN`], independent
+    /// of the 1 s command window (see `last_showcase`'s doc comment).
+    fn allow_showcase(&mut self, now: Instant) -> bool {
+        if self.last_showcase.is_some_and(|last| now.duration_since(last) < SHOWCASE_COOLDOWN) {
+            return false;
+        }
+        self.last_showcase = Some(now);
+        true
+    }
 }
+
+/// Minimum spacing between `RefreshShowcase` requests from one connection —
+/// each entry is a friend's save file read from disk, so this is a
+/// human-interaction-scale cap, not a command-flood one.
+const SHOWCASE_COOLDOWN: Duration = Duration::from_secs(5);
 
 /// How far (Chebyshev, in tiles) a nearby-chat bubble carries. Roughly the
 /// on-screen neighborhood at the default zoom — close enough to feel local,
@@ -1004,6 +1042,34 @@ fn social_for(state: &GameState, account: i64) -> ServerMsg {
         })
         .collect();
     ServerMsg::Social { friends }
+}
+
+/// `ServerMsg::Showcase` for `account` (V0.5 "hub activities v1"): one entry
+/// per friend, read on demand from that friend's personal-world save file —
+/// fine at this scale (a handful of friends, a rare click), not something the
+/// tick loop ever does. A friend with no save yet (never played, or the file
+/// simply isn't there) is silently skipped rather than fabricating a row.
+/// When `state` IS the central world, each entry's `central_contribution` is
+/// filled in for free from the ledger already sitting in memory; elsewhere
+/// (a personal world has no global view) it's `None`.
+fn showcase_for(state: &GameState, account: i64) -> ServerMsg {
+    let entries = accounts::friends_list(account)
+        .into_iter()
+        .filter_map(|(fid, fname)| {
+            let path = crate::net::world_manager::account_save_path(fid);
+            let friend_state = persist::load_at(&path)?;
+            Some(ShowcaseEntry {
+                account: fid,
+                name: fname,
+                days_survived: friend_state.day(),
+                population: friend_state.survivors.len() as u32,
+                buildings: friend_state.buildings.len() as u32,
+                graduated: friend_state.graduated,
+                central_contribution: state.central.then(|| state.ledger_for(fid)),
+            })
+        })
+        .collect();
+    ServerMsg::Showcase { entries }
 }
 
 /// A private, transient system line to one client, reusing the Bubble channel
@@ -1165,6 +1231,21 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                     let online = state.players.iter().any(|p| p.account == Some(owner));
                     let _ = reply.send(online);
                 }
+                Ok(ToServer::DeliverServerMsg { account, msg }) => {
+                    let targets: Vec<u64> = state
+                        .players
+                        .iter()
+                        .filter(|p| p.account == Some(account))
+                        .map(|p| p.id)
+                        .collect();
+                    if !targets.is_empty() {
+                        for (cid, out) in &clients {
+                            if player_of.get(cid).is_some_and(|p| targets.contains(p)) {
+                                let _ = out.send((*msg).clone());
+                            }
+                        }
+                    }
+                }
                 Ok(ToServer::Join { name, token, account, out, id_back }) => {
                     let client_id = next_client_id;
                     next_client_id += 1;
@@ -1224,8 +1305,14 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                     });
                     // Account sessions get their friends list right away, so
                     // the social panel is populated without an extra request.
+                    // Same for their current visit policy (V0.6
+                    // "owner-offline entry"), so the settings toggle can show
+                    // the right state without a round-trip.
                     if let Some(acc) = account {
                         let _ = out.send(social_for(&state, acc));
+                        let _ = out.send(ServerMsg::VisitPolicy {
+                            allow_offline: accounts::visit_policy(acc),
+                        });
                     }
                     clients.insert(client_id, out);
                     let _ = id_back.send(client_id);
@@ -1291,6 +1378,15 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                         // — and gating them behind the cmd/chat/ping caps
                         // would let a flood on those channels starve a kick).
                         ClientMsg::SetGuestPermission { .. } | ClientMsg::Kick { .. } => true,
+                        // Showcase reads a save file per friend from disk —
+                        // its own dedicated cooldown (see `allow_showcase`),
+                        // not the 1 s chat/cmd budget.
+                        ClientMsg::RefreshShowcase => limiters
+                            .get_mut(&client)
+                            .is_some_and(|l| l.allow_showcase(now)),
+                        // Rare owner-only setting change; same reasoning as
+                        // SetGuestPermission/Kick above.
+                        ClientMsg::SetVisitPolicy { .. } => true,
                     };
                     if allowed {
                         match msg {
@@ -1391,34 +1487,38 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                                             .filter(|p| p.account == Some(target))
                                             .map(|p| p.id)
                                             .collect();
-                                        if targets.is_empty() {
-                                            if let Some(out) = clients.get(&client) {
-                                                let _ = out.send(system_bubble(
-                                                    "Do'stingiz hozir Global Olamda emas.",
-                                                ));
+                                        let host_name = state
+                                            .player(pid)
+                                            .map(|p| p.name.clone())
+                                            .unwrap_or_default();
+                                        let invited_msg = ServerMsg::Invited {
+                                            host: host_acc,
+                                            host_name: host_name.clone(),
+                                        };
+                                        // Deliver to the target if they're
+                                        // right here in the central world...
+                                        for (cid, out) in &clients {
+                                            if player_of.get(cid).is_some_and(|p| targets.contains(p)) {
+                                                let _ = out.send(invited_msg.clone());
                                             }
-                                        } else {
-                                            book.invite(host_acc, target);
-                                            let host_name = state
-                                                .player(pid)
-                                                .map(|p| p.name.clone())
-                                                .unwrap_or_default();
-                                            for (cid, out) in &clients {
-                                                if player_of
-                                                    .get(cid)
-                                                    .is_some_and(|p| targets.contains(p))
-                                                {
-                                                    let _ = out.send(ServerMsg::Invited {
-                                                        host: host_acc,
-                                                        host_name: host_name.clone(),
-                                                    });
-                                                }
-                                            }
-                                            if let Some(out) = clients.get(&client) {
-                                                let _ = out.send(system_bubble(
-                                                    "Taklif yuborildi — o'z olamingizga qaytsangiz, do'stingiz kira oladi.",
-                                                ));
-                                            }
+                                        }
+                                        // ...AND, regardless, to their own
+                                        // PERSONAL world too (V0.6 "guest
+                                        // without onboarding" — a friend
+                                        // doesn't have to be standing in the
+                                        // hub at this exact moment to be
+                                        // invited into it).
+                                        if let Some(wm) = config.world_manager.as_ref() {
+                                            wm.deliver_to_account(target, invited_msg);
+                                        }
+                                        book.invite(host_acc, target);
+                                        if let Some(out) = clients.get(&client) {
+                                            let feedback = if targets.is_empty() {
+                                                "Taklif yuborildi — do'stingiz hozir Global Olamda emas, lekin o'z olamiga kirganda ko'radi."
+                                            } else {
+                                                "Taklif yuborildi — o'z olamingizga qaytsangiz, do'stingiz kira oladi."
+                                            };
+                                            let _ = out.send(system_bubble(feedback));
                                         }
                                     }
                                 }
@@ -1460,6 +1560,26 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                                         limiters.remove(&kc);
                                     }
                                     sim::kick_player(&mut state, target);
+                                }
+                            }
+                            ClientMsg::RefreshShowcase => {
+                                if let Some(acc) = state.player_account(pid) {
+                                    if let Some(out) = clients.get(&client) {
+                                        let _ = out.send(showcase_for(&state, acc));
+                                    }
+                                }
+                            }
+                            ClientMsg::SetVisitPolicy { allow_offline } => {
+                                if let Some(acc) = state.player_account(pid) {
+                                    if accounts::set_visit_policy(acc, allow_offline).is_ok() {
+                                        if let Some(out) = clients.get(&client) {
+                                            let _ = out.send(ServerMsg::VisitPolicy { allow_offline });
+                                        }
+                                    } else if let Some(out) = clients.get(&client) {
+                                        let _ = out.send(system_bubble(
+                                            "Sozlamani saqlab bo'lmadi — keyinroq qayta urining.",
+                                        ));
+                                    }
                                 }
                             }
                         }

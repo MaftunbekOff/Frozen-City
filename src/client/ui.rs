@@ -114,6 +114,11 @@ pub struct WorldSwitchBtn;
 #[derive(Component)]
 pub struct WorldSwitchLabel;
 
+/// The brief center-screen "Entering the Global World..." banner (see
+/// `TransitionMsg`).
+#[derive(Component)]
+pub struct TransitionText;
+
 fn text(t: impl Into<String>, size: f32, color: Color) -> impl Bundle {
     (
         Text::new(t.into()),
@@ -281,6 +286,24 @@ pub fn spawn_hud(mut commands: Commands) {
         },
         text(DEFAULT_HINT, 13.0, TEXT_DIM),
         TooltipText,
+        DespawnOnExit(Screen::Game),
+    ));
+
+    // --- World-switch transition banner: a big, brief, center-screen line
+    // ("Entering the Global World...") that fades out once the new world has
+    // actually loaded (see `TransitionMsg`). Deliberately not part of the
+    // top bar's fixed-position rows so it can't collide with any of them.
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.0),
+            right: Val::Px(0.0),
+            top: Val::Px(160.0),
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        text("", 26.0, TEXT_MAIN),
+        TransitionText,
         DespawnOnExit(Screen::Game),
     ));
 
@@ -844,6 +867,7 @@ pub fn game_over_ui(
     view: Res<GameView>,
     session: Res<Session>,
     mut pending: ResMut<PendingSwitch>,
+    mut transition: ResMut<TransitionMsg>,
     mut next: ResMut<NextState<Screen>>,
     mut root: Query<&mut Node, With<GameOverRoot>>,
     mut texts: Query<(&mut Text, &mut TextColor, &GoText)>,
@@ -862,6 +886,8 @@ pub fn game_over_ui(
         // The dial happens in `menu::pending_switch` after the game scene
         // tears down — see `PendingSwitch`.
         pending.0 = Some(WorldTarget::Central);
+        transition.text = Some(WorldTarget::Central.transition_label(None));
+        transition.age = 0.0;
         next.set(Screen::Menu);
         return;
     }
@@ -943,6 +969,7 @@ pub fn world_switch_button(
     view: Res<GameView>,
     session: Res<Session>,
     mut pending: ResMut<PendingSwitch>,
+    mut transition: ResMut<TransitionMsg>,
     mut next: ResMut<NextState<Screen>>,
     mut btn: Query<(&Interaction, &mut Node), With<WorldSwitchBtn>>,
     mut label: Query<&mut Text, With<WorldSwitchLabel>>,
@@ -965,6 +992,8 @@ pub fn world_switch_button(
         if let Some((world, _)) = target {
             if *interaction == Interaction::Pressed {
                 pending.0 = Some(world);
+                transition.text = Some(world.transition_label(None));
+                transition.age = 0.0;
                 next.set(Screen::Menu);
                 return;
             }
@@ -976,6 +1005,40 @@ pub fn world_switch_button(
                 text.0 = wanted.to_string();
             }
         }
+    }
+}
+
+/// Fades in, holds, then fades out the center-screen transition banner
+/// (see `TransitionMsg`). `time.delta_secs()` is used directly rather than a
+/// `Local` accumulator since `TransitionMsg::age` is the shared, resettable
+/// clock every switch site restarts.
+pub fn transition_overlay(
+    time: Res<Time>,
+    mut transition: ResMut<TransitionMsg>,
+    mut q: Query<(&mut Text, &mut TextColor), With<TransitionText>>,
+) {
+    const HOLD: f32 = 1.6;
+    const FADE: f32 = 0.8;
+    let Some(msg) = transition.text.clone() else {
+        return;
+    };
+    transition.age += time.delta_secs();
+    let age = transition.age;
+    let alpha = if age < 0.15 {
+        age / 0.15
+    } else if age < HOLD {
+        1.0
+    } else if age < HOLD + FADE {
+        1.0 - (age - HOLD) / FADE
+    } else {
+        transition.text = None;
+        0.0
+    };
+    for (mut text, mut color) in &mut q {
+        if text.0 != msg {
+            text.0 = msg.clone();
+        }
+        color.0.set_alpha(alpha.clamp(0.0, 1.0));
     }
 }
 

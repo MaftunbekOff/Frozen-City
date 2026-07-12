@@ -103,7 +103,10 @@ fn worlds_dir() -> String {
     std::env::var("FC_ACCOUNT_WORLDS_DIR").unwrap_or_else(|_| DEFAULT_WORLDS_DIR.to_string())
 }
 
-fn account_save_path(account_id: i64) -> String {
+/// `pub(crate)` so `server.rs` can read a friend's personal-world save
+/// on-demand for `ServerMsg::Showcase`, without spawning (or otherwise
+/// disturbing) that account's world — a plain read of whatever's on disk.
+pub(crate) fn account_save_path(account_id: i64) -> String {
     format!("{}/{account_id}.bin", worlds_dir())
 }
 
@@ -144,10 +147,15 @@ impl WorldManager {
         })
     }
 
-    /// Admits `visitor` into `host`'s personal world as a guest — only while
-    /// a fresh invite stands and the host is online there (the default
-    /// no-owner-no-entry policy). The world is never spawned FOR a visit: a
-    /// not-running world means the host isn't in it.
+    /// Admits `visitor` into `host`'s personal world as a guest — a fresh
+    /// invite must always stand. Beyond that, the default policy is
+    /// no-owner-no-entry (a world without its owner currently connected
+    /// admits nobody, and isn't spawned just to be visited); but if `host`
+    /// has opted into `allow_offline_guests` (V0.6 "owner-offline entry",
+    /// `accounts::visit_policy`), a visit is admitted regardless — lazily
+    /// spawning the world if it isn't already running. Owner-role pinning
+    /// (`ServerConfig::owner_account`, checked on every `Join`) still applies
+    /// either way, so an offline-admitted visitor can never seize ownership.
     pub fn visit_friend(
         self: &Arc<Self>,
         host: i64,
@@ -158,30 +166,62 @@ impl WorldManager {
         if !self.invites.valid(host, visitor) {
             return Err(VisitError::NoInvite);
         }
-        let tx = {
+        let allow_offline = crate::net::accounts::visit_policy(host);
+        let existing = {
             let worlds = self.worlds.lock().unwrap();
-            match worlds.get(&host) {
-                Some(handle) => handle.tx.clone(),
-                None => return Err(VisitError::HostOffline),
-            }
+            worlds.get(&host).map(|h| h.tx.clone())
         };
-        let (reply_tx, reply_rx) = channel();
-        if tx
-            .send(ToServer::OwnerOnline {
-                owner: host,
-                reply: reply_tx,
-            })
-            .is_err()
-        {
-            return Err(VisitError::HostOffline);
-        }
-        match reply_rx.recv_timeout(MIGRATE_REPLY_TIMEOUT) {
-            Ok(true) => {}
-            Ok(false) => return Err(VisitError::HostOffline),
-            Err(_) => return Err(VisitError::Capacity),
-        }
+        let tx = match existing {
+            Some(tx) => {
+                let (reply_tx, reply_rx) = channel();
+                if tx
+                    .send(ToServer::OwnerOnline { owner: host, reply: reply_tx })
+                    .is_err()
+                {
+                    // Stale handle (evicted between lookup and send): treat
+                    // exactly like "not currently spawned" below.
+                    None
+                } else {
+                    match reply_rx.recv_timeout(MIGRATE_REPLY_TIMEOUT) {
+                        Ok(true) => Some(tx),
+                        Ok(false) if allow_offline => Some(tx),
+                        Ok(false) => return Err(VisitError::HostOffline),
+                        Err(_) => return Err(VisitError::Capacity),
+                    }
+                }
+            }
+            None => None,
+        };
+        let tx = match tx {
+            Some(tx) => tx,
+            None if allow_offline => {
+                // Not currently spawned at all: lazily spawn it (from disk,
+                // same path `join_account` would use) so an offline-admitting
+                // host's world is still visitable.
+                self.get_or_spawn(host).ok_or(VisitError::Capacity)?
+            }
+            None => return Err(VisitError::HostOffline),
+        };
         let (id, out_rx) = join(&tx, name, token, Some(visitor)).ok_or(VisitError::Capacity)?;
         Ok((tx, id, out_rx))
+    }
+
+    /// Pushes `msg` to `account`'s PERSONAL world, if it's currently spawned
+    /// (i.e. some connection is or recently was active there) and that
+    /// account is actually connected to it right now — a no-op otherwise
+    /// (never spawns a world just to deliver into it: a personal world only
+    /// exists here while someone's using it). Used for cross-world delivery
+    /// (`ServerMsg::Invited` reaching a target's own world, not just one
+    /// they happen to be in centrally at the moment) — see
+    /// `ToServer::DeliverServerMsg`.
+    pub fn deliver_to_account(&self, account: i64, msg: ServerMsg) {
+        let tx = {
+            let worlds = self.worlds.lock().unwrap();
+            worlds.get(&account).map(|h| h.tx.clone())
+        };
+        if let Some(tx) = tx {
+            let _ = tx.send(ToServer::DeliverServerMsg { account, msg: Box::new(msg) });
+        }
     }
 
     /// Joins `account_id`'s world as `name`, spawning it on first use.
@@ -356,6 +396,10 @@ impl WorldManager {
             // Only the central world issues invites (that's where people
             // meet); it needs the shared book to write them into.
             invites: central.then(|| self.invites.clone()),
+            // Only the central world needs to reach OUT to another world
+            // (delivering `Invited` to the target's personal world); a
+            // personal world never originates cross-world pushes itself.
+            world_manager: central.then(|| self.clone()),
         };
         let this = self.clone();
         let flag_for_thread = world_shutdown.clone();

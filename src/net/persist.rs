@@ -16,13 +16,17 @@ use crate::game::types::GameState;
 pub const DEFAULT_SAVE_PATH: &str = "/var/lib/frozen-city/world.bin";
 
 /// Version header every save is written with since the format grew fields
-/// (V2: `Survivor::owner`, `PlayerInfo::account`, `GameState::central`).
-/// Bincode is positional, so without a header there'd be no way to tell a
-/// V2 file from a V1 one — and a V1 file misread as V2 (or vice versa) would
+/// (V2: `Survivor::owner`, `PlayerInfo::account`, `GameState::central`; V3:
+/// `Building::owner_account`, `GameState::central_ledger`). Bincode is
+/// positional, so without a header there'd be no way to tell one version's
+/// file from another's — and misreading one version as another would
 /// "collapse to None" in `load_at` and silently wipe a production world on
-/// the first deploy after a format change. Files WITHOUT this prefix are
-/// decoded through the frozen V1 mirror (`legacy.rs`) and migrated.
+/// the first deploy after a format change. Files WITHOUT any recognized
+/// prefix are decoded through the frozen V1 mirror (`legacy.rs`) and
+/// migrated all the way to V3; files with `MAGIC_V2` decode through the V2
+/// mirror and migrate one hop to V3.
 const MAGIC_V2: &[u8; 8] = b"FCWORLD2";
+const MAGIC_V3: &[u8; 8] = b"FCWORLD3";
 
 fn resolve_path() -> String {
     std::env::var("FC_WORLD_SAVE").unwrap_or_else(|_| DEFAULT_SAVE_PATH.to_string())
@@ -52,8 +56,8 @@ pub fn save_at(state: &GameState, path: &str) -> io::Result<()> {
     }
     let body =
         bincode::serialize(state).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    let mut bytes = Vec::with_capacity(MAGIC_V2.len() + body.len());
-    bytes.extend_from_slice(MAGIC_V2);
+    let mut bytes = Vec::with_capacity(MAGIC_V3.len() + body.len());
+    bytes.extend_from_slice(MAGIC_V3);
     bytes.extend_from_slice(&body);
     // Write to a sibling temp file and rename over the target: a kill mid-write
     // (the exact moment this feature exists to survive) leaves the previous,
@@ -67,15 +71,23 @@ pub fn save_at(state: &GameState, path: &str) -> io::Result<()> {
 
 pub fn load_at(path: &str) -> Option<GameState> {
     let bytes = fs::read(path).ok()?;
-    match bytes.strip_prefix(MAGIC_V2.as_slice()) {
-        Some(body) => bincode::deserialize(body).ok(),
-        // No header: a save written before versioning existed — decode it
-        // through the frozen V1 mirror and migrate. The next autosave
-        // rewrites it as V2.
-        None => bincode::deserialize::<crate::net::legacy::GameStateV1>(&bytes)
-            .ok()
-            .map(GameState::from),
+    if let Some(body) = bytes.strip_prefix(MAGIC_V3.as_slice()) {
+        return bincode::deserialize(body).ok();
     }
+    if let Some(body) = bytes.strip_prefix(MAGIC_V2.as_slice()) {
+        // V2 (pre-account-ownership/contribution-ledger): decode through the
+        // frozen V2 mirror and migrate one hop to V3. The next autosave
+        // rewrites it as V3.
+        return bincode::deserialize::<crate::net::legacy::GameStateV2>(body)
+            .ok()
+            .map(GameState::from);
+    }
+    // No recognized header: a save written before versioning existed at
+    // all — decode it through the frozen V1 mirror and migrate all the way
+    // to V3. The next autosave rewrites it as V3.
+    bincode::deserialize::<crate::net::legacy::GameStateV1>(&bytes)
+        .ok()
+        .map(GameState::from)
 }
 
 #[cfg(test)]
@@ -120,7 +132,7 @@ mod tests {
     /// a production city silently wiped on the first post-format-change boot.
     #[test]
     fn v1_save_without_header_migrates() {
-        use crate::net::legacy::{GameStateV1, PlayerInfoV1, SurvivorV1};
+        use crate::net::legacy::{BuildingV2, GameStateV1, PlayerInfoV1, SurvivorV1};
 
         let path = throwaway_path("v1-migrate");
         // Fabricate V1 bytes exactly the way an old binary wrote them: a
@@ -133,7 +145,19 @@ mod tests {
             tick: modern.tick,
             win_days: modern.win_days,
             tiles: modern.tiles.clone(),
-            buildings: modern.buildings.clone(),
+            buildings: modern
+                .buildings
+                .iter()
+                .map(|b| BuildingV2 {
+                    id: b.id,
+                    kind: b.kind,
+                    x: b.x,
+                    y: b.y,
+                    workers: b.workers,
+                    progress: b.progress,
+                    owner: b.owner,
+                })
+                .collect(),
             survivors: modern
                 .survivors
                 .iter()
@@ -191,10 +215,92 @@ mod tests {
         assert!(loaded.graduated, "graduation must survive migration");
         assert_eq!(loaded.tiles, modern.tiles);
         assert_eq!(loaded.stock, modern.stock);
+        assert!(
+            loaded.buildings.iter().all(|b| b.owner_account.is_none()),
+            "V1 predates account-based building ownership"
+        );
+        assert!(loaded.central_ledger.is_empty(), "V1 predates the contribution ledger");
 
-        // And once re-saved (V2, with header), it round-trips as-is.
+        // And once re-saved (V3, with header), it round-trips as-is.
         save_at(&loaded, &path).unwrap();
-        assert_eq!(load_at(&path).expect("V2 reload"), loaded);
+        assert_eq!(load_at(&path).expect("V3 reload"), loaded);
+        fs::remove_file(&path).ok();
+    }
+
+    /// A world saved under `FCWORLD2` (post-central-world, pre-account-owned
+    /// central buildings/contribution ledger) must load and migrate one hop
+    /// to V3, same non-negotiable "never collapses to None" guarantee as V1.
+    #[test]
+    fn v2_save_migrates() {
+        use crate::net::legacy::{BuildingV2, GameStateV2};
+
+        let path = throwaway_path("v2-migrate");
+        let mut modern = sim::new_game(23, 12);
+        sim::player_joined(&mut modern, 3, "Vali");
+        modern.graduated = true;
+        let v2 = GameStateV2 {
+            tick: modern.tick,
+            win_days: modern.win_days,
+            tiles: modern.tiles.clone(),
+            buildings: modern
+                .buildings
+                .iter()
+                .map(|b| BuildingV2 {
+                    id: b.id,
+                    kind: b.kind,
+                    x: b.x,
+                    y: b.y,
+                    workers: b.workers,
+                    progress: b.progress,
+                    owner: b.owner,
+                })
+                .collect(),
+            survivors: modern.survivors.clone(),
+            stock: modern.stock,
+            furnace_level: modern.furnace_level,
+            furnace_lit: modern.furnace_lit,
+            cold_snap: modern.cold_snap,
+            players: modern.players.clone(),
+            phase: modern.phase,
+            events: modern.events.clone(),
+            total_events: modern.total_events,
+            chat: modern.chat.clone(),
+            total_chat: modern.total_chat,
+            pings: modern.pings.clone(),
+            missions: modern.missions.clone(),
+            tunnel: modern.tunnel,
+            graduated: modern.graduated,
+            central: modern.central,
+            techs: modern.techs.clone(),
+            disease_until: modern.disease_until,
+            blizzard_until: modern.blizzard_until,
+            pending_event: modern.pending_event,
+            event_rng: modern.event_rng,
+            guest_perm: modern.guest_perm,
+            owner_id: modern.owner_id,
+            next_id: modern.next_id,
+            rng: modern.rng,
+        };
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(MAGIC_V2);
+        bytes.extend_from_slice(&bincode::serialize(&v2).unwrap());
+        fs::write(&path, bytes).unwrap();
+
+        let loaded = load_at(&path).expect("V2 save must migrate, never wipe");
+        assert_eq!(loaded.survivors.len(), modern.survivors.len());
+        assert_eq!(loaded.players, modern.players);
+        assert!(loaded.graduated, "graduation must survive migration");
+        assert_eq!(loaded.tiles, modern.tiles);
+        assert_eq!(loaded.stock, modern.stock);
+        assert!(
+            loaded.buildings.iter().all(|b| b.owner_account.is_none()),
+            "V2 predates account-based building ownership"
+        );
+        assert!(loaded.central_ledger.is_empty(), "V2 predates the contribution ledger");
+
+        // And once re-saved (V3, with header), it round-trips as-is.
+        save_at(&loaded, &path).unwrap();
+        assert_eq!(load_at(&path).expect("V3 reload"), loaded);
         fs::remove_file(&path).ok();
     }
 

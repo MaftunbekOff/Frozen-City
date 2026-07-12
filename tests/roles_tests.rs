@@ -82,6 +82,7 @@ fn can_issue_guest_build_may_demolish_own_building_but_not_others() {
         workers: 0,
         progress: 0.0,
         owner: Some(2),
+        owner_account: None,
     });
     let (ox, oy) = find_spot(&state, BuildingKind::Tent);
     state.buildings.push(Building {
@@ -92,6 +93,7 @@ fn can_issue_guest_build_may_demolish_own_building_but_not_others() {
         workers: 0,
         progress: 0.0,
         owner: Some(1),
+        owner_account: None,
     });
 
     assert!(state.can_issue(2, &PlayerCommand::Demolish { building: 101 }), "guest may demolish their own building");

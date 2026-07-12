@@ -200,6 +200,13 @@ pub struct Building {
     pub progress: f32,
     /// Player id that placed this building; `None` for the starting furnace.
     pub owner: Option<u64>,
+    /// Account id that placed this building, set only when it was placed in
+    /// the CENTRAL world by an account-authenticated connection; `None`
+    /// everywhere else (personal/guest worlds keep using `owner`/session-id
+    /// authority) and for legacy central buildings placed before this field
+    /// existed (migration default `None` — they stay demolishable by anyone,
+    /// same as today, rather than becoming permanently stuck).
+    pub owner_account: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -277,6 +284,28 @@ pub enum GamePhase {
     Running,
     Won,
     Lost,
+}
+
+/// One account's running contribution totals in the central world (V0.5
+/// "economy v1"): credited for what their owned settlers' staffed buildings
+/// produce there, and for what they spend placing buildings there. Purely a
+/// ledger — it does not gate anything (yet); it's the data source for
+/// `ServerMsg::Showcase`.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq)]
+pub struct ContributionTotals {
+    pub wood: f32,
+    pub coal: f32,
+    pub food: f32,
+    /// Wood spent placing buildings (a cost, tracked separately from the
+    /// production credits above so a showcase can show "built" vs "produced").
+    pub wood_spent: f32,
+}
+
+/// One row of the central-world contribution ledger, keyed by account.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct LedgerEntry {
+    pub account: i64,
+    pub totals: ContributionTotals,
 }
 
 /// A player's authority in the world. The first to join owns it; everyone else
@@ -567,6 +596,9 @@ pub struct GameState {
     pub next_id: u32,
     /// SplitMix64 RNG state.
     pub rng: u64,
+    /// Central world only: per-account contribution ledger (see
+    /// [`ContributionTotals`]). Always empty in personal/guest worlds.
+    pub central_ledger: Vec<LedgerEntry>,
 }
 
 pub fn tile_index(x: u8, y: u8) -> usize {
@@ -694,6 +726,30 @@ impl GameState {
             .count()
     }
 
+    /// Mutable access to `account`'s central-world ledger row, creating it
+    /// (zeroed) on first use. Callers apply their own delta via the closure —
+    /// keeps every call site a one-liner instead of a find-or-insert dance.
+    pub fn credit_ledger(&mut self, account: i64, f: impl FnOnce(&mut ContributionTotals)) {
+        match self.central_ledger.iter_mut().find(|e| e.account == account) {
+            Some(entry) => f(&mut entry.totals),
+            None => {
+                let mut totals = ContributionTotals::default();
+                f(&mut totals);
+                self.central_ledger.push(LedgerEntry { account, totals });
+            }
+        }
+    }
+
+    /// `account`'s central-world contribution totals, or zero if they have
+    /// none recorded yet (never having placed/staffed anything there).
+    pub fn ledger_for(&self, account: i64) -> ContributionTotals {
+        self.central_ledger
+            .iter()
+            .find(|e| e.account == account)
+            .map(|e| e.totals)
+            .unwrap_or_default()
+    }
+
     /// The single source of truth for command authority, shared by the server
     /// (enforcement), the sim (`apply_command`) and the client (UI greying).
     /// Unknown players (unit tests, trusted local calls) and owner-less worlds
@@ -708,14 +764,19 @@ impl GameState {
             let account = self.player_account(pid);
             return match cmd {
                 // Anyone may add to the shared city; tearing down is limited
-                // to what this session built (buildings are keyed by player
-                // id, not account — good enough until central-world building
-                // ownership becomes account-based).
+                // to whoever placed it. Account-owned central buildings (set
+                // from the builder's account at placement time) require that
+                // SAME account — any of its connections, any session — while
+                // legacy central buildings from before account ownership
+                // existed (`owner_account: None`, migration default) stay
+                // demolishable by the placing session, as they always were.
                 PlayerCommand::Place { .. } => true,
-                PlayerCommand::Demolish { building } => self
-                    .find_building(*building)
-                    .map(|b| b.owner == Some(pid))
-                    .unwrap_or(false),
+                PlayerCommand::Demolish { building } => {
+                    self.find_building(*building).is_some_and(|b| match b.owner_account {
+                        Some(owner_acc) => account == Some(owner_acc),
+                        None => b.owner == Some(pid),
+                    })
+                }
                 // Only your own settlers, by account identity.
                 PlayerCommand::AssignSurvivor { survivor, .. } => {
                     account.is_some()

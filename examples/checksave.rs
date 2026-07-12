@@ -15,15 +15,20 @@ fn main() {
     let mut failed = false;
     for path in paths {
         match frozen_city::net::persist::load_at(&path) {
-            Some(s) => println!(
-                "OK   {path}: day {}, pop {}, buildings {}, players-known {}, graduated {}, central {}",
-                s.day(),
-                s.survivors.len(),
-                s.buildings.len(),
-                s.players.len(),
-                s.graduated,
-                s.central
-            ),
+            Some(s) => {
+                let owned_buildings = s.buildings.iter().filter(|b| b.owner_account.is_some()).count();
+                println!(
+                    "OK   {path}: day {}, pop {}, buildings {} ({} account-owned), players-known {}, graduated {}, central {}, ledger-accounts {}",
+                    s.day(),
+                    s.survivors.len(),
+                    s.buildings.len(),
+                    owned_buildings,
+                    s.players.len(),
+                    s.graduated,
+                    s.central,
+                    s.central_ledger.len(),
+                )
+            }
             None => {
                 println!("FAIL {path}: does not decode under the current format");
                 failed = true;

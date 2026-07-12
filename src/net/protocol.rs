@@ -89,11 +89,25 @@ pub enum ClientMsg {
     RemoveFriend { account: i64 },
     /// Ask for a fresh `ServerMsg::Social` (e.g. to poll who's online).
     RefreshSocial,
-    /// Central world only: invite another account (who must be online in the
-    /// central world right now) to visit the sender's personal world. The
-    /// target receives `ServerMsg::Invited`; the standing invite then admits
-    /// their `VisitFriend` for a while.
+    /// Central world only: invite another account to visit the sender's
+    /// personal world. Delivered as `ServerMsg::Invited` to the target
+    /// wherever they're currently reachable — the central world if they
+    /// happen to be there, and separately their own personal world (so a
+    /// friend doesn't have to be standing in the hub at this exact moment to
+    /// receive it). The standing invite then admits their `VisitFriend` for
+    /// a while, whether or not delivery found them online anywhere.
     Invite { account: i64 },
+    /// Ask for a fresh `ServerMsg::Showcase` (hub activities v1): the
+    /// account's friends' personal-world stats, read on demand from their
+    /// save files. Account-authenticated connections only; rate-limited
+    /// server-side (see `RateLimiter::allow_showcase`).
+    /// (This and everything below it: appended in order, never reordered —
+    /// bincode enum indices are positional.)
+    RefreshShowcase,
+    /// Account-authenticated connections only: change whether guests may
+    /// `VisitFriend` into the sender's personal world while the sender isn't
+    /// online there (default: no). Answered with `ServerMsg::VisitPolicy`.
+    SetVisitPolicy { allow_offline: bool },
 }
 
 /// One friend row in `ServerMsg::Social`.
@@ -105,6 +119,24 @@ pub struct FriendInfo {
     /// Only meaningful when the receiving client is in the central world
     /// itself (elsewhere the server reports `false` — it has no global view).
     pub online_central: bool,
+}
+
+/// One row of `ServerMsg::Showcase` (V0.5 "hub activities v1"): a friend's
+/// personal-world stats, read on demand from their save file. Every numeric
+/// field reflects that save's state at the moment `RefreshShowcase` was
+/// answered (not live — friends aren't necessarily online).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct ShowcaseEntry {
+    pub account: i64,
+    pub name: String,
+    pub days_survived: u32,
+    pub population: u32,
+    pub buildings: u32,
+    pub graduated: bool,
+    /// This account's central-world contribution totals, when cheaply
+    /// available (the requester's own central-world `GameState` already has
+    /// them in memory; `None` when the requester isn't asking from there).
+    pub central_contribution: Option<crate::game::types::ContributionTotals>,
 }
 
 /// Which of `GameState`'s pricier collection fields actually ride along on a
@@ -152,6 +184,15 @@ pub enum ServerMsg {
     /// Someone in the central world invited this client to visit their
     /// personal world — follow up with `VisitFriend { host, .. }`.
     Invited { host: i64, host_name: String },
+    /// Answer to `ClientMsg::RefreshShowcase`: the sender's friends' (and, if
+    /// account-authenticated, the sender's own) personal-world stats. Only
+    /// friends are ever included (privacy) — see `ClientMsg::RefreshShowcase`.
+    /// (This and everything below it: appended in order, never reordered —
+    /// bincode enum indices are positional.)
+    Showcase { entries: Vec<ShowcaseEntry> },
+    /// The sender's own `allow_offline_guests` setting (V0.6 "owner-offline
+    /// entry"), sent on account join and after every `SetVisitPolicy`.
+    VisitPolicy { allow_offline: bool },
 }
 
 /// Deflate level: fast enough to run every tick on a shared box, still gets

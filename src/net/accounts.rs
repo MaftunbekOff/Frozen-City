@@ -86,10 +86,48 @@ fn open_rw(db_path: &str) -> Option<Connection> {
             friend_id INTEGER NOT NULL,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             PRIMARY KEY (account_id, friend_id)
+        );
+        CREATE TABLE IF NOT EXISTS visit_policy (
+            account_id INTEGER PRIMARY KEY,
+            allow_offline INTEGER NOT NULL DEFAULT 0
         );",
     )
     .ok()?;
     Some(conn)
+}
+
+/// Whether `account` currently allows `VisitFriend` guests into their
+/// personal world while they're not online there themselves (V0.6
+/// "owner-offline entry"). Defaults to `false` (no row yet — same
+/// "missing collapses to the safe default" shape as the rest of this module).
+pub fn visit_policy(account: i64) -> bool {
+    let db_path = std::env::var("FC_ACCOUNTS_DB").unwrap_or_else(|_| DEFAULT_DB_PATH.to_string());
+    let Some(conn) = open_rw(&db_path) else {
+        return false;
+    };
+    conn.query_row(
+        "SELECT allow_offline FROM visit_policy WHERE account_id = ?1",
+        [account],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|v| v != 0)
+    .unwrap_or(false)
+}
+
+/// Sets `account`'s owner-offline visit policy. Best-effort: a write failure
+/// (DB unavailable) is swallowed by the caller the same way every other
+/// account write here is — the in-memory `GameState` isn't affected either
+/// way, only whether the choice survives a restart.
+pub fn set_visit_policy(account: i64, allow_offline: bool) -> Result<(), FriendError> {
+    let db_path = std::env::var("FC_ACCOUNTS_DB").unwrap_or_else(|_| DEFAULT_DB_PATH.to_string());
+    let conn = open_rw(&db_path).ok_or(FriendError::Io)?;
+    conn.execute(
+        "INSERT INTO visit_policy (account_id, allow_offline) VALUES (?1, ?2)
+         ON CONFLICT(account_id) DO UPDATE SET allow_offline = excluded.allow_offline",
+        rusqlite::params![account, allow_offline as i64],
+    )
+    .map_err(|_| FriendError::Io)?;
+    Ok(())
 }
 
 /// Creates an account from inside the game client (no Telegram involved) and
@@ -407,6 +445,23 @@ mod tests {
 
         friends_remove(aziz, vali).unwrap();
         assert!(friends_list(aziz).is_empty());
+
+        // Visit policy (V0.6 "owner-offline entry"): default-deny for an
+        // account with no row yet, flips on SetVisitPolicy, and is per
+        // account (setting Aziz's never touches Vali's). Piggybacks on this
+        // test rather than its own (see the doc comment above: the sole test
+        // in this binary touching the env-var-selected `FC_ACCOUNTS_DB`).
+        assert!(!visit_policy(aziz), "default is deny (no row yet)");
+        assert!(!visit_policy(vali), "default is deny (no row yet)");
+        set_visit_policy(aziz, true).unwrap();
+        assert!(visit_policy(aziz), "flips on after SetVisitPolicy");
+        assert!(!visit_policy(vali), "unaffected by another account's setting");
+        // Idempotent update (ON CONFLICT path), and flips back off too.
+        set_visit_policy(aziz, true).unwrap();
+        assert!(visit_policy(aziz));
+        set_visit_policy(aziz, false).unwrap();
+        assert!(!visit_policy(aziz));
+
         std::env::remove_var("FC_ACCOUNTS_DB");
         std::fs::remove_dir_all(&dir).ok();
     }

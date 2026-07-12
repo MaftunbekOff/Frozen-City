@@ -9,12 +9,17 @@ use bevy::prelude::*;
 use frozen_city::game::types::MAX_CHAT_LEN;
 use frozen_city::net::protocol::ClientMsg;
 
+use super::render::{AvatarViz, AvatarWalk, CursorMarker, CursorViz};
 use super::{player_color, GameView, NetConn, Screen};
 
 /// How many recent chat lines the on-screen log shows.
 const CHAT_LINES: usize = 7;
 const SYSTEM_COLOR: Color = Color::srgb(0.62, 0.68, 0.78);
 const INPUT_BG: Color = Color::srgba(0.02, 0.04, 0.08, 0.92);
+/// How long a floating nearby-chat bubble stays over its sender before
+/// despawning, and how much of that tail is spent fading out.
+const BUBBLE_LIFETIME: f32 = 7.0;
+const BUBBLE_FADE: f32 = 1.5;
 
 /// Whether the chat input box is capturing keystrokes, and its current text.
 /// While `active`, world/camera input is suppressed (see `input.rs`).
@@ -34,12 +39,26 @@ struct ChatInputRoot;
 #[derive(Component)]
 struct ChatInputText;
 
+#[derive(Component)]
+struct ChatHintText;
+
+/// A floating nearby-chat/system bubble rendered above its sender's
+/// avatar/cursor in the 3D world (screen-projected UI text, same technique
+/// `render.rs` uses for cursor/avatar name tags). `player_id` re-locates the
+/// sender's current world position every frame so the bubble tracks their
+/// walk instead of staying pinned to where they were when it was sent.
+#[derive(Component)]
+pub(crate) struct ChatBubble {
+    player_id: u64,
+    age: f32,
+}
+
 pub fn plugin(app: &mut App) {
     app.init_resource::<ChatState>()
         .add_systems(OnEnter(Screen::Game), spawn_chat_ui)
         .add_systems(
             Update,
-            (chat_keyboard, update_chat_log, update_chat_input)
+            (chat_keyboard, update_chat_log, update_chat_input, update_bubbles)
                 .run_if(in_state(Screen::Game)),
         );
 }
@@ -69,6 +88,23 @@ fn spawn_chat_ui(mut commands: Commands) {
                 ));
             }
         });
+
+    // Hint line just above the input box: reminds players of the "/l "
+    // nearby-chat prefix. Shown/hidden alongside the input box itself.
+    commands.spawn((
+        Node {
+            display: Display::None,
+            position_type: PositionType::Absolute,
+            left: Val::Px(12.0),
+            bottom: Val::Px(148.0),
+            ..default()
+        },
+        Text::new("Enter to send   \"/l text\" = nearby chat (bubble, no log)   Esc cancel"),
+        TextFont::from_font_size(11.5),
+        TextColor(SYSTEM_COLOR),
+        ChatHintText,
+        DespawnOnExit(Screen::Game),
+    ));
 
     // Single-line input box, hidden until the player presses Enter.
     commands
@@ -120,9 +156,18 @@ fn chat_keyboard(
             // Enter/Escape act only on the true press, never on key-repeat, so a
             // held key can't send-then-reopen or instantly close the box.
             Key::Enter if !ev.repeat => {
-                let text = chat.buffer.trim().to_string();
-                if !text.is_empty() {
-                    net.send(ClientMsg::Chat { text });
+                let raw = chat.buffer.trim();
+                // "/l " sends nearby chat (`ChatLocal`, a transient
+                // `Bubble` to players in earshot) instead of the persistent
+                // world-wide log — same message box, just a different wire
+                // message depending on the prefix.
+                if let Some(rest) = raw.strip_prefix("/l ").or_else(|| raw.strip_prefix("/l")) {
+                    let text = rest.trim().to_string();
+                    if !text.is_empty() {
+                        net.send(ClientMsg::ChatLocal { text });
+                    }
+                } else if !raw.is_empty() {
+                    net.send(ClientMsg::Chat { text: raw.to_string() });
                 }
                 chat.buffer.clear();
                 chat.active = false;
@@ -176,11 +221,17 @@ fn update_chat_log(view: Res<GameView>, mut lines: Query<(&mut Text, &mut TextCo
 
 fn update_chat_input(
     chat: Res<ChatState>,
-    mut root: Query<&mut Node, With<ChatInputRoot>>,
+    mut root: Query<&mut Node, (With<ChatInputRoot>, Without<ChatHintText>)>,
+    mut hint: Query<&mut Node, (With<ChatHintText>, Without<ChatInputRoot>)>,
     mut text: Query<&mut Text, With<ChatInputText>>,
 ) {
     let display = if chat.active { Display::Flex } else { Display::None };
     for mut node in &mut root {
+        if node.display != display {
+            node.display = display;
+        }
+    }
+    for mut node in &mut hint {
         if node.display != display {
             node.display = display;
         }
@@ -192,6 +243,75 @@ fn update_chat_input(
         let new = format!("> {}_", chat.buffer);
         if t.0 != new {
             t.0 = new;
+        }
+    }
+}
+
+/// Spawns one floating world-space bubble for `player_id`'s message,
+/// screen-projected above their current avatar/cursor position each frame by
+/// `update_bubbles`. Called from `social.rs::drain_bubbles_to_toasts` (the
+/// single drain point for `SocialState.bubbles`, see its doc comment) rather
+/// than being a system itself, since the inbox must only be drained once.
+pub(crate) fn spawn_bubble(commands: &mut Commands, player_id: u64, name: String, color: u8, text: String) {
+    commands.spawn((
+        Text::new(format!("{name}: {text}")),
+        TextFont::from_font_size(13.0),
+        TextColor(player_color(color)),
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(-1000.0),
+            top: Val::Px(-1000.0),
+            ..default()
+        },
+        ChatBubble { player_id, age: 0.0 },
+        DespawnOnExit(Screen::Game),
+    ));
+}
+
+/// Positions every live bubble above its sender's current world anchor
+/// (`render::sender_anchor` — the avatar in the central world, the remote
+/// cursor marker elsewhere, or a direct snapshot lookup as a fallback that
+/// also covers the local player, who never gets a marker of their own) each
+/// frame, fades it out over the last `BUBBLE_FADE` seconds of its life, and
+/// despawns it once `BUBBLE_LIFETIME` elapses.
+pub fn update_bubbles(
+    time: Res<Time>,
+    view: Res<GameView>,
+    avatars: Res<AvatarViz>,
+    cursors: Res<CursorViz>,
+    mut commands: Commands,
+    avatar_q: Query<&Transform, With<AvatarWalk>>,
+    cursor_q: Query<&Transform, With<CursorMarker>>,
+    camera: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    mut bubbles: Query<(Entity, &mut ChatBubble, &mut Node, &mut TextColor, &mut Visibility)>,
+) {
+    let Some(state) = view.state.as_ref() else { return };
+    let Ok((cam, cam_gt)) = camera.single() else { return };
+    for (entity, mut bubble, mut node, mut color, mut vis) in &mut bubbles {
+        bubble.age += time.delta_secs();
+        if bubble.age > BUBBLE_LIFETIME {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let remaining = BUBBLE_LIFETIME - bubble.age;
+        if remaining < BUBBLE_FADE {
+            color.0.set_alpha((remaining / BUBBLE_FADE).clamp(0.0, 1.0));
+        }
+        let anchor = super::render::sender_anchor(
+            bubble.player_id,
+            state,
+            &avatars,
+            &cursors,
+            &avatar_q,
+            &cursor_q,
+        );
+        match anchor.and_then(|p| cam.world_to_viewport(cam_gt, p + Vec3::Y * 1.1).ok()) {
+            Some(p) => {
+                *vis = Visibility::Visible;
+                node.left = Val::Px(p.x - 60.0);
+                node.top = Val::Px(p.y - 46.0);
+            }
+            None => *vis = Visibility::Hidden,
         }
     }
 }

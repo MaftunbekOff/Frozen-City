@@ -117,6 +117,12 @@ pub fn pump_net(
             ServerMsg::Invited { host, host_name } => {
                 social.invite = Some((host, host_name));
             }
+            ServerMsg::Showcase { entries } => {
+                social.showcase = entries;
+            }
+            ServerMsg::VisitPolicy { allow_offline } => {
+                social.visit_policy = Some(allow_offline);
+            }
         }
     }
 }

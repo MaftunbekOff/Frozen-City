@@ -65,6 +65,7 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
         workers: 0,
         progress: 0.0,
         owner: None,
+        owner_account: None,
     };
 
     let mut state = GameState {
@@ -108,6 +109,7 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
         owner_id: None,
         next_id,
         rng: rng.0,
+        central_ledger: Vec::new(),
     };
     push_event(
         &mut state,
@@ -586,9 +588,15 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                 } else {
                     1.0
                 };
-                state.stock.wood -= kind.cost_wood() as f32 * discount;
+                let spent_wood = kind.cost_wood() as f32 * discount;
+                state.stock.wood -= spent_wood;
                 let id = state.next_id;
                 state.next_id += 1;
+                // Central-world buildings are owned by the placing ACCOUNT
+                // (so only that account may later demolish them, across any
+                // of its sessions); elsewhere ownership stays session-based
+                // as before (`owner_account: None`).
+                let owner_account = if state.central { state.player_account(player) } else { None };
                 state.buildings.push(Building {
                     id,
                     kind: *kind,
@@ -597,7 +605,13 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                     workers: 0,
                     progress: 0.0,
                     owner: Some(player),
+                    owner_account,
                 });
+                // Central-world economy v1: charge the placing account's
+                // ledger for what it spent, so a showcase can reflect it.
+                if let Some(acc) = owner_account {
+                    state.credit_ledger(acc, |t| t.wood_spent += spent_wood);
+                }
                 // Attribute the placement to the player, if they're in the roster.
                 let name = state.player(player).map(|p| p.name.clone());
                 if let Some(p) = state.players.iter_mut().find(|p| p.id == player) {
@@ -839,9 +853,9 @@ pub fn tick(state: &mut GameState) {
         1.0
     };
     for i in 0..state.buildings.len() {
-        let (kind, bx, by, workers) = {
+        let (kind, bx, by, workers, owner_account) = {
             let b = &state.buildings[i];
-            (b.kind, b.x, b.y, b.workers)
+            (b.kind, b.x, b.y, b.workers, b.owner_account)
         };
         if workers == 0 {
             continue;
@@ -851,6 +865,14 @@ pub fn tick(state: &mut GameState) {
             continue;
         }
         let amount = workers as f32 * per_day / TICKS_PER_DAY as f32 * tools_factor;
+        // Central-world economy v1: credit whatever this building actually
+        // adds to the shared stock this tick to its owning account's ledger
+        // — measured as an actual delta (not just `amount`) so Sawmill/
+        // CoalMine's discrete, depletion-bounded output is credited exactly,
+        // never more than what really landed in the stockpile.
+        let wood_before = state.stock.wood;
+        let coal_before = state.stock.coal;
+        let food_before = state.stock.food;
         match kind {
             BuildingKind::HunterHut => state.stock.food += amount,
             BuildingKind::Greenhouse => state.stock.food += amount,
@@ -882,6 +904,20 @@ pub fn tick(state: &mut GameState) {
                 }
             }
             _ => {}
+        }
+        if state.central {
+            if let Some(acc) = owner_account {
+                let dwood = state.stock.wood - wood_before;
+                let dcoal = state.stock.coal - coal_before;
+                let dfood = state.stock.food - food_before;
+                if dwood != 0.0 || dcoal != 0.0 || dfood != 0.0 {
+                    state.credit_ledger(acc, |t| {
+                        t.wood += dwood;
+                        t.coal += dcoal;
+                        t.food += dfood;
+                    });
+                }
+            }
         }
     }
 

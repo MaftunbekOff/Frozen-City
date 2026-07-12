@@ -51,6 +51,8 @@ pub struct RegionButton(&'static str);
 pub enum AccountField {
     Login,
     Password,
+    /// Desired display name — only shown/used in `RegisterMode::Register`.
+    Name,
 }
 
 /// Text typed into the account sign-in fields on the menu, and which of the
@@ -61,7 +63,15 @@ pub enum AccountField {
 pub struct LoginForm {
     pub login: String,
     pub password: String,
+    /// Desired display name, register mode only.
+    pub name: String,
     pub focus: Option<AccountField>,
+    /// Toggles the sign-in row between "Kirish" (Login) and "Ro'yxatdan
+    /// o'tish" (Register) — both post through the same three text fields,
+    /// only the button label/behavior and the visibility of the Name field
+    /// change. Kept on `LoginForm` (not a separate resource) so it survives
+    /// a menu respawn the same way the field text does.
+    pub register: bool,
 }
 
 #[derive(Component)]
@@ -72,6 +82,16 @@ pub(crate) struct LoginFieldText(AccountField);
 
 #[derive(Component)]
 pub(crate) struct AccountLoginButton;
+
+#[derive(Component)]
+pub(crate) struct AccountLoginButtonLabel;
+
+/// Switches `LoginForm::register` between sign-in and create-account mode.
+#[derive(Component)]
+pub(crate) struct RegisterToggleButton;
+
+#[derive(Component)]
+pub(crate) struct RegisterToggleLabel;
 
 pub fn spawn_menu(mut commands: Commands, settings: Res<Settings>, view: Res<GameView>) {
     let error = view.error.clone().unwrap_or_default();
@@ -196,7 +216,7 @@ pub fn spawn_menu(mut commands: Commands, settings: Res<Settings>, view: Res<Gam
             }
 
             p.spawn((
-                Text::new("Yoki akkaunt bilan kiring (Login/Parol — Telegram bot orqali ro'yxatdan o'ting):"),
+                Text::new("Akkaunt bilan kiring, yoki shu yerdan ro'yxatdan o'ting:"),
                 TextFont::from_font_size(13.0),
                 TextColor(TEXT_DIM),
             ));
@@ -207,7 +227,9 @@ pub fn spawn_menu(mut commands: Commands, settings: Res<Settings>, view: Res<Gam
                 ..default()
             })
             .with_children(|row| {
-                for field in [AccountField::Login, AccountField::Password] {
+                // Name is register-only; its box is hidden (Display::None) in
+                // login mode by `update_login_fields`.
+                for field in [AccountField::Name, AccountField::Login, AccountField::Password] {
                     row.spawn((
                         Button,
                         Node {
@@ -247,6 +269,28 @@ pub fn spawn_menu(mut commands: Commands, settings: Res<Settings>, view: Res<Gam
                         Text::new("Kirish"),
                         TextFont::from_font_size(15.0),
                         TextColor(TEXT_MAIN),
+                        AccountLoginButtonLabel,
+                    ));
+                });
+                row.spawn((
+                    Button,
+                    Node {
+                        width: Val::Px(180.0),
+                        height: Val::Px(40.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundColor(FIELD_BG),
+                    BaseColor(FIELD_BG),
+                    RegisterToggleButton,
+                ))
+                .with_children(|b| {
+                    b.spawn((
+                        Text::new("Ro'yxatdan o'tish"),
+                        TextFont::from_font_size(13.0),
+                        TextColor(TEXT_DIM),
+                        RegisterToggleLabel,
                     ));
                 });
             });
@@ -475,6 +519,9 @@ fn start_game(
                     central: false,
                     owner_account: None,
                     invites: None,
+                    // Cross-world invite delivery only matters for the
+                    // central world; local host/singleplayer has neither.
+                    world_manager: None,
                 };
                 let handle = server::start(config)
                     .map_err(|e| format!("Could not start the server: {e}"))?;
@@ -538,9 +585,9 @@ pub fn login_field_focus(
     }
 }
 
-/// Capture keystrokes into whichever account field has focus. Tab swaps
-/// focus between the two fields, Escape clears it, Enter submits (same as
-/// clicking Kirish).
+/// Capture keystrokes into whichever account field has focus. Tab cycles
+/// focus through the fields (Name only reachable in register mode), Escape
+/// clears it, Enter submits (same as clicking Kirish/Ro'yxatdan o'tish).
 #[allow(clippy::too_many_arguments)]
 pub fn login_form_keyboard(
     mut events: MessageReader<KeyboardInput>,
@@ -561,13 +608,10 @@ pub fn login_form_keyboard(
         }
         match &ev.logical_key {
             Key::Tab => {
-                form.focus = Some(match focus {
-                    AccountField::Login => AccountField::Password,
-                    AccountField::Password => AccountField::Login,
-                });
+                form.focus = Some(next_field(focus, form.register));
             }
             Key::Enter if !ev.repeat => {
-                match submit_login(&form, &settings, &mut net, &mut view, &mut session) {
+                match submit(&form, &settings, &mut net, &mut view, &mut session) {
                     Ok(()) => next.set(Screen::Game),
                     Err(e) => {
                         if let Ok(mut t) = error_text.single_mut() {
@@ -583,12 +627,14 @@ pub fn login_form_keyboard(
                 match focus {
                     AccountField::Login => form.login.pop(),
                     AccountField::Password => form.password.pop(),
+                    AccountField::Name => form.name.pop(),
                 };
             }
             Key::Character(s) => {
                 let len = match focus {
                     AccountField::Login => form.login.chars().count(),
                     AccountField::Password => form.password.chars().count(),
+                    AccountField::Name => form.name.chars().count(),
                 };
                 if len < MAX_FIELD_LEN {
                     for c in s.chars() {
@@ -596,6 +642,7 @@ pub fn login_form_keyboard(
                             match focus {
                                 AccountField::Login => form.login.push(c),
                                 AccountField::Password => form.password.push(c),
+                                AccountField::Name => form.name.push(c),
                             }
                         }
                     }
@@ -606,7 +653,25 @@ pub fn login_form_keyboard(
     }
 }
 
-/// The "Kirish" button — same submit path as pressing Enter in a field.
+/// Tab order: login mode skips the Name field entirely (it isn't shown, so it
+/// must never gain focus); register mode cycles Name -> Login -> Password.
+fn next_field(current: AccountField, register: bool) -> AccountField {
+    if register {
+        match current {
+            AccountField::Name => AccountField::Login,
+            AccountField::Login => AccountField::Password,
+            AccountField::Password => AccountField::Name,
+        }
+    } else {
+        match current {
+            AccountField::Login | AccountField::Name => AccountField::Password,
+            AccountField::Password => AccountField::Login,
+        }
+    }
+}
+
+/// The "Kirish"/"Ro'yxatdan o'tish" button — same submit path as pressing
+/// Enter in a field.
 #[allow(clippy::too_many_arguments)]
 pub fn account_login_button(
     q: Query<&Interaction, (With<AccountLoginButton>, Changed<Interaction>)>,
@@ -622,7 +687,7 @@ pub fn account_login_button(
         if *interaction != Interaction::Pressed {
             continue;
         }
-        match submit_login(&form, &settings, &mut net, &mut view, &mut session) {
+        match submit(&form, &settings, &mut net, &mut view, &mut session) {
             Ok(()) => next.set(Screen::Game),
             Err(e) => {
                 if let Ok(mut t) = error_text.single_mut() {
@@ -631,6 +696,37 @@ pub fn account_login_button(
             }
         }
         return;
+    }
+}
+
+/// Flips `LoginForm::register`; a fresh mode starts with a clean error line
+/// but keeps whatever the player already typed (switching to fix a typo
+/// shouldn't lose their login/password).
+pub fn register_toggle_button(
+    q: Query<&Interaction, (With<RegisterToggleButton>, Changed<Interaction>)>,
+    mut form: ResMut<LoginForm>,
+) {
+    for interaction in &q {
+        if *interaction == Interaction::Pressed {
+            form.register = !form.register;
+            form.focus = None;
+        }
+    }
+}
+
+/// Dispatches to `submit_login` or `submit_register` depending on the
+/// current form mode.
+fn submit(
+    form: &LoginForm,
+    settings: &Settings,
+    net: &mut NetConn,
+    view: &mut GameView,
+    session: &mut Session,
+) -> Result<(), String> {
+    if form.register {
+        submit_register(form, settings, net, view, session)
+    } else {
+        submit_login(form, settings, net, view, session)
     }
 }
 
@@ -686,14 +782,73 @@ fn submit_login(
     Ok(())
 }
 
+/// Dials `settings.join_addr` with `ClientMsg::Register` — creates the
+/// account right from the client (no Telegram bot) and, on success, signs
+/// straight into the fresh personal world exactly like a `Login` would (the
+/// server answers with the same `Welcome`/`AuthFailed` pair either way).
+fn submit_register(
+    form: &LoginForm,
+    settings: &Settings,
+    net: &mut NetConn,
+    view: &mut GameView,
+    session: &mut Session,
+) -> Result<(), String> {
+    let login = form.login.trim();
+    let password = form.password.trim();
+    let name = form.name.trim();
+    if login.is_empty() || password.is_empty() || name.is_empty() {
+        return Err("Ism, login va parolni kiriting.".to_string());
+    }
+    let hello = ClientMsg::Register {
+        login: login.to_string(),
+        password: password.to_string(),
+        name: name.to_string(),
+    };
+    // Accounts are main-region-only, same reasoning as `submit_login`.
+    #[cfg(target_arch = "wasm32")]
+    let addr = main_region_addr(&settings.join_addr);
+    #[cfg(not(target_arch = "wasm32"))]
+    let addr = settings.join_addr.clone();
+    #[cfg(not(target_arch = "wasm32"))]
+    let conn = frozen_city::net::client::connect_tcp_with(&addr, hello)
+        .map_err(|e| format!("Could not join {addr}: {e}"))?;
+    #[cfg(target_arch = "wasm32")]
+    let conn = frozen_city::net::ws::connect_with(&ws_url(&addr), hello)
+        .map_err(|e| format!("Could not join {addr}: {e}"))?;
+
+    // The freshly created account signs in with the same login/password the
+    // player just chose — later reconnects (and Tunnel world-switches) replay
+    // a plain `Login`, matching `submit_login`'s session shape.
+    *session = Session {
+        join_addr: addr,
+        name: settings.name.clone(),
+        auth: Some(AccountAuth {
+            login: login.to_string(),
+            password: password.to_string(),
+        }),
+        token: None,
+        reconnectable: true,
+        attempts: 0,
+        central: false,
+        visiting: None,
+    };
+    *view = GameView::default();
+    net.0 = Some(Mutex::new(conn));
+    Ok(())
+}
+
 /// Reflects `LoginForm` onto the field boxes/text every frame: focus tint,
-/// typed value (password masked), and an idle placeholder when empty.
+/// typed value (password masked — same as the existing Login/Password
+/// fields, Name never masks), an idle placeholder when empty, and the Name
+/// field's box only shown in register mode (`Display::None` in login mode,
+/// matching the display-toggle idiom used by every modal panel in this
+/// codebase, e.g. `roster.rs::update_roster`).
 pub fn update_login_fields(
     form: Res<LoginForm>,
-    mut boxes: Query<(&LoginFieldBox, &mut BackgroundColor)>,
+    mut boxes: Query<(&LoginFieldBox, &mut BackgroundColor, &mut Node)>,
     mut texts: Query<(&LoginFieldText, &mut Text, &mut TextColor)>,
 ) {
-    for (marker, mut bg) in &mut boxes {
+    for (marker, mut bg, mut node) in &mut boxes {
         let target = if form.focus == Some(marker.0) {
             FIELD_FOCUS_BG
         } else {
@@ -702,11 +857,20 @@ pub fn update_login_fields(
         if bg.0 != target {
             bg.0 = target;
         }
+        let display = if marker.0 == AccountField::Name && !form.register {
+            Display::None
+        } else {
+            Display::Flex
+        };
+        if node.display != display {
+            node.display = display;
+        }
     }
     for (marker, mut text, mut color) in &mut texts {
         let (value, masked, placeholder) = match marker.0 {
             AccountField::Login => (form.login.as_str(), false, "Login"),
             AccountField::Password => (form.password.as_str(), true, "Parol"),
+            AccountField::Name => (form.name.as_str(), false, "Ism"),
         };
         let focused = form.focus == Some(marker.0);
         let (new, c) = if value.is_empty() && !focused {
@@ -725,6 +889,36 @@ pub fn update_login_fields(
         }
         if color.0 != c {
             color.0 = c;
+        }
+    }
+}
+
+/// Swaps the submit button's label and the toggle button's own caption
+/// between the two modes.
+pub fn update_register_toggle(
+    form: Res<LoginForm>,
+    mut submit_label: Query<
+        &mut Text,
+        (With<AccountLoginButtonLabel>, Without<RegisterToggleLabel>),
+    >,
+    mut toggle_label: Query<
+        &mut Text,
+        (With<RegisterToggleLabel>, Without<AccountLoginButtonLabel>),
+    >,
+) {
+    let (submit, toggle) = if form.register {
+        ("Ro'yxatdan o'tish", "Kirish rejimi")
+    } else {
+        ("Kirish", "Ro'yxatdan o'tish")
+    };
+    if let Ok(mut t) = submit_label.single_mut() {
+        if t.0 != submit {
+            t.0 = submit.to_string();
+        }
+    }
+    if let Ok(mut t) = toggle_label.single_mut() {
+        if t.0 != toggle {
+            t.0 = toggle.to_string();
         }
     }
 }

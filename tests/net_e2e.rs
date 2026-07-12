@@ -51,6 +51,7 @@ fn two_clients_share_one_city() {
         central: false,
         owner_account: None,
         invites: None,
+        world_manager: None,
     })
     .expect("server starts");
     let port = handle.addr.expect("bound addr").port();
@@ -110,6 +111,7 @@ fn tiles_are_omitted_but_periodically_included() {
         central: false,
         owner_account: None,
         invites: None,
+        world_manager: None,
     })
     .expect("server starts");
     let port = handle.addr.expect("addr").port();
@@ -159,6 +161,7 @@ fn websocket_and_tcp_clients_share_one_city() {
         central: false,
         owner_account: None,
         invites: None,
+        world_manager: None,
     })
     .expect("server starts");
     let port = handle.addr.expect("addr").port();
@@ -244,6 +247,7 @@ fn http_get_serves_the_web_page() {
         central: false,
         owner_account: None,
         invites: None,
+        world_manager: None,
     })
     .expect("server starts");
     let port = handle.addr.expect("addr").port();

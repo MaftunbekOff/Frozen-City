@@ -59,10 +59,13 @@ pub fn touch_control(
     mut selection: ResMut<Selection>,
     camera: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     chat: Res<super::chat::ChatState>,
+    social: Res<super::social::SocialOpen>,
 ) {
-    // While composing a chat message, touches must not pan/zoom or build,
-    // matching how camera_control and build_input gate on chat.active.
-    if chat.active {
+    // While composing a chat message or browsing the social panel, touches
+    // must not pan/zoom or build, matching how camera_control and
+    // build_input gate on chat.active (social.0 added for the same reason —
+    // the panel has its own buttons that would otherwise fight world taps).
+    if chat.active || social.0 {
         ctl.single = None;
         ctl.pinch = None;
         return;

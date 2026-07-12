@@ -58,11 +58,13 @@ pub fn camera_control(
     ui_hover: Res<UiHover>,
     chat: Res<ChatState>,
     research: Res<super::research::ResearchOpen>,
+    social: Res<super::social::SocialOpen>,
     mut rig: ResMut<CamRig>,
     mut cam: Query<&mut Transform, With<Camera3d>>,
 ) {
-    // While typing in chat or browsing the research modal, the world ignores input.
-    if chat.active || research.0 {
+    // While typing in chat or browsing the research/social modal, the world
+    // ignores input.
+    if chat.active || research.0 || social.0 {
         return;
     }
     // Zoom (mouse wheel), unless the cursor is parked on the UI.
@@ -158,9 +160,10 @@ pub fn build_input(
     mut ghost: Query<(&mut Transform, &GhostMarker, &mut Visibility)>,
     chat: Res<ChatState>,
     research: Res<super::research::ResearchOpen>,
+    social: Res<super::social::SocialOpen>,
 ) {
-    // While typing in chat or in the research modal, keys don't build/cancel.
-    if chat.active || research.0 {
+    // While typing in chat or in the research/social modal, keys don't build/cancel.
+    if chat.active || research.0 || social.0 {
         hide_ghost(&mut ghost);
         return;
     }
