@@ -212,10 +212,20 @@ pub fn fit_ui_scale(
     mut scale: ResMut<UiScale>,
 ) {
     let Ok(w) = window.single() else { return };
-    // Pivot chosen so the widest fixed row (the 7-building + furnace build bar,
-    // ~1000 px) fits: windows at/above it stay crisp at 1.0, narrower ones
-    // shrink the whole HUD to fit rather than overflow.
-    let target = (w.resolution.width() / 1000.0).clamp(0.5, 1.0);
+    // Pivot: the build bar (8 buildings + furnace controls, ~1000 px) is
+    // still the widest *unscaled* row on Desktop/Tablet, where it never
+    // scrolls — so 1000 px remains the right value there, same as before.
+    // On Mobile the build bar now scrolls horizontally instead of shrinking
+    // to fit (`ui::spawn_hud`'s build bar uses `Overflow::scroll_x` there),
+    // so it no longer needs this system to squeeze it down to legibility;
+    // the row that still can't scroll on Mobile is the two-row top bar
+    // (~650 px at its widest realistic content), comfortably narrower than
+    // the old build bar pivot. Since a phone-width HUD only needed the
+    // aggressive low end (down to 0.5) to fit that unscrollable build bar,
+    // and that pressure is gone, the floor is raised to 0.8: small enough to
+    // give a little headroom on narrow phones, high enough that resource/
+    // clock/morale text never becomes hard to read.
+    let target = (w.resolution.width() / 1000.0).clamp(0.8, 1.0);
     if (scale.0 - target).abs() > 0.01 {
         scale.0 = target;
     }

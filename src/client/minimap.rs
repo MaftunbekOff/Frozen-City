@@ -81,10 +81,14 @@ fn spawn_minimap(mut commands: Commands, tex: Res<MinimapTex>) {
                 width: Val::Px(MINIMAP_PX),
                 height: Val::Px(MINIMAP_PX),
                 border: UiRect::all(Val::Px(2.0)),
+                border_radius: BorderRadius::all(Val::Px(super::theme::RAD_BTN)),
+                // Clip the square minimap texture to the rounded frame —
+                // otherwise its corners would poke past the rounded border.
+                overflow: Overflow::clip(),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.04, 0.06, 0.10, 0.85)),
-            BorderColor::all(Color::srgba(0.55, 0.68, 0.85, 0.6)),
+            BackgroundColor(super::theme::BG_PANEL),
+            BorderColor::all(super::theme::BORDER_STRONG),
             // Register as a UI region so world clicks/zoom are suppressed here,
             // and track the cursor's position within it for click-to-navigate.
             Interaction::default(),
