@@ -53,9 +53,9 @@ pub struct FurnaceLvlBtn(pub u8);
 #[derive(Component)]
 pub struct UiBlocker;
 
-/// Resting color for generically hover-styled buttons.
-#[derive(Component)]
-pub struct BaseColor(pub Color);
+/// Resting color for generically hover-styled buttons — now part of the
+/// design system; re-exported so existing `ui::BaseColor` paths keep working.
+pub use super::theme::BaseColor;
 
 #[derive(Component)]
 pub struct SelPanelRoot;
@@ -896,6 +896,7 @@ pub fn selection_panel_buttons(
 pub fn game_over_ui(
     view: Res<GameView>,
     session: Res<Session>,
+    lang: Res<super::i18n::Lang>,
     mut pending: ResMut<PendingSwitch>,
     mut transition: ResMut<TransitionMsg>,
     mut next: ResMut<NextState<Screen>>,
@@ -916,7 +917,7 @@ pub fn game_over_ui(
         // The dial happens in `menu::pending_switch` after the game scene
         // tears down — see `PendingSwitch`.
         pending.0 = Some(WorldTarget::Central);
-        transition.text = Some(WorldTarget::Central.transition_label(None));
+        transition.text = Some(WorldTarget::Central.transition_label(None, *lang));
         transition.age = 0.0;
         next.set(Screen::Menu);
         return;
@@ -1005,6 +1006,7 @@ pub fn game_over_ui(
 pub fn world_switch_button(
     view: Res<GameView>,
     session: Res<Session>,
+    lang: Res<super::i18n::Lang>,
     mut pending: ResMut<PendingSwitch>,
     mut transition: ResMut<TransitionMsg>,
     mut next: ResMut<NextState<Screen>>,
@@ -1029,7 +1031,7 @@ pub fn world_switch_button(
         if let Some((world, _)) = target {
             if *interaction == Interaction::Pressed {
                 pending.0 = Some(world);
-                transition.text = Some(world.transition_label(None));
+                transition.text = Some(world.transition_label(None, *lang));
                 transition.age = 0.0;
                 next.set(Screen::Menu);
                 return;

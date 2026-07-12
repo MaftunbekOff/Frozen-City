@@ -12,6 +12,7 @@ use frozen_city::game::types::GamePhase;
 use frozen_city::net::client::ClientConn;
 use frozen_city::net::protocol::{ClientMsg, ServerMsg};
 
+use super::i18n::{self, Lang};
 use super::{BubbleEvent, GameView, NetConn, Screen, Session, SocialState};
 
 /// Holds an in-flight background reconnect dial (native). `None` when idle.
@@ -147,6 +148,7 @@ pub fn watch_disconnect(
     mut session: ResMut<Session>,
     mut reconnecting: ResMut<Reconnecting>,
     mut next: ResMut<NextState<Screen>>,
+    lang: Res<Lang>,
 ) {
     // 1) Poll an in-flight (native) reconnect dial without blocking.
     let outcome: Option<Option<ClientConn>> = reconnecting.pending.as_ref().and_then(|m| {
@@ -186,7 +188,7 @@ pub fn watch_disconnect(
             return;
         }
     }
-    view.error = Some("Connection to the server was lost.".to_string());
+    view.error = Some(i18n::connection_lost(*lang).to_string());
     next.set(Screen::Menu);
 }
 

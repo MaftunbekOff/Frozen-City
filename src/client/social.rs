@@ -12,7 +12,7 @@ use frozen_city::net::protocol::ClientMsg;
 
 use super::chat::ChatState;
 use super::ui::{BaseColor, UiBlocker};
-use super::{GameView, NetConn, PendingSwitch, Screen, Session, SocialState, WorldTarget};
+use super::{i18n, GameView, NetConn, PendingSwitch, Screen, Session, SocialState, WorldTarget};
 
 /// Visible friend rows at once — friends lists are small (this is a co-op
 /// hub, not a social network), so no "+N more" overflow line like the
@@ -635,6 +635,7 @@ fn update_social_panel(
 fn friend_buttons(
     net: Res<NetConn>,
     social: Res<SocialState>,
+    lang: Res<i18n::Lang>,
     visit: Query<(&Interaction, &VisitBtn), Changed<Interaction>>,
     invite: Query<(&Interaction, &InviteBtn), Changed<Interaction>>,
     remove: Query<(&Interaction, &RemoveBtn), Changed<Interaction>>,
@@ -653,7 +654,7 @@ fn friend_buttons(
                 let target = WorldTarget::Visit(account);
                 let name = social.friends.iter().find(|f| f.account == account).map(|f| f.name.as_str());
                 pending.0 = Some(target);
-                transition.text = Some(target.transition_label(name));
+                transition.text = Some(target.transition_label(name, *lang));
                 transition.age = 0.0;
                 open.0 = false;
                 next.set(Screen::Menu);
@@ -794,6 +795,7 @@ fn update_invite_toast(
 fn invite_accept_button(
     clicked: Query<&Interaction, (Changed<Interaction>, With<InviteAcceptBtn>)>,
     social: Res<SocialState>,
+    lang: Res<i18n::Lang>,
     mut pending: ResMut<PendingSwitch>,
     mut transition: ResMut<super::TransitionMsg>,
     mut next: ResMut<NextState<Screen>>,
@@ -803,7 +805,7 @@ fn invite_accept_button(
         if let Some((host, host_name)) = social.invite.clone() {
             let target = WorldTarget::Visit(host);
             pending.0 = Some(target);
-            transition.text = Some(target.transition_label(Some(&host_name)));
+            transition.text = Some(target.transition_label(Some(&host_name), *lang));
             transition.age = 0.0;
             open.0 = false;
             next.set(Screen::Menu);
@@ -840,13 +842,14 @@ fn update_visiting_indicator(
 
 fn go_home_button(
     clicked: Query<&Interaction, (Changed<Interaction>, With<GoHomeBtn>)>,
+    lang: Res<i18n::Lang>,
     mut pending: ResMut<PendingSwitch>,
     mut transition: ResMut<super::TransitionMsg>,
     mut next: ResMut<NextState<Screen>>,
 ) {
     if clicked.iter().any(|i| *i == Interaction::Pressed) {
         pending.0 = Some(WorldTarget::Personal);
-        transition.text = Some(WorldTarget::Personal.transition_label(None));
+        transition.text = Some(WorldTarget::Personal.transition_label(None, *lang));
         transition.age = 0.0;
         next.set(Screen::Menu);
     }

@@ -10,6 +10,7 @@ use bevy::prelude::*;
 use frozen_city::net::server::{self, ServerConfig};
 use frozen_city::net::protocol::ClientMsg;
 
+use super::i18n::{self, Lang};
 use super::ui::BaseColor;
 use super::*;
 
@@ -18,8 +19,9 @@ const TEXT_MAIN: Color = Color::srgb(0.90, 0.93, 0.97);
 const TEXT_DIM: Color = Color::srgb(0.58, 0.65, 0.76);
 const FIELD_BG: Color = Color::srgba(0.02, 0.04, 0.08, 0.92);
 const FIELD_FOCUS_BG: Color = Color::srgb(0.10, 0.16, 0.26);
-/// Highlight for whichever region button matches the live `join_addr` path.
-#[cfg(target_arch = "wasm32")]
+/// Highlight for whichever region button matches the live `join_addr` path,
+/// and (native and web alike) whichever Language/Graphics/Sound setting
+/// button matches the current preference.
 const BTN_ACTIVE: Color = Color::srgb(0.24, 0.36, 0.52);
 /// Anti-runaway-buffer cap on the account fields; the server never trusts
 /// the client anyway (a login/password pair is just looked up against the
@@ -93,9 +95,55 @@ pub(crate) struct RegisterToggleButton;
 #[derive(Component)]
 pub(crate) struct RegisterToggleLabel;
 
-pub fn spawn_menu(mut commands: Commands, settings: Res<Settings>, view: Res<GameView>) {
-    let error = view.error.clone().unwrap_or_default();
+/// Marks the single despawn/respawn root of the whole menu screen, so a
+/// settings change that needs the menu rebuilt (currently: language) can find
+/// and despawn it without relying on `DespawnOnExit(Screen::Menu)` (which only
+/// fires on an actual state exit, not a same-state respawn).
+#[derive(Component)]
+pub(crate) struct MenuRoot;
 
+/// One of the three language-picker buttons in the settings block.
+#[derive(Component, Clone, Copy, PartialEq)]
+pub(crate) struct LangButton(pub Lang);
+
+/// One of the four graphics-quality-picker buttons in the settings block.
+#[derive(Component, Clone, Copy, PartialEq)]
+pub(crate) struct QualityButton(pub QualityPref);
+
+/// The Sound on/off toggle in the settings block.
+#[derive(Component)]
+pub(crate) struct AudioToggleButton;
+
+#[derive(Component)]
+pub(crate) struct AudioToggleLabel;
+
+pub fn spawn_menu(
+    commands: Commands,
+    settings: Res<Settings>,
+    view: Res<GameView>,
+    lang: Res<Lang>,
+    quality_pref: Res<QualityPref>,
+    audio: Res<AudioSettings>,
+) {
+    let error = view.error.clone().unwrap_or_default();
+    build_menu(commands, &settings, error, *lang, *quality_pref, *audio);
+}
+
+/// The actual menu layout, factored out of the `spawn_menu` system so
+/// `lang_buttons` can rebuild it too (from a click handler, it already holds
+/// plain values/`&mut`s, not fresh `Res<T>` system params — `Res`/`ResMut`
+/// can only be obtained by the scheduler injecting them into a system's
+/// signature, not constructed by hand). Both callers pass an owned/copied
+/// snapshot of each resource, never the resource references themselves.
+#[allow(clippy::too_many_arguments)]
+fn build_menu(
+    mut commands: Commands,
+    settings: &Settings,
+    error: String,
+    lang: Lang,
+    quality_pref: QualityPref,
+    audio: AudioSettings,
+) {
     commands
         .spawn((
             Node {
@@ -112,6 +160,7 @@ pub fn spawn_menu(mut commands: Commands, settings: Res<Settings>, view: Res<Gam
             },
             BackgroundColor(Color::srgb(0.035, 0.055, 0.095)),
             DespawnOnExit(Screen::Menu),
+            MenuRoot,
         ))
         .with_children(|p| {
             p.spawn((
@@ -214,6 +263,112 @@ pub fn spawn_menu(mut commands: Commands, settings: Res<Settings>, view: Res<Gam
                     }
                 });
             }
+
+            // Settings block: language, graphics quality, sound — all shown
+            // on every platform (unlike the region picker above, which is
+            // browser-only).
+            p.spawn((
+                Text::new("Til / Language:"),
+                TextFont::from_font_size(13.0),
+                TextColor(TEXT_DIM),
+            ));
+            p.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                column_gap: Val::Px(8.0),
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|row| {
+                for l in [Lang::Uz, Lang::En, Lang::Ru] {
+                    let bg = if lang == l { BTN_ACTIVE } else { BTN_BG };
+                    row.spawn((
+                        Button,
+                        Node {
+                            width: Val::Px(90.0),
+                            height: Val::Px(36.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        BackgroundColor(bg),
+                        LangButton(l),
+                    ))
+                    .with_children(|b| {
+                        b.spawn((
+                            Text::new(l.label()),
+                            TextFont::from_font_size(14.0),
+                            TextColor(TEXT_MAIN),
+                        ));
+                    });
+                }
+            });
+
+            p.spawn((
+                Text::new("Grafika:"),
+                TextFont::from_font_size(13.0),
+                TextColor(TEXT_DIM),
+            ));
+            p.spawn(Node {
+                flex_direction: FlexDirection::Row,
+                column_gap: Val::Px(8.0),
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|row| {
+                for (q, label) in [
+                    (QualityPref::Auto, "Avto"),
+                    (QualityPref::Low, "Past"),
+                    (QualityPref::Medium, "O'rta"),
+                    (QualityPref::High, "Yuqori"),
+                ] {
+                    let bg = if quality_pref == q { BTN_ACTIVE } else { BTN_BG };
+                    row.spawn((
+                        Button,
+                        Node {
+                            width: Val::Px(80.0),
+                            height: Val::Px(36.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        BackgroundColor(bg),
+                        QualityButton(q),
+                    ))
+                    .with_children(|b| {
+                        b.spawn((
+                            Text::new(label),
+                            TextFont::from_font_size(14.0),
+                            TextColor(TEXT_MAIN),
+                        ));
+                    });
+                }
+            });
+
+            p.spawn((
+                Text::new("Ovoz:"),
+                TextFont::from_font_size(13.0),
+                TextColor(TEXT_DIM),
+            ));
+            p.spawn((
+                Button,
+                Node {
+                    width: Val::Px(90.0),
+                    height: Val::Px(36.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(if audio.enabled { BTN_ACTIVE } else { BTN_BG }),
+                AudioToggleButton,
+            ))
+            .with_children(|b| {
+                b.spawn((
+                    Text::new(if audio.enabled { "On" } else { "Off" }),
+                    TextFont::from_font_size(14.0),
+                    TextColor(TEXT_MAIN),
+                    AudioToggleLabel,
+                ));
+            });
 
             p.spawn((
                 Text::new("Akkaunt bilan kiring, yoki shu yerdan ro'yxatdan o'ting:"),
@@ -493,6 +648,102 @@ fn with_path(addr: &str, path: &str) -> String {
         .map(|i| after_scheme + i)
         .unwrap_or(addr.len());
     format!("{}{path}", &addr[..prefix_end])
+}
+
+/// Click handling for the Language row: picks the clicked language, saves it,
+/// and despawns/respawns the whole menu (the simplest reliable way to reflect
+/// a language change everywhere labels appear — same idiom other screens use
+/// for a display-toggle, just applied to the whole root instead of one node).
+/// Rebuilds through the same [`build_menu`] helper `spawn_menu` uses, so the
+/// new menu picks up the new language's highlight immediately.
+#[allow(clippy::too_many_arguments)]
+pub fn lang_buttons(
+    mut commands: Commands,
+    clicked: Query<(&Interaction, &LangButton), Changed<Interaction>>,
+    root: Query<Entity, With<MenuRoot>>,
+    mut lang: ResMut<Lang>,
+    settings: Res<Settings>,
+    view: Res<GameView>,
+    quality_pref: Res<QualityPref>,
+    audio: Res<AudioSettings>,
+) {
+    for (interaction, btn) in &clicked {
+        if *interaction != Interaction::Pressed || btn.0 == *lang {
+            continue;
+        }
+        *lang = btn.0;
+        i18n::pref_set("lang", lang.code());
+        for e in &root {
+            commands.entity(e).despawn();
+        }
+        let error = view.error.clone().unwrap_or_default();
+        build_menu(commands, &settings, error, *lang, *quality_pref, *audio);
+        return;
+    }
+}
+
+/// Click handling and active-highlight for the Graphics row — same shape as
+/// `region_buttons`, but native and web alike. Unlike language, a quality
+/// change doesn't need a menu rebuild: nothing else on this screen displays
+/// the quality tier, and `render::setup_camera_and_assets` (which does read
+/// `Quality`) already ran once at startup — `QualityPref` only takes effect
+/// on the *next* app launch, exactly like the task's other saved prefs.
+pub fn quality_buttons(
+    clicked: Query<(&Interaction, &QualityButton), Changed<Interaction>>,
+    mut pref: ResMut<QualityPref>,
+    mut all: Query<(&QualityButton, &mut BackgroundColor)>,
+) {
+    for (interaction, btn) in &clicked {
+        if *interaction == Interaction::Pressed && btn.0 != *pref {
+            *pref = btn.0;
+            i18n::pref_set("quality", pref.code());
+        }
+    }
+    for (btn, mut bg) in &mut all {
+        let color = if btn.0 == *pref { BTN_ACTIVE } else { BTN_BG };
+        if bg.0 != color {
+            bg.0 = color;
+        }
+    }
+}
+
+/// Click handling for the Sound toggle. Takes effect immediately (unlike
+/// Graphics): `audio.rs`'s systems read `AudioSettings` every frame, so
+/// flipping it here silences/unsilences the running session right away.
+pub fn audio_toggle_button(
+    q: Query<&Interaction, (With<AudioToggleButton>, Changed<Interaction>)>,
+    mut audio: ResMut<AudioSettings>,
+) {
+    for interaction in &q {
+        if *interaction == Interaction::Pressed {
+            audio.enabled = !audio.enabled;
+            i18n::pref_set("audio", if audio.enabled { "on" } else { "off" });
+        }
+    }
+}
+
+/// Reflects `AudioSettings`/`QualityPref` onto their buttons' background and
+/// the Sound button's own label every frame — split from the click handlers
+/// above so it also runs when a respawned menu needs its very first paint to
+/// already show the right highlight/label (a freshly spawned button's
+/// `Interaction` never fires `Changed` on its own).
+pub fn update_settings_buttons(
+    audio: Res<AudioSettings>,
+    mut audio_bg: Query<&mut BackgroundColor, With<AudioToggleButton>>,
+    mut audio_label: Query<&mut Text, With<AudioToggleLabel>>,
+) {
+    if let Ok(mut bg) = audio_bg.single_mut() {
+        let color = if audio.enabled { BTN_ACTIVE } else { BTN_BG };
+        if bg.0 != color {
+            bg.0 = color;
+        }
+    }
+    if let Ok(mut t) = audio_label.single_mut() {
+        let label = if audio.enabled { "On" } else { "Off" };
+        if t.0 != label {
+            t.0 = label.to_string();
+        }
+    }
 }
 
 fn start_game(

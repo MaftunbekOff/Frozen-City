@@ -30,6 +30,9 @@ struct Cli {
     join_addr: String,
     host_port: u16,
     smoke: bool,
+    /// Explicit `--lang`/`?lang=` override; `None` falls through to the
+    /// saved preference, then the `Lang` default (see `resolve_lang`).
+    lang: Option<client::i18n::Lang>,
 }
 
 #[derive(PartialEq)]
@@ -50,6 +53,7 @@ fn parse_cli() -> Cli {
         join_addr: format!("127.0.0.1:{DEFAULT_PORT}"),
         host_port: DEFAULT_PORT,
         smoke: false,
+        lang: None,
     };
     let mut i = 0;
     while i < args.len() {
@@ -104,6 +108,12 @@ fn parse_cli() -> Cli {
                 }
             }
             "--smoke" => cli.smoke = true,
+            "--lang" => {
+                if let Some(l) = next.as_deref().and_then(client::i18n::Lang::from_code) {
+                    cli.lang = Some(l);
+                    i += 1;
+                }
+            }
             "--help" | "-h" => {
                 println!(
                     "Frozen City\n\
@@ -115,6 +125,7 @@ fn parse_cli() -> Cli {
                      --name <name>      player name\n\
                      --seed <n>         map seed\n\
                      --days <n>         days to survive (default {DEFAULT_WIN_DAYS})\n\
+                     --lang <uz|en|ru>  UI language (default: saved preference, or uz)\n\
                      --smoke            auto-exit after a few seconds (CI smoke test)"
                 );
                 std::process::exit(0);
@@ -130,6 +141,25 @@ fn whoami_default() -> String {
     std::env::var("USERNAME")
         .or_else(|_| std::env::var("USER"))
         .unwrap_or_else(|_| "Mayor".to_string())
+}
+
+/// Language priority: (1) an explicit `--lang`/`?lang=` override, already
+/// parsed by `parse_cli`/`apply_web_overrides`, (2) the saved preference, (3)
+/// `Lang::default()` (Uzbek).
+fn resolve_lang(explicit: Option<client::i18n::Lang>) -> client::i18n::Lang {
+    explicit
+        .or_else(|| client::i18n::pref_get("lang").as_deref().and_then(client::i18n::Lang::from_code))
+        .unwrap_or_default()
+}
+
+/// Graphics-quality-preference priority: just the saved preference, falling
+/// back to `QualityPref::Auto` (the platform-detected default) — unlike
+/// `Lang`, there is no CLI/URL override for this one.
+fn resolve_quality_pref() -> client::QualityPref {
+    client::i18n::pref_get("quality")
+        .as_deref()
+        .and_then(client::QualityPref::from_code)
+        .unwrap_or_default()
 }
 
 fn main() {
@@ -152,9 +182,13 @@ fn main() {
     };
 
     #[cfg(not(target_arch = "wasm32"))]
-    let quality = client::Quality::High;
+    let mut quality = client::Quality::High;
     #[cfg(target_arch = "wasm32")]
-    let quality = web_quality();
+    let mut quality = web_quality();
+    let quality_pref = resolve_quality_pref();
+    if let Some(forced) = quality_pref.resolve() {
+        quality = forced;
+    }
 
     #[allow(unused_mut)]
     let mut resolution: WindowResolution = (1280, 720).into();
@@ -204,6 +238,11 @@ fn main() {
         });
     }
 
+    let lang = resolve_lang(cli.lang);
+    let audio = client::AudioSettings {
+        enabled: client::i18n::pref_get("audio").as_deref() != Some("off"),
+    };
+
     App::new()
         .insert_resource(ClearColor(Color::srgb(0.035, 0.055, 0.095)))
         .add_plugins(plugins)
@@ -217,6 +256,9 @@ fn main() {
         })
         .insert_resource(AutoStart(auto))
         .insert_resource(quality)
+        .insert_resource(lang)
+        .insert_resource(quality_pref)
+        .insert_resource(audio)
         .add_plugins(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
         .add_plugins(ClientPlugin)
         .run();
@@ -354,6 +396,11 @@ fn apply_web_overrides(cli: &mut Cli) {
                 }
             }
             "join" => cli.mode = Mode::Join,
+            "lang" => {
+                if let Some(l) = client::i18n::Lang::from_code(&val) {
+                    cli.lang = Some(l);
+                }
+            }
             _ => {}
         }
     }

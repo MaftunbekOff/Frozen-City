@@ -9,7 +9,7 @@ use std::f32::consts::TAU;
 use bevy::audio::Volume;
 use bevy::prelude::*;
 
-use super::{GameView, Screen};
+use super::{AudioSettings, GameView, Screen};
 
 /// Sample rate for every synthesized clip. Modest on purpose: these are tiny,
 /// simple waveforms, so CD quality would just be wasted memory.
@@ -177,15 +177,17 @@ fn spawn_wind(mut commands: Commands, sfx: Res<Sfx>) {
 // ----------------------------------------------------------------- systems
 
 /// Ease the looping wind's volume toward its target instead of snapping, so
-/// a blizzard starting or ending fades rather than clicks.
+/// a blizzard starting or ending fades rather than clicks. Muted (eased to
+/// silence, same as no blizzard) whenever `AudioSettings::enabled` is false.
 fn blizzard_volume(
     view: Res<GameView>,
+    audio: Res<AudioSettings>,
     time: Res<Time>,
     mut sinks: Query<&mut AudioSink, With<WindSound>>,
 ) {
     let Ok(mut sink) = sinks.single_mut() else { return };
     let target = match view.state.as_ref() {
-        Some(state) if state.blizzard_active() => BLIZZARD_WIND_VOLUME,
+        Some(state) if audio.enabled && state.blizzard_active() => BLIZZARD_WIND_VOLUME,
         _ => 0.0,
     };
     let current = sink.volume().to_linear();
@@ -196,11 +198,14 @@ fn blizzard_volume(
 /// Fires a one-shot when the world changes: a soft thunk each time the
 /// building count grows, a two-note chime each time a new event lands.
 /// `prev` only ever compares against the previous frame, so the very first
-/// frame just primes it rather than firing a burst on load.
+/// frame just primes it rather than firing a burst on load. Still tracks
+/// `prev` while `AudioSettings::enabled` is false so re-enabling mid-session
+/// doesn't immediately fire a burst for everything that happened while muted.
 fn sfx_on_change(
     mut commands: Commands,
     view: Res<GameView>,
     sfx: Res<Sfx>,
+    audio: Res<AudioSettings>,
     mut prev: Local<Option<(usize, u64)>>,
 ) {
     let Some(state) = view.state.as_ref() else { return };
@@ -220,11 +225,13 @@ fn sfx_on_change(
         return;
     }
 
-    if buildings > prev_buildings {
-        commands.spawn((AudioPlayer(sfx.place.clone()), PlaybackSettings::DESPAWN));
-    }
-    if events > prev_events {
-        commands.spawn((AudioPlayer(sfx.event.clone()), PlaybackSettings::DESPAWN));
+    if audio.enabled {
+        if buildings > prev_buildings {
+            commands.spawn((AudioPlayer(sfx.place.clone()), PlaybackSettings::DESPAWN));
+        }
+        if events > prev_events {
+            commands.spawn((AudioPlayer(sfx.event.clone()), PlaybackSettings::DESPAWN));
+        }
     }
     *prev = Some((buildings, events));
 }

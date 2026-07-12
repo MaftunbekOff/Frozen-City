@@ -16,6 +16,7 @@ use frozen_city::net::server::ServerHandle;
 pub mod audio;
 pub mod chat;
 pub mod events;
+pub mod i18n;
 pub mod input;
 #[cfg(target_arch = "wasm32")]
 pub mod local_server;
@@ -28,8 +29,15 @@ pub mod research;
 pub mod roles;
 pub mod roster;
 pub mod social;
+pub mod theme;
 pub mod touch;
 pub mod ui;
+
+// i18n matn kataloglari (har UI sohasi o'z faylida — parallel tahrirga qulay).
+pub mod i18n_hud;
+pub mod i18n_menu;
+pub mod i18n_names;
+pub mod i18n_panels;
 
 /// One grid tile = one 3D world unit. The map lies on the XZ plane
 /// (sim grid y -> world Z), +Y is up, the furnace center is the origin.
@@ -55,6 +63,65 @@ pub enum Quality {
     Medium,
     /// Native desktop: HDR bloom, high-res shadows, MSAA 4x.
     High,
+}
+
+/// Player-controlled graphics quality preference, saved via `i18n::pref_set`
+/// under the `"quality"` key. `Auto` (the default) defers entirely to the
+/// existing per-platform detection (native: `Quality::High`; web:
+/// `web_quality()`); the other three tiers override it once the app starts.
+#[derive(Resource, Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum QualityPref {
+    #[default]
+    Auto,
+    Low,
+    Medium,
+    High,
+}
+
+impl QualityPref {
+    pub fn code(self) -> &'static str {
+        match self {
+            QualityPref::Auto => "auto",
+            QualityPref::Low => "low",
+            QualityPref::Medium => "medium",
+            QualityPref::High => "high",
+        }
+    }
+
+    pub fn from_code(s: &str) -> Option<QualityPref> {
+        match s {
+            "auto" => Some(QualityPref::Auto),
+            "low" => Some(QualityPref::Low),
+            "medium" => Some(QualityPref::Medium),
+            "high" => Some(QualityPref::High),
+            _ => None,
+        }
+    }
+
+    /// The concrete `Quality` this preference forces, or `None` for `Auto`
+    /// (meaning: keep whatever the platform-detected default already is).
+    pub fn resolve(self) -> Option<Quality> {
+        match self {
+            QualityPref::Auto => None,
+            QualityPref::Low => Some(Quality::Low),
+            QualityPref::Medium => Some(Quality::Medium),
+            QualityPref::High => Some(Quality::High),
+        }
+    }
+}
+
+/// Whether sound effects and the blizzard wind bed play at all. Saved via
+/// `i18n::pref_set` under the `"audio"` key. Every audio spawn/volume site
+/// lives in `audio.rs` and checks this before making any sound.
+#[derive(Resource, Clone, Copy, PartialEq, Eq, Debug)]
+pub struct AudioSettings {
+    pub enabled: bool,
+}
+
+impl Default for AudioSettings {
+    fn default() -> Self {
+        AudioSettings { enabled: true }
+    }
 }
 
 #[derive(Resource, Clone)]
@@ -231,13 +298,28 @@ pub struct TransitionMsg {
 impl WorldTarget {
     /// The overlay line shown while switching to this target — phrased from
     /// the traveler's point of view, matching the task's examples.
-    pub fn transition_label(self, friend_name: Option<&str>) -> String {
+    pub fn transition_label(self, friend_name: Option<&str>, l: i18n::Lang) -> String {
+        use i18n::Lang;
         match self {
-            WorldTarget::Personal => "Returning to your city...".to_string(),
-            WorldTarget::Central => "Entering the Global World...".to_string(),
-            WorldTarget::Visit(_) => match friend_name {
-                Some(name) => format!("Visiting {name}..."),
-                None => "Visiting...".to_string(),
+            WorldTarget::Personal => match l {
+                Lang::Uz => "Shahringizga qaytilmoqda...",
+                Lang::En => "Returning to your city...",
+                Lang::Ru => "Возвращение в ваш город...",
+            }
+            .to_string(),
+            WorldTarget::Central => match l {
+                Lang::Uz => "Global Olamga kirilmoqda...",
+                Lang::En => "Entering the Global World...",
+                Lang::Ru => "Вход в Глобальный мир...",
+            }
+            .to_string(),
+            WorldTarget::Visit(_) => match (friend_name, l) {
+                (Some(name), Lang::Uz) => format!("{name}nikiga tashrif..."),
+                (Some(name), Lang::En) => format!("Visiting {name}..."),
+                (Some(name), Lang::Ru) => format!("Визит к {name}..."),
+                (None, Lang::Uz) => "Tashrif...".to_string(),
+                (None, Lang::En) => "Visiting...".to_string(),
+                (None, Lang::Ru) => "Визит...".to_string(),
             },
         }
     }
@@ -386,6 +468,12 @@ impl Plugin for ClientPlugin {
             .init_resource::<render::CursorViz>()
             .init_resource::<render::AvatarViz>()
             .init_resource::<render::PingViz>()
+            .init_resource::<theme::FormFactor>()
+            // Cyrillic-capable default font — must land before any UI text is
+            // spawned, hence first in `Startup` (see `i18n::install_default_font`'s
+            // doc comment for why `Startup` is early enough).
+            .add_systems(Startup, i18n::install_default_font)
+            .add_systems(Update, theme::update_form_factor)
             .add_systems(Startup, render::setup_camera_and_assets)
             // Menu.
             .add_systems(OnEnter(Screen::Menu), menu::spawn_menu)
@@ -403,6 +491,10 @@ impl Plugin for ClientPlugin {
                     menu::register_toggle_button,
                     menu::update_login_fields,
                     menu::update_register_toggle,
+                    menu::lang_buttons,
+                    menu::quality_buttons,
+                    menu::audio_toggle_button,
+                    menu::update_settings_buttons,
                     ui::generic_button_hover,
                 )
                     .run_if(in_state(Screen::Menu)),
