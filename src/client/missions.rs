@@ -10,19 +10,21 @@ use frozen_city::game::types::{
 };
 use frozen_city::net::protocol::ClientMsg;
 
+use super::i18n::Lang;
+use super::i18n_names;
+use super::i18n_panels;
+use super::theme::{self, FormFactor};
 use super::ui::UiBlocker;
 use super::{GameView, NetConn, Screen};
 
 /// Fixed mission rows (there are 5 missions; a little headroom).
 const ROWS: usize = 6;
 
-const PANEL_BG: Color = Color::srgba(0.045, 0.075, 0.125, 0.9);
-const BTN_BG: Color = Color::srgb(0.20, 0.36, 0.30);
-const BTN_DIM: Color = Color::srgba(0.10, 0.12, 0.16, 0.9);
-const TEXT_MAIN: Color = Color::srgb(0.90, 0.93, 0.97);
-const TEXT_DIM: Color = Color::srgb(0.60, 0.66, 0.76);
-const DONE: Color = Color::srgb(0.55, 0.88, 0.50);
-const TUNNEL_COL: Color = Color::srgb(0.70, 0.82, 1.0);
+const DONE: Color = Color::srgb(0.550, 0.880, 0.500);
+const TUNNEL_COL: Color = Color::srgb(0.700, 0.820, 1.000);
+
+#[derive(Component)]
+struct TitleText;
 
 #[derive(Component)]
 struct MissionRow(usize);
@@ -36,6 +38,9 @@ struct TunnelText;
 #[derive(Component)]
 struct TunnelInvestBtn;
 
+#[derive(Component)]
+struct TunnelInvestLabel;
+
 pub fn plugin(app: &mut App) {
     app.add_systems(OnEnter(Screen::Game), spawn_panel).add_systems(
         Update,
@@ -43,32 +48,34 @@ pub fn plugin(app: &mut App) {
     );
 }
 
-fn text(t: impl Into<String>, size: f32, color: Color) -> impl Bundle {
-    (Text::new(t.into()), TextFont::from_font_size(size), TextColor(color))
-}
-
-fn spawn_panel(mut commands: Commands) {
+fn spawn_panel(mut commands: Commands, ff: Res<FormFactor>) {
+    let ff = *ff;
+    // Mobile: cap the panel to roughly 46% of the window width and use the
+    // micro font size, per the task brief (no collapse-toggle — out of scope).
+    let width = if ff.compact() { Val::Percent(46.0) } else { Val::Px(320.0) };
+    let row_font = if ff.compact() { theme::FS_MICRO } else { theme::FS_SMALL };
     commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
                 right: Val::Px(12.0),
                 top: Val::Px(232.0),
-                width: Val::Px(320.0),
+                width,
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(4.0),
-                padding: UiRect::all(Val::Px(8.0)),
+                row_gap: Val::Px(theme::SP_XS),
+                padding: UiRect::all(Val::Px(theme::SP_SM)),
+                border_radius: BorderRadius::all(Val::Px(theme::RAD_PANEL)),
                 ..default()
             },
-            BackgroundColor(PANEL_BG),
+            BackgroundColor(theme::BG_PANEL),
             Interaction::default(),
             UiBlocker,
             DespawnOnExit(Screen::Game),
         ))
         .with_children(|p| {
-            p.spawn(text("Missions", 14.0, TEXT_MAIN));
+            p.spawn((theme::text("", theme::FS_SMALL, theme::TEXT_PRIMARY), TitleText));
             for i in 0..ROWS {
-                p.spawn((text("", 12.5, TEXT_DIM), MissionRow(i)));
+                p.spawn((theme::text("", row_font, theme::TEXT_MUTED), MissionRow(i)));
             }
 
             // Tunnel section, hidden until every mission is complete.
@@ -76,69 +83,78 @@ fn spawn_panel(mut commands: Commands) {
                 Node {
                     display: Display::None,
                     flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(4.0),
-                    margin: UiRect::top(Val::Px(6.0)),
+                    row_gap: Val::Px(theme::SP_XS),
+                    margin: UiRect::top(Val::Px(theme::SP_SM)),
                     ..default()
                 },
                 TunnelSection,
             ))
             .with_children(|t| {
-                t.spawn((text("", 13.0, TUNNEL_COL), TunnelText));
+                t.spawn((theme::text("", row_font, TUNNEL_COL), TunnelText));
                 t.spawn((
                     Button,
                     Node {
-                        width: Val::Px(240.0),
-                        height: Val::Px(30.0),
+                        width: Val::Percent(100.0),
+                        height: Val::Px(ff.btn_h()),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
+                        border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
                         ..default()
                     },
                     // No BaseColor: this button's color is owned entirely by
                     // update_panel (affordability dim/bright), so the generic
                     // hover system must not fight it over BackgroundColor.
-                    BackgroundColor(BTN_BG),
+                    BackgroundColor(theme::BTN_SUCCESS),
                     TunnelInvestBtn,
                 ))
                 .with_children(|b| {
-                    b.spawn(text(
-                        format!(
-                            "Excavate  ({:.0} wood, {:.0} coal)",
-                            TUNNEL_INVEST_WOOD, TUNNEL_INVEST_COAL
-                        ),
-                        12.0,
-                        TEXT_MAIN,
-                    ));
+                    b.spawn((theme::text("", row_font, theme::TEXT_PRIMARY), TunnelInvestLabel));
                 });
             });
         });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn update_panel(
     view: Res<GameView>,
+    lang: Res<Lang>,
+    mut title: Query<&mut Text, (With<TitleText>, Without<MissionRow>, Without<TunnelText>)>,
     mut rows: Query<(&MissionRow, &mut Text, &mut TextColor), Without<TunnelText>>,
     mut section: Query<&mut Node, With<TunnelSection>>,
-    mut tunnel_text: Query<&mut Text, With<TunnelText>>,
+    mut tunnel_text: Query<&mut Text, (With<TunnelText>, Without<MissionRow>, Without<TitleText>)>,
     mut invest_bg: Query<&mut BackgroundColor, With<TunnelInvestBtn>>,
+    mut invest_label: Query<&mut Text, (With<TunnelInvestLabel>, Without<MissionRow>, Without<TunnelText>, Without<TitleText>)>,
 ) {
+    let lang = *lang;
+    if let Ok(mut t) = title.single_mut() {
+        if t.0 != i18n_panels::missions_title(lang) {
+            t.0 = i18n_panels::missions_title(lang).to_string();
+        }
+    }
+    if let Ok(mut t) = invest_label.single_mut() {
+        let new = i18n_panels::tunnel_invest_btn(TUNNEL_INVEST_WOOD, TUNNEL_INVEST_COAL, lang);
+        if t.0 != new {
+            t.0 = new;
+        }
+    }
+
     let Some(state) = view.state.as_ref() else { return };
 
     for (row, mut t, mut c) in &mut rows {
         let (s, col) = match state.missions.get(row.0) {
             Some(m) => {
                 let cur = state.mission_current(m.kind).min(m.kind.target());
+                let label = i18n_names::mission_label(m.kind, lang);
                 if m.done {
-                    (
-                        format!("[x] {} {}", m.kind.label(), m.kind.target()),
-                        DONE,
-                    )
+                    (i18n_panels::mission_done_row(label, m.kind.target()), DONE)
                 } else {
                     (
-                        format!("[ ] {} {}  ({}/{})", m.kind.label(), m.kind.target(), cur, m.kind.target()),
-                        TEXT_DIM,
+                        i18n_panels::mission_pending_row(label, m.kind.target(), cur),
+                        theme::TEXT_MUTED,
                     )
                 }
             }
-            None => (String::new(), TEXT_DIM),
+            None => (String::new(), theme::TEXT_MUTED),
         };
         if t.0 != s {
             t.0 = s;
@@ -159,17 +175,14 @@ fn update_panel(
     if show {
         if let Ok(mut tt) = tunnel_text.single_mut() {
             let pct = (state.tunnel.progress * 100.0) as u32;
-            let new = format!(
-                "TUNNEL  —  stage {}/{}  ({}%)",
-                state.tunnel.stage, TUNNEL_STAGES, pct
-            );
+            let new = i18n_panels::tunnel_status(state.tunnel.stage, TUNNEL_STAGES, pct, lang);
             if tt.0 != new {
                 tt.0 = new;
             }
         }
         let affordable = state.stock.wood >= TUNNEL_INVEST_WOOD && state.stock.coal >= TUNNEL_INVEST_COAL;
         if let Ok(mut bg) = invest_bg.single_mut() {
-            let want = if affordable { BTN_BG } else { BTN_DIM };
+            let want = if affordable { theme::BTN_SUCCESS } else { theme::BTN_DIM };
             if bg.0 != want {
                 bg.0 = want;
             }

@@ -1,21 +1,22 @@
 //! Dynamic-event UI: a non-blocking caravan choice popup (Accept / Decline)
 //! and a status line for active disease / blizzard. Reads the authoritative
 //! snapshot and sends `RespondEvent`; the sim owns all logic and timers.
+//! The caravan dialog BODY is server-authored text and is never translated
+//! here — only the frame and the two client-side button labels are.
 
 use bevy::prelude::*;
 
 use frozen_city::game::types::{GamePhase, PlayerCommand};
 use frozen_city::net::protocol::ClientMsg;
 
-use super::ui::{BaseColor, UiBlocker};
+use super::i18n::Lang;
+use super::i18n_panels;
+use super::theme::{self, FormFactor};
+use super::ui::UiBlocker;
 use super::{GameView, NetConn, Screen};
 
-const PANEL_BG: Color = Color::srgba(0.06, 0.09, 0.14, 0.96);
-const ACCEPT_BG: Color = Color::srgb(0.20, 0.40, 0.26);
-const DECLINE_BG: Color = Color::srgb(0.42, 0.20, 0.18);
-const TEXT_MAIN: Color = Color::srgb(0.92, 0.95, 1.0);
-const SICK_COL: Color = Color::srgb(0.72, 0.90, 0.45);
-const COLD_COL: Color = Color::srgb(0.60, 0.82, 1.0);
+const SICK_COL: Color = Color::srgb(0.720, 0.900, 0.450);
+const COLD_COL: Color = Color::srgb(0.600, 0.820, 1.000);
 
 #[derive(Component)]
 struct CaravanRoot;
@@ -27,7 +28,13 @@ struct CaravanText;
 struct CaravanAcceptBtn;
 
 #[derive(Component)]
+struct CaravanAcceptLabel;
+
+#[derive(Component)]
 struct CaravanDeclineBtn;
+
+#[derive(Component)]
+struct CaravanDeclineLabel;
 
 #[derive(Component)]
 struct EventStatusText;
@@ -40,27 +47,8 @@ pub fn plugin(app: &mut App) {
         );
 }
 
-fn text(t: impl Into<String>, size: f32, color: Color) -> impl Bundle {
-    (Text::new(t.into()), TextFont::from_font_size(size), TextColor(color))
-}
-
-fn btn(label: &str, bg: Color) -> impl Bundle {
-    (
-        Button,
-        Node {
-            width: Val::Px(120.0),
-            height: Val::Px(30.0),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            ..default()
-        },
-        BackgroundColor(bg),
-        BaseColor(bg),
-        Name::new(label.to_string()),
-    )
-}
-
-fn spawn_events_ui(mut commands: Commands) {
+fn spawn_events_ui(mut commands: Commands, ff: Res<FormFactor>) {
+    let ff = *ff;
     // Active-event status line, centered just below the top bar.
     commands
         .spawn((
@@ -70,78 +58,82 @@ fn spawn_events_ui(mut commands: Commands) {
                 right: Val::Px(0.0),
                 top: Val::Px(50.0),
                 justify_content: JustifyContent::Center,
-                column_gap: Val::Px(16.0),
+                column_gap: Val::Px(theme::SP_LG),
                 ..default()
             },
             DespawnOnExit(Screen::Game),
         ))
         .with_children(|p| {
-            p.spawn((text("", 15.0, SICK_COL), EventStatusText));
+            p.spawn((theme::text("", theme::FS_BODY, SICK_COL), EventStatusText));
         });
 
-    // Caravan choice popup (non-blocking), centered near the top.
+    // Caravan choice popup: same scrim+modal_panel shell as roster/social/
+    // research. Visible by default for one frame until `update_events`'
+    // very first tick hides it (no pending event yet) — same idiom those
+    // modals use for their `*Open` resource's `false` default.
     commands
-        .spawn((
-            Node {
-                display: Display::None,
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                top: Val::Px(96.0),
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            CaravanRoot,
-            DespawnOnExit(Screen::Game),
-        ))
+        .spawn((theme::scrim(ff), UiBlocker, CaravanRoot, DespawnOnExit(Screen::Game)))
         .with_children(|p| {
-            p.spawn((
-                Node {
-                    width: Val::Px(440.0),
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    row_gap: Val::Px(10.0),
-                    padding: UiRect::all(Val::Px(14.0)),
-                    ..default()
-                },
-                BackgroundColor(PANEL_BG),
-                Interaction::default(),
-                UiBlocker,
-            ))
-            .with_children(|panel| {
-                panel.spawn((text("", 14.0, TEXT_MAIN), CaravanText));
+            p.spawn(theme::modal_panel(ff)).with_children(|panel| {
+                panel.spawn((theme::text("", theme::FS_BODY, theme::TEXT_PRIMARY), CaravanText));
                 panel
                     .spawn(Node {
-                        column_gap: Val::Px(12.0),
+                        column_gap: Val::Px(theme::SP_MD),
                         ..default()
                     })
                     .with_children(|row| {
-                        row.spawn((btn("Accept", ACCEPT_BG), CaravanAcceptBtn))
-                            .with_children(|b| {
-                                b.spawn(text("Take them in", 13.0, TEXT_MAIN));
-                            });
-                        row.spawn((btn("Decline", DECLINE_BG), CaravanDeclineBtn))
-                            .with_children(|b| {
-                                b.spawn(text("Turn away", 13.0, TEXT_MAIN));
-                            });
+                        row.spawn((
+                            theme::button(Val::Px(120.0), ff.btn_h(), theme::BTN_SUCCESS),
+                            CaravanAcceptBtn,
+                        ))
+                        .with_children(|b| {
+                            b.spawn((theme::text("", theme::FS_SMALL, theme::TEXT_PRIMARY), CaravanAcceptLabel));
+                        });
+                        row.spawn((
+                            theme::button(Val::Px(120.0), ff.btn_h(), theme::BTN_DANGER),
+                            CaravanDeclineBtn,
+                        ))
+                        .with_children(|b| {
+                            b.spawn((theme::text("", theme::FS_SMALL, theme::TEXT_PRIMARY), CaravanDeclineLabel));
+                        });
                     });
             });
         });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn update_events(
     view: Res<GameView>,
+    lang: Res<Lang>,
     mut root: Query<&mut Node, With<CaravanRoot>>,
     mut caravan_text: Query<&mut Text, (With<CaravanText>, Without<EventStatusText>)>,
-    mut status: Query<(&mut Text, &mut TextColor), With<EventStatusText>>,
+    mut accept_label: Query<&mut Text, (With<CaravanAcceptLabel>, Without<CaravanText>, Without<EventStatusText>)>,
+    mut decline_label: Query<
+        &mut Text,
+        (With<CaravanDeclineLabel>, Without<CaravanText>, Without<EventStatusText>, Without<CaravanAcceptLabel>),
+    >,
+    mut status: Query<(&mut Text, &mut TextColor), (With<EventStatusText>, Without<CaravanText>)>,
 ) {
+    let lang = *lang;
+    if let Ok(mut t) = accept_label.single_mut() {
+        if t.0 != i18n_panels::caravan_accept(lang) {
+            t.0 = i18n_panels::caravan_accept(lang).to_string();
+        }
+    }
+    if let Ok(mut t) = decline_label.single_mut() {
+        if t.0 != i18n_panels::caravan_decline(lang) {
+            t.0 = i18n_panels::caravan_decline(lang).to_string();
+        }
+    }
+
     let Some(state) = view.state.as_ref() else { return };
     // Once the game is over, `tick` stops running so events never clear — hide
     // the popup and status line rather than let them freeze over the game-over
     // overlay (and intercept its clicks).
     let running = state.phase == GamePhase::Running;
 
-    // Caravan popup.
+    // Caravan popup. Dialog body is server-authored (refugee count / food
+    // cost come from the snapshot) and intentionally left untranslated.
     let display = if running && state.pending_event.is_some() {
         Display::Flex
     } else {
@@ -167,9 +159,9 @@ fn update_events(
     // Disease / blizzard status line.
     if let Ok((mut t, mut c)) = status.single_mut() {
         let (new, col) = match (running && state.disease_active(), running && state.blizzard_active()) {
-            (true, true) => ("SICKNESS + BLIZZARD".to_string(), COLD_COL),
-            (true, false) => ("SICKNESS spreading".to_string(), SICK_COL),
-            (false, true) => ("BLIZZARD".to_string(), COLD_COL),
+            (true, true) => (i18n_panels::event_sickness_blizzard(lang).to_string(), COLD_COL),
+            (true, false) => (i18n_panels::event_sickness(lang).to_string(), SICK_COL),
+            (false, true) => (i18n_panels::event_blizzard(lang).to_string(), COLD_COL),
             (false, false) => (String::new(), SICK_COL),
         };
         if t.0 != new {
