@@ -60,8 +60,10 @@ pub fn menu_buttons(
         match start_game(auto, &settings, &mut net, &mut server_res, &mut view, &mut session, *lang) {
             Ok(()) => next.set(Screen::Game),
             Err(e) => {
-                if let Ok(mut t) = error_text.single_mut() {
-                    t.0 = e;
+                // Every `MenuErrorText` (the landing's, and the account modal's
+                // when open) so the message shows wherever it's visible.
+                for mut t in &mut error_text {
+                    t.0 = e.clone();
                 }
             }
         }
@@ -120,13 +122,14 @@ pub(crate) fn with_path(addr: &str, path: &str) -> String {
 pub fn lang_buttons(
     mut commands: Commands,
     clicked: Query<(&Interaction, &LangButton), Changed<Interaction>>,
-    root: Query<Entity, With<MenuRoot>>,
+    roots: Query<Entity, Or<(With<MenuRoot>, With<OverlayRoot>)>>,
     mut lang: ResMut<Lang>,
     settings: Res<Settings>,
     view: Res<GameView>,
     quality_pref: Res<QualityPref>,
     audio: Res<AudioSettings>,
     ff: Res<FormFactor>,
+    overlay: Res<MenuOverlay>,
 ) {
     for (interaction, btn) in &clicked {
         if *interaction != Interaction::Pressed || btn.0 == *lang {
@@ -134,11 +137,14 @@ pub fn lang_buttons(
         }
         *lang = btn.0;
         i18n::pref_set("lang", lang.code());
-        for e in &root {
+        // Rebuild the landing AND the currently-open modal (the language
+        // buttons live inside the Settings modal), so both repaint in the new
+        // language and the modal stays open.
+        for e in &roots {
             commands.entity(e).despawn();
         }
         let error = view.error.clone().unwrap_or_default();
-        build_menu(commands, &settings, error, *lang, *quality_pref, *audio, *ff);
+        build_menu(commands, &settings, error, *lang, *quality_pref, *audio, *ff, *overlay);
         return;
     }
 }

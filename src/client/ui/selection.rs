@@ -1,11 +1,15 @@
 use bevy::prelude::*;
 
-use frozen_city::game::types::{BuildingKind, PlayerCommand, FURNACE_COAL_PER_DAY_PER_LEVEL};
+use frozen_city::game::types::{
+    BuildingKind, PlayerCommand, BUILDING_MAX_LEVEL, CONSTRUCTION_CREW_MAX,
+    FURNACE_COAL_PER_DAY_PER_LEVEL,
+};
 use frozen_city::net::protocol::ClientMsg;
 
 use super::super::i18n::Lang;
 use super::super::i18n_hud;
 use super::super::i18n_names;
+use super::super::theme;
 use super::super::*;
 use super::*;
 
@@ -17,6 +21,8 @@ pub fn selection_panel_update(
         Query<&mut Node, With<SelPanelRoot>>,
         Query<&mut Node, With<WorkerRow>>,
         Query<&mut Node, With<DemolishBtn>>,
+        Query<&mut Node, With<FurnaceRow>>,
+        Query<(&mut Node, &mut BackgroundColor), With<UpgradeBtn>>,
     )>,
     mut texts: Query<(&mut Text, &SelText)>,
 ) {
@@ -43,11 +49,29 @@ pub fn selection_panel_update(
     }
     let Some(b) = sel else { return };
 
-    let has_workers = b.kind.max_workers() > 0;
+    // V0.8: qurilish maydonchasi ham ishchi (usta) boshqaruvini ko'rsatadi —
+    // hatto bitganda ishchisiz turlar (Chodir) uchun ham.
+    let has_workers = b.under_construction() || b.kind.max_workers() > 0;
     let workers_display = if has_workers { Display::Flex } else { Display::None };
     for mut node in &mut nodes.p1() {
         if node.display != workers_display {
             node.display = workers_display;
+        }
+    }
+
+    // V0.8: Yangilash tugmasi — faqat bitgan, qurilsa bo'ladigan va
+    // maksimumga yetmagan binoda; rangi yog'och yetarliligini aks ettiradi.
+    let show_upgrade = b.kind.buildable() && !b.under_construction() && !b.at_max_level();
+    let affordable = show_upgrade
+        && state.stock.wood >= b.kind.upgrade_cost_wood(b.level + 1) as f32;
+    for (mut node, mut bg) in &mut nodes.p4() {
+        let d = if show_upgrade { Display::Flex } else { Display::None };
+        if node.display != d {
+            node.display = d;
+        }
+        let want = if affordable { theme::BTN_SUCCESS } else { theme::BTN_DIM };
+        if bg.0 != want {
+            bg.0 = want;
         }
     }
     let demolish_display = if b.kind.buildable() {
@@ -58,6 +82,17 @@ pub fn selection_panel_update(
     for mut node in &mut nodes.p2() {
         if node.display != demolish_display {
             node.display = demolish_display;
+        }
+    }
+    // Furnace level buttons appear only for the Furnace itself.
+    let furnace_display = if b.kind == BuildingKind::Furnace {
+        Display::Flex
+    } else {
+        Display::None
+    };
+    for mut node in &mut nodes.p3() {
+        if node.display != furnace_display {
+            node.display = furnace_display;
         }
     }
 
@@ -120,7 +155,40 @@ pub fn selection_panel_update(
         let new = match kind {
             SelText::Title => i18n_names::building_name(b.kind, lang).to_string(),
             SelText::Info => info.clone(),
-            SelText::Count => i18n_hud::worker_count(b.workers, b.kind.max_workers(), lang),
+            SelText::Count => {
+                // Qurilishda sig'im — brigada capi; bitganda kasb o'rinlari.
+                let cap = if b.under_construction() {
+                    CONSTRUCTION_CREW_MAX
+                } else {
+                    b.kind.max_workers()
+                };
+                i18n_hud::worker_count(b.workers, cap, lang)
+            }
+            SelText::Avail => i18n_hud::workers_available(state.idle_workers(), lang),
+            SelText::Level => {
+                if !b.kind.buildable() {
+                    // Pechning o'z darajasi (0-3) bor — V0.8 qatori unga
+                    // taalluqli emas.
+                    String::new()
+                } else if b.under_construction() {
+                    let total = if b.level <= 1 {
+                        b.kind.build_workdays()
+                    } else {
+                        b.kind.upgrade_workdays(b.level)
+                    };
+                    let pct = (((1.0 - b.build_left / total.max(1e-6)).clamp(0.0, 1.0)) * 100.0) as u32;
+                    i18n_hud::construction_line(pct, b.workers, CONSTRUCTION_CREW_MAX, lang)
+                } else {
+                    i18n_hud::level_line(b.level, BUILDING_MAX_LEVEL, lang)
+                }
+            }
+            SelText::Upgrade => {
+                if b.at_max_level() {
+                    i18n_hud::upgrade_btn_max(lang).to_string()
+                } else {
+                    i18n_hud::upgrade_btn(b.level + 1, b.kind.upgrade_cost_wood(b.level + 1), lang)
+                }
+            }
         };
         if text.0 != new {
             text.0 = new;
@@ -128,11 +196,16 @@ pub fn selection_panel_update(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn selection_panel_buttons(
     net: Res<NetConn>,
+    view: Res<GameView>,
     mut selection: ResMut<Selection>,
     minus: Query<&Interaction, (Changed<Interaction>, With<WorkerMinus>)>,
     plus: Query<&Interaction, (Changed<Interaction>, With<WorkerPlus>)>,
+    none_btn: Query<&Interaction, (Changed<Interaction>, With<WorkerNoneBtn>)>,
+    max_btn: Query<&Interaction, (Changed<Interaction>, With<WorkerMaxBtn>)>,
+    upgrade: Query<&Interaction, (Changed<Interaction>, With<UpgradeBtn>)>,
     demolish: Query<&Interaction, (Changed<Interaction>, With<DemolishBtn>)>,
 ) {
     let Some(id) = selection.0 else { return };
@@ -147,6 +220,38 @@ pub fn selection_panel_buttons(
             building: id,
             delta: 1,
         }));
+    }
+    // Tez-tugmalar: deltani joriy snapshot'dan hisoblaymiz; server baribir
+    // [0, max]ga, named-floor'ga va bo'sh-ishchi zaxirasiga qarab klamplaydi
+    // (`sim::command`ning `AdjustWorkers` tarmog'i), shuning uchun oshirib
+    // so'rash xavfsiz.
+    let sel_building = view.state.as_ref().and_then(|s| s.find_building(id));
+    if none_btn.iter().any(|i| *i == Interaction::Pressed) {
+        if let Some(b) = sel_building {
+            if b.workers > 0 {
+                net.send(ClientMsg::Cmd(PlayerCommand::AdjustWorkers {
+                    building: id,
+                    delta: -(b.workers.min(127) as i8),
+                }));
+            }
+        }
+    }
+    if max_btn.iter().any(|i| *i == Interaction::Pressed) {
+        if let Some(b) = sel_building {
+            let room = b.kind.max_workers().saturating_sub(b.workers);
+            if room > 0 {
+                net.send(ClientMsg::Cmd(PlayerCommand::AdjustWorkers {
+                    building: id,
+                    delta: room.min(127) as i8,
+                }));
+            }
+        }
+    }
+    // V0.8: yangilash — validatsiya server tomonида (`apply_command`ning
+    // UpgradeBuilding tarmog'i narx/daraja/holatni tekshiradi), tugma rangi
+    // esa `selection_panel_update`da oldindan ogohlantiradi.
+    if upgrade.iter().any(|i| *i == Interaction::Pressed) {
+        net.send(ClientMsg::Cmd(PlayerCommand::UpgradeBuilding { building: id }));
     }
     if demolish.iter().any(|i| *i == Interaction::Pressed) {
         net.send(ClientMsg::Cmd(PlayerCommand::Demolish { building: id }));

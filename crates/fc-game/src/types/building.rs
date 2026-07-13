@@ -2,6 +2,11 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::{
+    BUILDING_MAX_LEVEL, BUILD_WORKDAYS_PER_WOOD, LEVEL_PRODUCTION_BONUS, TENT_CAPACITY,
+    TENT_CAPACITY_PER_LEVEL,
+};
+
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BuildingKind {
     Furnace,
@@ -107,6 +112,22 @@ impl BuildingKind {
         self != BuildingKind::Furnace
     }
 
+    /// V0.8: worker-days of construction to erect this building at level 1.
+    pub fn build_workdays(self) -> f32 {
+        self.cost_wood() as f32 * BUILD_WORKDAYS_PER_WOOD
+    }
+
+    /// V0.8: wood price of upgrading TO `next_level` (2..=BUILDING_MAX_LEVEL).
+    /// Scales with the target level so late levels are a real wood sink.
+    pub fn upgrade_cost_wood(self, next_level: u8) -> u32 {
+        (self.cost_wood() * next_level as u32).div_ceil(2)
+    }
+
+    /// V0.8: worker-days of construction an upgrade TO `next_level` takes.
+    pub fn upgrade_workdays(self, next_level: u8) -> f32 {
+        self.build_workdays() * next_level as f32 * 0.5
+    }
+
     pub fn description(self) -> &'static str {
         match self {
             BuildingKind::Furnace => "Keep it burning. Consumes coal (or wood).",
@@ -140,4 +161,39 @@ pub struct Building {
     /// existed (migration default `None` — they stay demolishable by anyone,
     /// same as today, rather than becoming permanently stuck).
     pub owner_account: Option<i64>,
+    /// V0.8: building level, 1..=`BUILDING_MAX_LEVEL`. Upgrades go one level
+    /// at a time (`UpgradeBuilding`); migration default for old saves is 1.
+    pub level: u8,
+    /// V0.8: remaining construction work in worker-days; > 0 while this is an
+    /// unfinished site (a fresh placement or an in-progress upgrade). The
+    /// assigned crew works it down each tick and the building produces
+    /// nothing / houses nobody until it reaches 0.
+    pub build_left: f32,
+}
+
+impl Building {
+    /// True while this is an unfinished construction site (new or upgrading).
+    pub fn under_construction(&self) -> bool {
+        self.build_left > 0.0
+    }
+
+    /// Level-scaled output/effect multiplier: 1.0 at level 1,
+    /// +`LEVEL_PRODUCTION_BONUS` per level above it.
+    pub fn level_factor(&self) -> f32 {
+        1.0 + LEVEL_PRODUCTION_BONUS * self.level.saturating_sub(1) as f32
+    }
+
+    /// Housing slots this building contributes (Tents only; a site under
+    /// construction shelters nobody). Grows with level.
+    pub fn housing_slots(&self) -> usize {
+        if self.kind != BuildingKind::Tent || self.under_construction() {
+            return 0;
+        }
+        TENT_CAPACITY + TENT_CAPACITY_PER_LEVEL * self.level.saturating_sub(1) as usize
+    }
+
+    /// Sanity guard used by upgrade validation.
+    pub fn at_max_level(&self) -> bool {
+        self.level >= BUILDING_MAX_LEVEL
+    }
 }

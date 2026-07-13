@@ -17,13 +17,31 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                 let warehouse_staffed = state
                     .buildings
                     .iter()
-                    .any(|b| b.kind == BuildingKind::Warehouse && b.workers > 0);
+                    .any(|b| b.kind == BuildingKind::Warehouse && b.workers > 0 && !b.under_construction());
                 let discount = if warehouse_staffed {
                     WAREHOUSE_BUILD_DISCOUNT
                 } else {
                     1.0
                 };
                 let spent_wood = kind.cost_wood() as f32 * discount;
+                // V0.8: qarzga qurilmaydi — resurs yetmasa buyruq e'tiborsiz
+                // qoladi (client menyusi bu shartni oldindan ko'rsatadi).
+                if state.stock.wood < spent_wood {
+                    return;
+                }
+                // V0.8: yangi bino qurilish maydonchasi sifatida boshlanadi —
+                // bo'sh ishchilardan avtomatik usta-brigada tuziladi (kam
+                // bo'lsa bori bilan; hech kim bo'lmasa qurilish o'z-o'zidan
+                // siljimaydi, o'yinchi keyin +/- bilan biriktiradi).
+                // MARKAZIY olamda brigada tuzilmaydi: u yerda har bir aholi
+                // akkauntga tegishli, anonim jalb qilish `AdjustWorkers`
+                // taqiqlangani bilan bir xil sabablarga ko'ra mumkin emas —
+                // egasi o'z ko'chmanchisini saytga o'zi biriktiradi.
+                let crew = if state.central {
+                    0
+                } else {
+                    (state.idle_workers()).min(CONSTRUCTION_CREW_MAX as u32) as u8
+                };
                 state.stock.wood -= spent_wood;
                 let id = state.next_id;
                 state.next_id += 1;
@@ -37,10 +55,12 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                     kind: *kind,
                     x: *x,
                     y: *y,
-                    workers: 0,
+                    workers: crew,
                     progress: 0.0,
                     owner: Some(player),
                     owner_account,
+                    level: 1,
+                    build_left: kind.build_workdays(),
                 });
                 // Central-world economy v1: charge the placing account's
                 // ledger for what it spent, so a showcase can reflect it.
@@ -53,7 +73,7 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                     p.built += 1;
                 }
                 if let Some(name) = name {
-                    push_action_event(state, format!("{} built a {}.", name, kind.name()));
+                    push_action_event(state, format!("{} started building a {}.", name, kind.name()));
                 }
             }
         }
@@ -92,7 +112,14 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                 .filter(|s| s.assigned_building == Some(*building))
                 .count() as i32;
             if let Some(b) = state.buildings.iter_mut().find(|b| b.id == *building) {
-                let max = b.kind.max_workers() as i32;
+                // V0.8: qurilish maydonchasi o'z sig'imi bilan ishlaydi —
+                // ustalar brigada capigacha, bitgan bino esa o'z kasb
+                // o'rinlarigacha oladi.
+                let max = if b.under_construction() {
+                    CONSTRUCTION_CREW_MAX as i32
+                } else {
+                    b.kind.max_workers() as i32
+                };
                 let cur = b.workers as i32;
                 let target = (cur + *delta as i32).clamp(0, max).max(named);
                 let new = if target > cur {
@@ -113,10 +140,19 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                     let Some(target) = state.buildings.iter().find(|b| b.id == *new_id) else {
                         return;
                     };
-                    if target.kind.max_workers() == 0 || prev == Some(*new_id) {
+                    // V0.8: qurilish maydonchasi nomlangan ustalarni brigada
+                    // capigacha oladi (jumladan max_workers == 0 turlar ham,
+                    // masalan Chodir maydonchasi); bitgan bino esa o'z kasb
+                    // o'rinlari bilan cheklanadi.
+                    let capacity = if target.under_construction() {
+                        CONSTRUCTION_CREW_MAX
+                    } else {
+                        target.kind.max_workers()
+                    };
+                    if capacity == 0 || prev == Some(*new_id) {
                         return;
                     }
-                    if target.workers >= target.kind.max_workers() {
+                    if target.workers >= capacity {
                         return;
                     }
                     let new_kind = target.kind;
@@ -248,6 +284,48 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                 }
             }
         }
+        PlayerCommand::UpgradeBuilding { building } => {
+            // Bo'sh ishchilar soni mutatsiyadan OLDIN — brigada to'ldirishda
+            // aynan shu zaxiradan olinadi.
+            let idle = state.idle_workers();
+            if let Some(i) = state.buildings.iter().position(|b| b.id == *building) {
+                let (kind, level, busy) = {
+                    let b = &state.buildings[i];
+                    (b.kind, b.level, b.under_construction())
+                };
+                // Faqat bitgan, qurilsa bo'ladigan va maksimumga yetmagan
+                // bino yangilanadi; yangilashlar zanjir — keyingisi faqat
+                // oldingisi bitgach.
+                if !kind.buildable() || busy || level >= BUILDING_MAX_LEVEL {
+                    return;
+                }
+                let cost = kind.upgrade_cost_wood(level + 1) as f32;
+                if state.stock.wood < cost {
+                    return;
+                }
+                state.stock.wood -= cost;
+                if state.central {
+                    if let Some(acc) = state.buildings[i].owner_account {
+                        state.credit_ledger(acc, |t| t.wood_spent += cost);
+                    }
+                }
+                let b = &mut state.buildings[i];
+                b.level += 1;
+                b.build_left = kind.upgrade_workdays(b.level);
+                // Mavjud ishchilar ustaga aylanadi; brigada to'lmagan bo'lsa
+                // bo'sh ishchilardan avtomatik to'ldiriladi (Place'dagi kabi).
+                let add = (CONSTRUCTION_CREW_MAX.saturating_sub(b.workers) as u32).min(idle) as u8;
+                b.workers += add;
+                let target = b.level;
+                let name = state.player(player).map(|p| p.name.clone());
+                if let Some(name) = name {
+                    push_action_event(
+                        state,
+                        format!("{} started upgrading a {} to L{}.", name, kind.name(), target),
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -266,17 +344,33 @@ pub(crate) fn survivor_contribution(s: &Survivor, kind: BuildingKind) -> f32 {
     };
     profession_factor * level_factor
 }
+// `xp_level` endi `types`da yashaydi (klient ko'rinish-darajalari ham xuddi
+// shu funksiyani ishlatadi) — bu yerdagi chaqiruvlar `use crate::types::*`
+// orqali o'sha yagona nusxaga boradi.
 
-/// XP level (0..=XP_MAX_LEVEL) from accrued in-game work-days, thresholded by
-/// `XP_DAYS_LEVEL_*` (cumulative totals, not per-level slices).
-fn xp_level(xp: f32) -> u8 {
-    if xp >= XP_DAYS_LEVEL_3 {
-        3
-    } else if xp >= XP_DAYS_LEVEL_2 {
-        2
-    } else if xp >= XP_DAYS_LEVEL_1 {
-        1
-    } else {
-        0
+/// V0.8 test/vosita yordamchisi: barcha qurilish maydonchalarini bir zumda
+/// bitiradi — tickdagi tugash mantig'i kabi ortiqcha ustalarni (sig'imdan
+/// oshgan nomlangan biriktirmalar bilan birga) bo'shatadi, lekin voqea
+/// yozmaydi. Sim o'zi hech qachon chaqirmaydi; bitgan binoning EFFEKTINI
+/// sinaydigan testlar qurilish bosqichini shu bilan o'tkazib yuboradi.
+pub fn finish_all_construction(state: &mut GameState) {
+    let mut finished: Vec<(u32, u8)> = Vec::new();
+    for b in state.buildings.iter_mut() {
+        if b.build_left > 0.0 {
+            b.build_left = 0.0;
+            b.workers = b.workers.min(b.kind.max_workers());
+            finished.push((b.id, b.kind.max_workers()));
+        }
+    }
+    for (id, max) in finished {
+        let mut named = 0u8;
+        for s in state.survivors.iter_mut() {
+            if s.assigned_building == Some(id) {
+                named += 1;
+                if named > max {
+                    s.assigned_building = None;
+                }
+            }
+        }
     }
 }

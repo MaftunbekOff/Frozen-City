@@ -117,6 +117,8 @@ fn legacy_central_building_with_no_owner_account_stays_demolishable_by_placing_s
         progress: 0.0,
         owner: Some(10),
         owner_account: None, // migration default
+        level: 1,
+        build_left: 0.0,
     });
     assert!(
         state.can_issue(10, &PlayerCommand::Demolish { building: 999 }),
@@ -178,6 +180,9 @@ fn staffed_central_production_credits_the_owning_account() {
     let (x, y) = find_spot(&state, BuildingKind::HunterHut);
     sim::apply_command(&mut state, 10, &PlayerCommand::Place { kind: BuildingKind::HunterHut, x, y });
     let hut = state.buildings.iter().find(|b| b.kind == BuildingKind::HunterHut).unwrap().id;
+    // V0.8: bu test bitgan binoning ledger-kreditini sinaydi — markaziy
+    // olamda hali aholi yo'q (brigada 0), maydonchani darhol bitiramiz.
+    sim::finish_all_construction(&mut state);
 
     sim::inject_migrants(&mut state, 1, "Aziz", vec![settler(1)]);
     let s_id = state.survivors.iter().find(|s| s.owner == Some(1)).unwrap().id;
@@ -266,6 +271,8 @@ fn v2_mirror_migrates_to_v3_with_none_owner_account_and_empty_ledger() {
         progress: 0.0,
         owner: Some(10),
         owner_account: None,
+        level: 1,
+        build_left: 0.0,
     });
     let v2 = GameStateV2 {
         tick: modern.tick,

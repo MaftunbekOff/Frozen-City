@@ -370,8 +370,9 @@ fn missions_to_tunnel_to_hub_to_invite_to_guest_build() {
         with_guest_tent
             .events
             .iter()
-            .any(|e| e.text.contains("Buddy") && e.text.contains("built")),
-        "the guest's build must show up attributed to their name in the event feed: {:?}",
+            .any(|e| e.text.contains("Buddy") && e.text.contains("building")),
+        "the guest's build must show up attributed to their name in the event feed \
+         (V0.8 wording: '<name> started building a <kind>.'): {:?}",
         with_guest_tent.events
     );
 

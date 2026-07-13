@@ -209,9 +209,9 @@ pub fn world_switch_my_city(l: Lang) -> &'static str {
 /// Full desktop hint/tooltip line (keyboard + mouse affordances).
 pub fn default_hint_desktop(l: Lang) -> &'static str {
     match l {
-        Lang::Uz => "Chap tugma qo'yish/tanlash   O'ng tugma bekor qilish   1-8 qurish   WASD siljitish   Q/E aylantirish   g'ildirak masshtab   R tadqiqot   P ro'yxat   Enter chat   Alt+bosish signal",
-        Lang::En => "LMB place/select   RMB cancel   1-8 build   WASD pan   Q/E rotate   wheel zoom   R research   P roster   Enter chat   Alt+click ping",
-        Lang::Ru => "ЛКМ поставить/выбрать   ПКМ отмена   1-8 постройка   WASD перемещение   Q/E поворот   колесо масштаб   R исследования   P список   Enter чат   Alt+клик метка",
+        Lang::Uz => "Chap tugma qo'yish/tanlash   O'ng tugma bekor qilish   B qurish menyusi   1-8 qurish   WASD siljitish   Q/E aylantirish   g'ildirak masshtab   R tadqiqot   P ro'yxat   Enter chat   Alt+bosish signal",
+        Lang::En => "LMB place/select   RMB cancel   B build menu   1-8 build   WASD pan   Q/E rotate   wheel zoom   R research   P roster   Enter chat   Alt+click ping",
+        Lang::Ru => "ЛКМ поставить/выбрать   ПКМ отмена   B меню построек   1-8 постройка   WASD перемещение   Q/E поворот   колесо масштаб   R исследования   P список   Enter чат   Alt+клик метка",
     }
 }
 
@@ -222,6 +222,16 @@ pub fn default_hint_mobile(l: Lang) -> &'static str {
         Lang::Uz => "Bosish: qo'yish/tanlash   Ikki barmoq: masshtab/aylantirish",
         Lang::En => "Tap: place/select   Two fingers: zoom/rotate",
         Lang::Ru => "Тап: поставить/выбрать   Два пальца: масштаб/поворот",
+    }
+}
+
+/// Build-menu deny line: the player clicked `name` but can't afford it —
+/// `cost` is the wood price, `have` the current stock (floored).
+pub fn build_need_wood(name: &str, cost: u32, have: i64, l: Lang) -> String {
+    match l {
+        Lang::Uz => format!("{name} uchun yog'och yetarli emas: {cost} kerak, sizda {have}"),
+        Lang::En => format!("Not enough wood for {name}: need {cost}, you have {have}"),
+        Lang::Ru => format!("Недостаточно дерева для {name}: нужно {cost}, у вас {have}"),
     }
 }
 
@@ -268,6 +278,48 @@ pub fn furnace_off_label(l: Lang) -> &'static str {
     }
 }
 
+// --- Bottom-right Build/Manage panel: tab and building-category labels ---
+
+pub fn tab_build(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Qurish",
+        Lang::En => "Build",
+        Lang::Ru => "Стройка",
+    }
+}
+
+pub fn tab_manage(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Boshqaruv",
+        Lang::En => "Manage",
+        Lang::Ru => "Управление",
+    }
+}
+
+pub fn build_cat_housing(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Turar-joy",
+        Lang::En => "Housing",
+        Lang::Ru => "Жильё",
+    }
+}
+
+pub fn build_cat_production(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Ishlab chiqarish",
+        Lang::En => "Production",
+        Lang::Ru => "Производство",
+    }
+}
+
+pub fn build_cat_services(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Xizmat",
+        Lang::En => "Services",
+        Lang::Ru => "Службы",
+    }
+}
+
 pub fn demolish_label(l: Lang) -> &'static str {
     match l {
         Lang::Uz => "Buzish (40% qaytadi)",
@@ -282,6 +334,80 @@ pub fn worker_count(cur: u8, max: u8, l: Lang) -> String {
         Lang::Uz => format!("{cur}/{max} ishchi"),
         Lang::En => format!("{cur}/{max} workers"),
         Lang::Ru => format!("{cur}/{max} рабочих"),
+    }
+}
+
+/// Selection panel "WORKFORCE" section heading (uppercase by convention —
+/// it's a section label, not a sentence).
+pub fn workforce_section(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "ISHCHI KUCHI",
+        Lang::En => "WORKFORCE",
+        Lang::Ru => "РАБОЧАЯ СИЛА",
+    }
+}
+
+/// Workforce quick-set: clear the building's anonymous workers.
+pub fn worker_none_label(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Hech kim",
+        Lang::En => "None",
+        Lang::Ru => "Никого",
+    }
+}
+
+/// Workforce quick-set: fill the building from the idle pool.
+pub fn worker_max_label(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Maksimum",
+        Lang::En => "Max",
+        Lang::Ru => "Максимум",
+    }
+}
+
+/// Colony-wide idle pool, shown under the workforce controls.
+pub fn workers_available(n: u32, l: Lang) -> String {
+    match l {
+        Lang::Uz => format!("Bo'sh ishchi: {n}"),
+        Lang::En => format!("Available workers: {n}"),
+        Lang::Ru => format!("Свободных рабочих: {n}"),
+    }
+}
+
+/// V0.8: bitgan binoning daraja qatori.
+pub fn level_line(level: u8, max: u8, l: Lang) -> String {
+    match l {
+        Lang::Uz => format!("Daraja {level}/{max}"),
+        Lang::En => format!("Level {level}/{max}"),
+        Lang::Ru => format!("Уровень {level}/{max}"),
+    }
+}
+
+/// V0.8: qurilish maydonchasining holat qatori — foiz va usta-brigada.
+pub fn construction_line(pct: u32, crew: u8, cap: u8, l: Lang) -> String {
+    match l {
+        Lang::Uz => format!("Qurilmoqda: {pct}%   ustalar {crew}/{cap}"),
+        Lang::En => format!("Under construction: {pct}%   builders {crew}/{cap}"),
+        Lang::Ru => format!("Стройка: {pct}%   строители {crew}/{cap}"),
+    }
+}
+
+/// V0.8: Yangilash tugmasi — keyingi daraja va yog'och narxi.
+pub fn upgrade_btn(next_level: u8, cost: u32, l: Lang) -> String {
+    match l {
+        Lang::Uz => format!("Yangilash → L{next_level}  ({cost} yog'och)"),
+        Lang::En => format!("Upgrade → L{next_level}  ({cost} wood)"),
+        Lang::Ru => format!("Улучшить → L{next_level}  ({cost} дерева)"),
+    }
+}
+
+/// V0.8: maksimal darajaga yetgan binoning tugma matni (tugma baribir
+/// yashiriladi — bu matn faqat bir freymlik oraliqlar uchun zaxira).
+pub fn upgrade_btn_max(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Maksimal daraja",
+        Lang::En => "Max level",
+        Lang::Ru => "Макс. уровень",
     }
 }
 

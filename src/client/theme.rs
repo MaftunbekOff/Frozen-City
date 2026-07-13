@@ -42,6 +42,11 @@ pub const ACCENT_WARM: Color = Color::srgb(0.950, 0.680, 0.290);
 pub const DANGER: Color = Color::srgb(0.930, 0.420, 0.380);
 pub const SUCCESS: Color = Color::srgb(0.480, 0.820, 0.500);
 
+/// Mis/bronza bezak urg'usi — gauge halqasi, panel sarlavha chizig'i,
+/// "ornate" ramka detallari (Frostpunk-uslub metall jilo).
+pub const BRASS: Color = Color::srgb(0.760, 0.620, 0.360);
+pub const BRASS_DIM: Color = Color::srgba(0.760, 0.620, 0.360, 0.45);
+
 /// Resurs ranglari (HUD va tooltiplarda bir xil bo'lsin).
 pub const RES_WOOD: Color = Color::srgb(0.850, 0.680, 0.420);
 pub const RES_COAL: Color = Color::srgb(0.620, 0.660, 0.750);
@@ -276,5 +281,71 @@ pub fn divider() -> impl Bundle {
             ..default()
         },
         BackgroundColor(BORDER_STRONG),
+    )
+}
+
+/// Mis rangli ajratuvchi — panel sarlavhasi ostidagi "ornate" chiziq
+/// (divider'ning bezakli varianti; Frostpunk-uslub metall detal).
+pub fn brass_divider() -> impl Bundle {
+    (
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Px(1.0),
+            margin: UiRect::vertical(Val::Px(SP_XS)),
+            ..default()
+        },
+        BackgroundColor(BRASS_DIM),
+    )
+}
+
+/// HUD stat-"chip"i: to'q pill-konteyner (dumaloq burchak, nozik chegara).
+/// Ichiga [`dot`] + matn qo'yiladi — yuqori paneldagi resurs ko'rsatkichlari
+/// alohida suzuvchi so'zlar emas, bir tekis kapsulalar bo'lib o'qilsin.
+pub fn chip() -> impl Bundle {
+    (
+        Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(6.0),
+            padding: UiRect::axes(Val::Px(SP_SM + 2.0), Val::Px(3.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::MAX,
+            flex_shrink: 0.0,
+            ..default()
+        },
+        BackgroundColor(BG_SECTION),
+        BorderColor::all(BORDER),
+    )
+}
+
+/// Chip ichidagi rangli belgi-nuqta (resurs rangi bilan).
+pub fn dot(size: f32, color: Color) -> impl Bundle {
+    (
+        Node {
+            width: Val::Px(size),
+            height: Val::Px(size),
+            border_radius: BorderRadius::MAX,
+            flex_shrink: 0.0,
+            ..default()
+        },
+        BackgroundColor(color),
+    )
+}
+
+/// Gorizontal ko'rsatkich-bar asosi (to'q fon + chegara). To'ldiruvchisi
+/// alohida bola-node bo'lib, kengligi `Val::Percent(qiymat)` bilan
+/// boshqariladi — Umid/kayfiyat bari va shunga o'xshashlar uchun.
+pub fn stat_bar_track(w: Val, h: f32) -> impl Bundle {
+    (
+        Node {
+            width: w,
+            height: Val::Px(h),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::MAX,
+            overflow: Overflow::clip(),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.020, 0.035, 0.065, 0.92)),
+        BorderColor::all(BORDER_STRONG),
     )
 }

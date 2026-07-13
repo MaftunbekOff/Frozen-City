@@ -117,10 +117,17 @@ fn extract_prefers_idle_and_frees_staffed_slots() {
     let start_pop = state.survivors.len();
     assert!(start_pop >= 4, "sanity: default start population");
 
-    // Stand up a sawmill and pin one named survivor to it.
+    // Stand up a sawmill and pin one named survivor to it. (V0.8: joylash
+    // maydoncha ochadi — bu test bitgan binoning slotlarini sinaydi, shuning
+    // uchun darhol bitirib, avto-brigadani bo'shatamiz.)
     let (x, y) = find_spot(&state, BuildingKind::Sawmill);
     sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
     let sawmill = state.buildings.iter().find(|b| b.kind == BuildingKind::Sawmill).unwrap().id;
+    sim::finish_all_construction(&mut state);
+    let cur = state.find_building(sawmill).unwrap().workers as i8;
+    if cur > 0 {
+        sim::apply_command(&mut state, 1, &PlayerCommand::AdjustWorkers { building: sawmill, delta: -cur });
+    }
     let pinned = state.survivors[0].id;
     sim::apply_command(
         &mut state,

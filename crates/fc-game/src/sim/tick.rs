@@ -82,15 +82,63 @@ pub fn tick(state: &mut GameState) {
         state.furnace_lit = false;
     }
 
+    // --- V0.8 Construction: ustalar bitmagan maydonchalarni bitiradi. Sayt
+    // bitgunicha hech narsa ishlab chiqarmaydi va hech kimni sig'dirmaydi
+    // (production/housing hisoblari `under_construction`ni tekshiradi). ---
+    for i in 0..state.buildings.len() {
+        let (crew, left) = {
+            let b = &state.buildings[i];
+            (b.workers, b.build_left)
+        };
+        if left <= 0.0 || crew == 0 {
+            continue;
+        }
+        let mut finished: Option<(BuildingKind, u32, u8, u8)> = None;
+        {
+            let b = &mut state.buildings[i];
+            b.build_left -= crew as f32 / TICKS_PER_DAY as f32;
+            if b.build_left <= 0.0 {
+                b.build_left = 0.0;
+                // Bitgan bino o'zi band qila oladigan ishchinigina saqlab
+                // qoladi; ortiqcha ustalar bo'sh ishchilar safiga qaytadi.
+                b.workers = b.workers.min(b.kind.max_workers());
+                finished = Some((b.kind, b.id, b.kind.max_workers(), b.level));
+            }
+        }
+        if let Some((kind, id, max, level)) = finished {
+            // Sig'imdan ortiq NOMLANGAN ustalar ham bo'shatiladi, workers >=
+            // named-floor invarianti buzilmasin (birinchi `max`tasi qoladi —
+            // deterministik).
+            let mut named = 0u8;
+            for s in state.survivors.iter_mut() {
+                if s.assigned_building == Some(id) {
+                    named += 1;
+                    if named > max {
+                        s.assigned_building = None;
+                    }
+                }
+            }
+            if level > 1 {
+                push_event(state, format!("{} upgraded to L{}.", kind.name(), level));
+            } else {
+                push_event(state, format!("{} complete.", kind.name()));
+            }
+        }
+    }
+
     // --- Production ---
     // Colony-wide multipliers (tools/leader/morale) composed once per tick,
     // not once per building — see `GameState::colony_production_multiplier`.
     let colony_factor = state.colony_production_multiplier();
     for i in 0..state.buildings.len() {
-        let (b_id, kind, bx, by, workers, owner_account) = {
+        let (b_id, kind, bx, by, workers, owner_account, level_factor, under_construction) = {
             let b = &state.buildings[i];
-            (b.id, b.kind, b.x, b.y, b.workers, b.owner_account)
+            (b.id, b.kind, b.x, b.y, b.workers, b.owner_account, b.level_factor(), b.under_construction())
         };
+        // V0.8: qurilish maydonchasi hali bino emas.
+        if under_construction {
+            continue;
+        }
         if workers == 0 {
             continue;
         }
@@ -113,7 +161,8 @@ pub fn tick(state: &mut GameState) {
             }
         }
         units += (workers.saturating_sub(named)) as f32;
-        let amount = units * per_day / TICKS_PER_DAY as f32 * colony_factor;
+        // V0.8: bino darajasi ishlab chiqarishni kuchaytiradi (`level_factor`).
+        let amount = units * per_day / TICKS_PER_DAY as f32 * colony_factor * level_factor;
         // Central-world economy v1: credit whatever this building actually
         // adds to the shared stock this tick to its owning account's ledger
         // — measured as an actual delta (not just `amount`) so Sawmill/
@@ -178,11 +227,14 @@ pub fn tick(state: &mut GameState) {
     let mut warm_slots = 0usize;
     let mut shelter_slots = 0usize;
     for b in &state.buildings {
-        if b.kind == BuildingKind::Tent {
+        // V0.8: daraja va qurilish holatiga qarab (bitmagan chodir joy
+        // bermaydi, yuqori daraja ko'proq sig'diradi) — `housing_slots`.
+        let slots = b.housing_slots();
+        if slots > 0 {
             if lit && GameState::dist_to_furnace(b.x, b.y) <= radius {
-                warm_slots += TENT_CAPACITY;
+                warm_slots += slots;
             } else {
-                shelter_slots += TENT_CAPACITY;
+                shelter_slots += slots;
             }
         }
     }
@@ -197,16 +249,23 @@ pub fn tick(state: &mut GameState) {
     // (`kitchen_staffed`, `KITCHEN_FOOD_EFFICIENCY`) with no scalar to boost,
     // so a matching Cook currently grants nothing — documented, not a bug.
     let mut hospital_units = 0.0f32;
-    for b in state.buildings.iter().filter(|b| b.kind == BuildingKind::Hospital) {
+    for b in state
+        .buildings
+        .iter()
+        .filter(|b| b.kind == BuildingKind::Hospital && !b.under_construction())
+    {
         let named: Vec<&Survivor> =
             state.survivors.iter().filter(|s| s.assigned_building == Some(b.id)).collect();
+        let mut units = 0.0f32;
         for s in &named {
-            hospital_units += survivor_contribution(s, BuildingKind::Hospital);
+            units += survivor_contribution(s, BuildingKind::Hospital);
         }
-        hospital_units += b.workers.saturating_sub(named.len() as u8) as f32;
+        units += b.workers.saturating_sub(named.len() as u8) as f32;
+        // V0.8: kasalxona darajasi parvarish kuchini ham oshiradi.
+        hospital_units += units * b.level_factor();
     }
     let kitchen_staffed = state.buildings.iter()
-        .any(|b| b.kind == BuildingKind::Kitchen && b.workers > 0);
+        .any(|b| b.kind == BuildingKind::Kitchen && b.workers > 0 && !b.under_construction());
     let medicine_factor = if state.has_tech(Tech::Medicine) {
         TECH_MEDICINE_CARE
     } else {

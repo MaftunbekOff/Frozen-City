@@ -63,6 +63,11 @@ fn matching_profession_boosts_production() {
     let (x, y) = find_sawmill_spot_near_forest(&control);
     sim::apply_command(&mut control, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
     let control_id = control.buildings.last().unwrap().id;
+    // V0.8: maydonchani bitirib, avto-brigadani bo'shatamiz — test aynan
+    // 1 ishchilik farqni o'lchaydi.
+    sim::finish_all_construction(&mut control);
+    let cur = control.find_building(control_id).unwrap().workers as i8;
+    sim::apply_command(&mut control, 1, &PlayerCommand::AdjustWorkers { building: control_id, delta: -cur });
     let control_survivor = control.survivors[0].id;
     // Force a Lumberjack in the control too, but leave them UNASSIGNED
     // (anonymous pool) so the profession bonus has no identity to attach to.
@@ -73,6 +78,9 @@ fn matching_profession_boosts_production() {
     let (x, y) = find_sawmill_spot_near_forest(&experiment);
     sim::apply_command(&mut experiment, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
     let exp_id = experiment.buildings.last().unwrap().id;
+    sim::finish_all_construction(&mut experiment);
+    let cur = experiment.find_building(exp_id).unwrap().workers as i8;
+    sim::apply_command(&mut experiment, 1, &PlayerCommand::AdjustWorkers { building: exp_id, delta: -cur });
     let exp_survivor = experiment.survivors[0].id;
     experiment.survivors.iter_mut().find(|s| s.id == exp_survivor).unwrap().profession =
         Profession::Lumberjack;
@@ -110,11 +118,18 @@ fn mismatched_profession_gets_no_bonus() {
     let (x, y) = find_sawmill_spot_near_forest(&baseline);
     sim::apply_command(&mut baseline, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
     let baseline_id = baseline.buildings.last().unwrap().id;
+    // V0.8: bitirish + brigada tozalash (yuqoridagi test bilan bir sabab).
+    sim::finish_all_construction(&mut baseline);
+    let cur = baseline.find_building(baseline_id).unwrap().workers as i8;
+    sim::apply_command(&mut baseline, 1, &PlayerCommand::AdjustWorkers { building: baseline_id, delta: -cur });
     sim::apply_command(&mut baseline, 1, &PlayerCommand::AdjustWorkers { building: baseline_id, delta: 1 });
 
     let (x, y) = find_sawmill_spot_near_forest(&mismatched);
     sim::apply_command(&mut mismatched, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
     let mismatched_id = mismatched.buildings.last().unwrap().id;
+    sim::finish_all_construction(&mut mismatched);
+    let cur = mismatched.find_building(mismatched_id).unwrap().workers as i8;
+    sim::apply_command(&mut mismatched, 1, &PlayerCommand::AdjustWorkers { building: mismatched_id, delta: -cur });
     let survivor = mismatched.survivors[0].id;
     // Explicitly a non-Lumberjack profession working the Sawmill.
     mismatched.survivors.iter_mut().find(|s| s.id == survivor).unwrap().profession = Profession::Cook;

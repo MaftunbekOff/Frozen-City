@@ -117,7 +117,7 @@ koordinata konvertatsiya funksiyalari `tile_center_world`/`world_to_tile`).
 
 | Fayl | Mas'uliyat | Kim ishlatadi / bog'liqligi |
 |---|---|---|
-| `menu/` (modul: `layout`·`buttons`·`account`·`start`) | Bosh menyu: singleplayer/host/join/akkaunt kirish, avtostart (`--host`/`--join`/`--smoke`) | `net::server` (host in-process), `net::client`/`net::ws` (join) |
+| `menu/` (modul: `layout`·`buttons`·`account`·`overlay`·`start`) | Bosh menyu: singleplayer/host/join, sof bosh-sahifa + Akkaunt/Sozlamalar **modal overlay**larда (`overlay.rs`); avtostart (`--host`/`--join`/`--smoke`) | `net::server` (host in-process), `net::client`/`net::ws` (join) |
 | `net_sync.rs` | Snapshot qabul qilish → `GameView`ga ko'chirish, shaffof auto-reconnect (fon-thread'da qayta ulanish, sessiya tokeni bilan) | `NetConn`, `ClientConn::poll` |
 | `render/` (modul: `components`·`assets`·`meshes`·`scene`·`terrain`·`buildings`·`survivors`·`cursors`·`effects`) | 3D protsedural sahna: teren, binolar, aholi, kecha-kunduz, pech yorug'i, qor, kursorlar — hammasi assetsiz | `GameView` (snapshot o'qish), `Quality` (grafika darajasi) |
 | `input.rs` | Kamera boshqaruvi, qurish input'i, tanlash | `BuildMode`, `Selection`, `PlayerCommand` yuborish |
@@ -190,7 +190,7 @@ V0.6) do'stlarini o'z shaxsiy olamiga taklif qiladi.
    siz bo'lsa deploy web-build bosqichigacha yetib bormay to'xtaydi.
 
 **Saqlash-format migratsiya qoidasi:** `GameState`ga yangi maydon qo'shishdan
-OLDIN — yangi versiya magic (`persist.rs`, hozir `FCWORLD2`) + `fc-net`ning `legacy.rs`
+OLDIN — yangi versiya magic (`persist.rs`, hozir `FCWORLD5`) + `fc-net`ning `legacy.rs`
 zanjiriga yangi bo'g'in (eski struktura muzlatilgan holicha qoladi, `From`
 impl bilan migratsiya) qo'shilishi shart, va deploy'dan oldin haqiqiy
 production saqlovlar nusxasi `examples/checksave.rs` bilan tekshiriladi.

@@ -62,6 +62,9 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
         progress: 0.0,
         owner: None,
         owner_account: None,
+        // Boshlang'ich pech tayyor holda tug'iladi (qurilishsiz).
+        level: 1,
+        build_left: 0.0,
     };
 
     let mut state = GameState {

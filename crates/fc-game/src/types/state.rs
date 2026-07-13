@@ -165,16 +165,18 @@ impl GameState {
     /// Live progress value for a mission, compared against `kind.target()`.
     pub fn mission_current(&self, kind: MissionKind) -> u32 {
         match kind {
+            // Only FINISHED buildings count toward build missions — a site
+            // under construction isn't a tent/sawmill yet (V0.8).
             MissionKind::BuildTents(_) => self
                 .buildings
                 .iter()
-                .filter(|b| b.kind == BuildingKind::Tent)
+                .filter(|b| b.kind == BuildingKind::Tent && !b.under_construction())
                 .count() as u32,
             MissionKind::Population(_) => self.survivors.len() as u32,
             MissionKind::Sawmills(_) => self
                 .buildings
                 .iter()
-                .filter(|b| b.kind == BuildingKind::Sawmill)
+                .filter(|b| b.kind == BuildingKind::Sawmill && !b.under_construction())
                 .count() as u32,
             MissionKind::StockpileCoal(_) => self.stock.coal.max(0.0) as u32,
             MissionKind::SurviveDays(_) => self.day(),
@@ -333,6 +335,14 @@ impl GameState {
                         None => b.owner == Some(pid),
                     })
                 }
+                // Upgrading follows the same ownership rule as tearing down:
+                // only whoever placed the building improves it.
+                PlayerCommand::UpgradeBuilding { building } => {
+                    self.find_building(*building).is_some_and(|b| match b.owner_account {
+                        Some(owner_acc) => account == Some(owner_acc),
+                        None => b.owner == Some(pid),
+                    })
+                }
                 // Only your own settlers, by account identity.
                 PlayerCommand::AssignSurvivor { survivor, .. } => {
                     account.is_some()
@@ -375,9 +385,11 @@ impl GameState {
             GuestPermission::Full => true,
             GuestPermission::ViewOnly => false,
             GuestPermission::Build => match cmd {
-                // Building, worker assignment and the shared Tunnel/research
-                // goals are the cooperative core, so guests may all pitch in.
+                // Building (incl. upgrades), worker assignment and the shared
+                // Tunnel/research goals are the cooperative core, so guests
+                // may all pitch in.
                 PlayerCommand::Place { .. }
+                | PlayerCommand::UpgradeBuilding { .. }
                 | PlayerCommand::AdjustWorkers { .. }
                 | PlayerCommand::AssignSurvivor { .. }
                 | PlayerCommand::MoveSurvivor { .. }
@@ -406,11 +418,9 @@ impl GameState {
     }
 
     pub fn housing_capacity(&self) -> usize {
-        self.buildings
-            .iter()
-            .filter(|b| b.kind == BuildingKind::Tent)
-            .count()
-            * TENT_CAPACITY
+        // Level-aware and construction-aware (an unfinished Tent site
+        // shelters nobody) — see `Building::housing_slots`.
+        self.buildings.iter().map(|b| b.housing_slots()).sum()
     }
 
     /// Chebyshev distance from a tile's center to the furnace center.

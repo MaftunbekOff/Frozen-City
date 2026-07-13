@@ -19,17 +19,20 @@ pub const DEFAULT_SAVE_PATH: &str = "/var/lib/frozen-city/world.bin";
 /// (V2: `Survivor::owner`, `PlayerInfo::account`, `GameState::central`; V3:
 /// `Building::owner_account`, `GameState::central_ledger`; V4: survivor
 /// position/movement, leader/mourning, professions, xp/levels, morale — see
-/// the V0.7 "survivor management" fields on `Survivor`/`GameState`). Bincode
-/// is positional, so without a header there'd be no way to tell one version's
-/// file from another's — and misreading one version as another would
-/// "collapse to None" in `load_at` and silently wipe a production world on
-/// the first deploy after a format change. Files WITHOUT any recognized
-/// prefix are decoded through the frozen V1 mirror (`legacy.rs`) and
-/// migrated all the way to V4; files with `MAGIC_V2`/`MAGIC_V3` decode
-/// through the matching mirror and migrate the rest of the way.
+/// the V0.7 "survivor management" fields on `Survivor`/`GameState`; V5:
+/// `Building::level`/`build_left` — V0.8 building levels & construction).
+/// Bincode is positional, so without a header there'd be no way to tell one
+/// version's file from another's — and misreading one version as another
+/// would "collapse to None" in `load_at` and silently wipe a production
+/// world on the first deploy after a format change. Files WITHOUT any
+/// recognized prefix are decoded through the frozen V1 mirror (`legacy.rs`)
+/// and migrated all the way to V5; files with `MAGIC_V2`/`MAGIC_V3`/
+/// `MAGIC_V4` decode through the matching mirror and migrate the rest of
+/// the way.
 const MAGIC_V2: &[u8; 8] = b"FCWORLD2";
 const MAGIC_V3: &[u8; 8] = b"FCWORLD3";
 const MAGIC_V4: &[u8; 8] = b"FCWORLD4";
+const MAGIC_V5: &[u8; 8] = b"FCWORLD5";
 
 fn resolve_path() -> String {
     std::env::var("FC_WORLD_SAVE").unwrap_or_else(|_| DEFAULT_SAVE_PATH.to_string())
@@ -59,8 +62,8 @@ pub fn save_at(state: &GameState, path: &str) -> io::Result<()> {
     }
     let body =
         bincode::serialize(state).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    let mut bytes = Vec::with_capacity(MAGIC_V4.len() + body.len());
-    bytes.extend_from_slice(MAGIC_V4);
+    let mut bytes = Vec::with_capacity(MAGIC_V5.len() + body.len());
+    bytes.extend_from_slice(MAGIC_V5);
     bytes.extend_from_slice(&body);
     // Write to a sibling temp file and rename over the target: a kill mid-write
     // (the exact moment this feature exists to survive) leaves the previous,
@@ -74,27 +77,34 @@ pub fn save_at(state: &GameState, path: &str) -> io::Result<()> {
 
 pub fn load_at(path: &str) -> Option<GameState> {
     let bytes = fs::read(path).ok()?;
-    if let Some(body) = bytes.strip_prefix(MAGIC_V4.as_slice()) {
+    if let Some(body) = bytes.strip_prefix(MAGIC_V5.as_slice()) {
         return bincode::deserialize(body).ok();
+    }
+    if let Some(body) = bytes.strip_prefix(MAGIC_V4.as_slice()) {
+        // V4 (pre-building-levels): decode through the frozen V4 mirror and
+        // migrate one hop to V5. The next autosave rewrites it as V5.
+        return bincode::deserialize::<crate::legacy::GameStateV4>(body)
+            .ok()
+            .map(GameState::from);
     }
     if let Some(body) = bytes.strip_prefix(MAGIC_V3.as_slice()) {
         // V3 (pre-survivor-management): decode through the frozen V3 mirror
-        // and migrate one hop to V4. The next autosave rewrites it as V4.
+        // and migrate two hops to V5. The next autosave rewrites it as V5.
         return bincode::deserialize::<crate::legacy::GameStateV3>(body)
             .ok()
             .map(GameState::from);
     }
     if let Some(body) = bytes.strip_prefix(MAGIC_V2.as_slice()) {
         // V2 (pre-account-ownership/contribution-ledger): decode through the
-        // frozen V2 mirror and migrate two hops to V4. The next autosave
-        // rewrites it as V4.
+        // frozen V2 mirror and migrate three hops to V5. The next autosave
+        // rewrites it as V5.
         return bincode::deserialize::<crate::legacy::GameStateV2>(body)
             .ok()
             .map(GameState::from);
     }
     // No recognized header: a save written before versioning existed at
     // all — decode it through the frozen V1 mirror and migrate all the way
-    // to V4. The next autosave rewrites it as V4.
+    // to V5. The next autosave rewrites it as V5.
     bincode::deserialize::<crate::legacy::GameStateV1>(&bytes)
         .ok()
         .map(GameState::from)
@@ -231,7 +241,7 @@ mod tests {
         );
         assert!(loaded.central_ledger.is_empty(), "V1 predates the contribution ledger");
 
-        // And once re-saved (V4, with header), it round-trips as-is.
+        // And once re-saved (V5, with header), it round-trips as-is.
         save_at(&loaded, &path).unwrap();
         assert_eq!(load_at(&path).expect("V4 reload"), loaded);
         fs::remove_file(&path).ok();
@@ -308,7 +318,7 @@ mod tests {
         );
         assert!(loaded.central_ledger.is_empty(), "V2 predates the contribution ledger");
 
-        // And once re-saved (V4, with header), it round-trips as-is.
+        // And once re-saved (V5, with header), it round-trips as-is.
         save_at(&loaded, &path).unwrap();
         assert_eq!(load_at(&path).expect("V4 reload"), loaded);
         fs::remove_file(&path).ok();
@@ -333,7 +343,7 @@ mod tests {
             tick: modern.tick,
             win_days: modern.win_days,
             tiles: modern.tiles.clone(),
-            buildings: modern.buildings.clone(),
+            buildings: modern.buildings.iter().map(crate::legacy::BuildingV4::from).collect(),
             survivors: modern.survivors.iter().map(SurvivorV3::from).collect(),
             stock: modern.stock,
             furnace_level: modern.furnace_level,
@@ -391,9 +401,80 @@ mod tests {
             assert!(d < 10.0, "V3 survivors should migrate to a furnace-adjacent spawn, got ({}, {})", s.x, s.y);
         }
 
-        // And once re-saved (V4, with header), it round-trips as-is.
+        // And once re-saved (V5, with header), it round-trips as-is.
         save_at(&loaded, &path).unwrap();
-        assert_eq!(load_at(&path).expect("V4 reload"), loaded);
+        assert_eq!(load_at(&path).expect("V5 reload"), loaded);
+        fs::remove_file(&path).ok();
+    }
+
+    /// A world saved under `FCWORLD4` (pre-building-levels: no
+    /// `Building::level`/`build_left`) must load and migrate one hop to V5
+    /// with every old building as a FINISHED level-1 building — same
+    /// non-negotiable "never collapses to None" guarantee as V1/V2/V3.
+    #[test]
+    fn v4_save_migrates() {
+        use crate::legacy::{BuildingV4, GameStateV4};
+
+        let path = throwaway_path("v4-migrate");
+        let mut modern = sim::new_game(41, 12);
+        sim::player_joined(&mut modern, 6, "Yulduz");
+        modern.graduated = true;
+        let v4 = GameStateV4 {
+            tick: modern.tick,
+            win_days: modern.win_days,
+            tiles: modern.tiles.clone(),
+            buildings: modern.buildings.iter().map(BuildingV4::from).collect(),
+            survivors: modern.survivors.clone(),
+            stock: modern.stock,
+            furnace_level: modern.furnace_level,
+            furnace_lit: modern.furnace_lit,
+            cold_snap: modern.cold_snap,
+            players: modern.players.clone(),
+            phase: modern.phase,
+            events: modern.events.clone(),
+            total_events: modern.total_events,
+            chat: modern.chat.clone(),
+            total_chat: modern.total_chat,
+            pings: modern.pings.clone(),
+            missions: modern.missions.clone(),
+            tunnel: modern.tunnel,
+            graduated: modern.graduated,
+            central: modern.central,
+            techs: modern.techs.clone(),
+            disease_until: modern.disease_until,
+            blizzard_until: modern.blizzard_until,
+            pending_event: modern.pending_event,
+            event_rng: modern.event_rng,
+            guest_perm: modern.guest_perm,
+            owner_id: modern.owner_id,
+            next_id: modern.next_id,
+            rng: modern.rng,
+            central_ledger: modern.central_ledger.clone(),
+            leader: modern.leader,
+            mourning_until: modern.mourning_until,
+            morale: modern.morale,
+        };
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(MAGIC_V4);
+        bytes.extend_from_slice(&bincode::serialize(&v4).unwrap());
+        fs::write(&path, bytes).unwrap();
+
+        let loaded = load_at(&path).expect("V4 save must migrate, never wipe");
+        assert_eq!(loaded.survivors, modern.survivors, "V4 survivors are already live-shape");
+        assert_eq!(loaded.players, modern.players);
+        assert!(loaded.graduated, "graduation must survive migration");
+        assert_eq!(loaded.stock, modern.stock);
+        for b in &loaded.buildings {
+            assert_eq!(b.level, 1, "V4 buildings migrate as level 1");
+            assert_eq!(b.build_left, 0.0, "V4 buildings migrate as FINISHED");
+        }
+        // A fresh world's buildings are level-1/finished too, so the whole
+        // set must match field-for-field after migration.
+        assert_eq!(loaded.buildings, modern.buildings);
+
+        // And once re-saved (V5, with header), it round-trips as-is.
+        save_at(&loaded, &path).unwrap();
+        assert_eq!(load_at(&path).expect("V5 reload"), loaded);
         fs::remove_file(&path).ok();
     }
 

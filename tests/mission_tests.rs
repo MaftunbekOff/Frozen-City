@@ -30,10 +30,19 @@ fn building_tents_completes_the_first_mission_and_grants_reward() {
     let (x2, y2) = find_spot(&state, BuildingKind::Tent);
     sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x: x2, y: y2 });
 
+    // V0.8: bitmagan maydoncha missiyaga sanalmaydi — avval shuni tasdiqlab,
+    // keyin qurilishni yakunlaymiz.
+    assert_eq!(
+        state.mission_current(MissionKind::BuildTents(2)),
+        0,
+        "unfinished tent sites must NOT count toward the mission"
+    );
+    sim::finish_all_construction(&mut state);
+
     assert_eq!(
         state.mission_current(MissionKind::BuildTents(2)),
         2,
-        "two tents should satisfy the BuildTents(2) mission's live progress"
+        "two FINISHED tents should satisfy the BuildTents(2) mission's live progress"
     );
 
     // Capture wood right before the completing tick: production/consumption

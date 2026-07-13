@@ -443,10 +443,24 @@ pub fn player_color(idx: u8) -> Color {
     Color::srgb(r, g, b)
 }
 
+/// Aholi 3D modeli (CesiumMan, CC-BY 4.0 — qarang
+/// `assets/models/LICENSE-CesiumMan.txt`). Font kabi binary ichiga
+/// singdirilgan: native va wasm'da bir xil, tashqi fayl/HTTP talab qilmaydi.
+const SURVIVOR_MODEL_BYTES: &[u8] = include_bytes!("../../assets/models/CesiumMan.glb");
+
 pub struct ClientPlugin;
 
 impl Plugin for ClientPlugin {
     fn build(&self, app: &mut App) {
+        // Singdirilgan GLB'ni `embedded://` asset manbasiga ro'yxatlaydi —
+        // `render::setup_camera_and_assets` shu yo'ldan yuklaydi.
+        app.world()
+            .resource::<bevy::asset::io::embedded::EmbeddedAssetRegistry>()
+            .insert_asset(
+                std::path::PathBuf::from("models/CesiumMan.glb"),
+                std::path::Path::new("models/CesiumMan.glb"),
+                SURVIVOR_MODEL_BYTES,
+            );
         app.init_state::<Screen>()
             .init_resource::<input::CamRig>()
             .init_resource::<touch::TouchCtl>()
@@ -458,8 +472,10 @@ impl Plugin for ClientPlugin {
             .init_resource::<TransitionMsg>()
             .init_resource::<SocialState>()
             .init_resource::<menu::LoginForm>()
+            .init_resource::<menu::MenuOverlay>()
             .init_resource::<net_sync::Reconnecting>()
             .init_resource::<BuildMode>()
+            .init_resource::<ui::BuildPanelOpen>()
             .init_resource::<Selection>()
             .init_resource::<UiHover>()
             .init_resource::<MoveOrderQueue>()
@@ -488,6 +504,7 @@ impl Plugin for ClientPlugin {
                     menu::pending_switch,
                     menu::autostart,
                     menu::menu_buttons,
+                    menu::overlay_buttons,
                     #[cfg(target_arch = "wasm32")]
                     menu::region_buttons,
                     menu::login_field_focus,
@@ -531,6 +548,8 @@ impl Plugin for ClientPlugin {
                     render::animate_effects,
                     render::animate_smoke,
                     render::animate_survivors,
+                    render::setup_survivor_animations,
+                    render::drive_survivor_animations,
                     render::animate_survivor_selection,
                     render::sync_leader_crown,
                     render::spawn_move_ping,
@@ -567,9 +586,12 @@ impl Plugin for ClientPlugin {
                 Update,
                 (
                     ui::hud_update,
+                    ui::morale_bar_update,
                     ui::fps_update,
                     ui::build_buttons,
                     ui::furnace_buttons,
+                    ui::build_panel_toggle,
+                    ui::build_panel_visibility,
                     ui::selection_panel_update,
                     ui::selection_panel_buttons,
                     ui::game_over_ui,

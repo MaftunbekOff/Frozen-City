@@ -42,7 +42,7 @@ fn menu_section() -> impl Bundle {
 /// Graphics button group): full card width, and `FlexWrap::Wrap` so a long
 /// label/localization or a narrow (Mobile) card reflows onto a second line
 /// instead of spilling past the card's right edge.
-fn menu_row() -> Node {
+pub(crate) fn menu_row() -> Node {
     Node {
         width: Val::Percent(100.0),
         flex_wrap: FlexWrap::Wrap,
@@ -67,9 +67,13 @@ pub fn spawn_menu(
     quality_pref: Res<QualityPref>,
     audio: Res<AudioSettings>,
     ff: Res<FormFactor>,
+    mut overlay: ResMut<MenuOverlay>,
 ) {
+    // A fresh menu entry always starts on the clean landing, never with a
+    // modal left open from a previous visit.
+    *overlay = MenuOverlay::None;
     let error = view.error.clone().unwrap_or_default();
-    build_menu(commands, &settings, error, *lang, *quality_pref, *audio, *ff);
+    build_menu(commands, &settings, error, *lang, *quality_pref, *audio, *ff, MenuOverlay::None);
 }
 
 /// The actual menu layout, factored out of the `spawn_menu` system so
@@ -79,10 +83,14 @@ pub fn spawn_menu(
 /// signature, not constructed by hand). Both callers pass an owned/copied
 /// snapshot of each resource, never the resource references themselves.
 ///
-/// Layout: a single scrolling column (full-width on Mobile, a centered
-/// ~480px card on Tablet/Desktop) — big title, subtitle, error line, then
-/// four `theme::card` sections (Play / Account / Region / Settings) and a
-/// dim hint footer. Region only appears on wasm (see `RegionButton`'s doc).
+/// Layout: a single centered column (full-width on Mobile, a ~480px card on
+/// Tablet/Desktop) — a big title, subtitle and accent bar, the primary Play
+/// actions, and a two-button row that opens the Account / Settings modals.
+/// Account and Settings themselves live in overlays ([`spawn_overlay`]) so the
+/// landing stays to clean actions, the way a polished game menu does. Region
+/// only appears on wasm (see `RegionButton`'s doc). The final step spawns the
+/// currently-open `overlay` on top, so every rebuild (open, close, language)
+/// re-renders it in the current state.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_menu(
     mut commands: Commands,
@@ -92,6 +100,7 @@ pub(crate) fn build_menu(
     quality_pref: QualityPref,
     audio: AudioSettings,
     ff: FormFactor,
+    overlay: MenuOverlay,
 ) {
     let column_width = if ff.compact() { Val::Percent(100.0) } else { Val::Px(480.0) };
     commands
@@ -103,7 +112,7 @@ pub(crate) fn build_menu(
                 top: Val::Px(0.0),
                 bottom: Val::Px(0.0),
                 flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::FlexStart,
+                justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 overflow: Overflow::scroll_y(),
                 ..default()
@@ -121,7 +130,7 @@ pub(crate) fn build_menu(
                     max_width: Val::Percent(100.0),
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Stretch,
-                    padding: UiRect::all(Val::Px(theme::SP_MD)).with_top(Val::Px(theme::SP_XL)),
+                    padding: UiRect::all(Val::Px(theme::SP_MD)).with_top(Val::Px(theme::SP_LG)),
                     row_gap: Val::Px(theme::SP_LG),
                     ..default()
                 },
@@ -131,24 +140,25 @@ pub(crate) fn build_menu(
                     align_items: AlignItems::Center,
                     flex_direction: FlexDirection::Column,
                     row_gap: Val::Px(theme::SP_XS),
+                    margin: UiRect::bottom(Val::Px(theme::SP_SM)),
                     ..default()
                 })
                 .with_children(|head| {
                     head.spawn((
                         theme::text(
                             mtxt::title(lang),
-                            if ff.compact() { 44.0 } else { 54.0 },
+                            if ff.compact() { 46.0 } else { 60.0 },
                             theme::TEXT_PRIMARY,
                         ),
                         // Muzli "porlash": pastga siljigan ko'k soya.
                         TextShadow {
                             offset: Vec2::new(0.0, 4.0),
-                            color: Color::srgba(0.15, 0.55, 0.90, 0.35),
+                            color: Color::srgba(0.15, 0.55, 0.90, 0.40),
                         },
                     ));
                     head.spawn((
                         Node {
-                            width: Val::Px(64.0),
+                            width: Val::Px(72.0),
                             height: Val::Px(3.0),
                             margin: UiRect::vertical(Val::Px(theme::SP_XS)),
                             border_radius: BorderRadius::MAX,
@@ -170,7 +180,7 @@ pub(crate) fn build_menu(
                     let mut buttons: Vec<(MenuAction, String)> =
                         vec![(MenuAction::Single, mtxt::btn_singleplayer(lang).to_string())];
                     #[cfg(not(target_arch = "wasm32"))]
-                    buttons.push((MenuAction::Host, mtxt::btn_host_coop(lang, settings.host_port)));
+                    buttons.push((MenuAction::Host, mtxt::btn_host_coop(lang).to_string()));
                     buttons.push((MenuAction::Join, mtxt::btn_join_guest(lang, &settings.join_addr)));
                     #[cfg(not(target_arch = "wasm32"))]
                     buttons.push((MenuAction::Quit, mtxt::btn_quit(lang).to_string()));
@@ -210,106 +220,6 @@ pub(crate) fn build_menu(
                     }
                 });
 
-                // ---------------------------------------------------Account
-                col.spawn(menu_section()).with_children(|section| {
-                    section.spawn(theme::section(mtxt::section_account(lang)));
-                    section.spawn(theme::divider());
-                    // Its own full-width row so long/localized intro text
-                    // wraps at the card's width instead of squeezed into a
-                    // narrow auto-width column alongside the fields below.
-                    section.spawn((
-                        theme::text(mtxt::account_intro(lang), theme::FS_SMALL, theme::TEXT_MUTED),
-                        Node {
-                            width: Val::Percent(100.0),
-                            ..default()
-                        },
-                    ));
-
-                    section
-                        .spawn(Node {
-                            flex_direction: FlexDirection::Column,
-                            row_gap: Val::Px(theme::SP_SM),
-                            ..default()
-                        })
-                        .with_children(|fields| {
-                            // Name is register-only; its box is hidden
-                            // (Display::None) in login mode by
-                            // `update_login_fields`.
-                            for field in
-                                [AccountField::Name, AccountField::Login, AccountField::Password]
-                            {
-                                fields
-                                    .spawn((
-                                        Button,
-                                        Node {
-                                            width: Val::Percent(100.0),
-                                            height: Val::Px(ff.btn_h()),
-                                            justify_content: JustifyContent::FlexStart,
-                                            align_items: AlignItems::Center,
-                                            padding: UiRect::horizontal(Val::Px(theme::SP_MD)),
-                                            border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
-                                            ..default()
-                                        },
-                                        BackgroundColor(FIELD_BG),
-                                        LoginFieldBox(field),
-                                    ))
-                                    .with_children(|b| {
-                                        b.spawn((
-                                            theme::text("", theme::FS_BODY, theme::TEXT_MUTED),
-                                            LoginFieldText(field),
-                                        ));
-                                    });
-                            }
-                        });
-
-                    section
-                        .spawn(menu_row())
-                        .with_children(|row| {
-                            row.spawn((
-                                Button,
-                                Node {
-                                    width: Val::Auto,
-                                    min_height: Val::Px(ff.btn_h()),
-                                    justify_content: JustifyContent::Center,
-                                    align_items: AlignItems::Center,
-                                    padding: UiRect::axes(Val::Px(theme::SP_MD), Val::Px(theme::SP_XS)),
-                                    border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
-                                    ..default()
-                                },
-                                BackgroundColor(theme::BTN),
-                                BaseColor(theme::BTN),
-                            ))
-                            .insert(AccountLoginButton)
-                            .with_children(|b| {
-                                b.spawn((
-                                    theme::text(mtxt::btn_sign_in(lang), theme::FS_BODY, theme::TEXT_PRIMARY),
-                                    AccountLoginButtonLabel,
-                                ));
-                            });
-                            row.spawn((
-                                Button,
-                                Node {
-                                    width: Val::Auto,
-                                    min_height: Val::Px(ff.btn_h()),
-                                    justify_content: JustifyContent::Center,
-                                    align_items: AlignItems::Center,
-                                    padding: UiRect::axes(Val::Px(theme::SP_MD), Val::Px(theme::SP_XS)),
-                                    border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
-                                    ..default()
-                                },
-                                BackgroundColor(FIELD_BG),
-                                BaseColor(FIELD_BG),
-                                RegisterToggleButton,
-                            ))
-                            .with_children(|b| {
-                                b.spawn((
-                                    theme::text(mtxt::btn_sign_up(lang), theme::FS_SMALL, theme::TEXT_MUTED),
-                                    RegisterToggleLabel,
-                                ));
-                            });
-                        });
-                });
-
                 // ---------------------------------------------------Region
                 // Which reverse-proxy path (and thus which independent
                 // region-server process) Join/sign-in dial. Native desktop
@@ -337,56 +247,42 @@ pub(crate) fn build_menu(
                         });
                 });
 
-                // -------------------------------------------------Settings
-                col.spawn(menu_section()).with_children(|section| {
-                    section.spawn(theme::section(mtxt::section_settings(lang)));
-                    section.spawn(theme::divider());
-
-                    section.spawn(theme::text(mtxt::language_label(lang), theme::FS_SMALL, theme::TEXT_MUTED));
-                    section
-                        .spawn(menu_row())
-                        .with_children(|row| {
-                            for l in [Lang::Uz, Lang::En, Lang::Ru] {
-                                let bg = if lang == l { BTN_ACTIVE } else { theme::BTN };
-                                row.spawn(theme::button(Val::Percent(100.0 / 3.0), ff.btn_h(), bg))
-                                    .insert(LangButton(l))
-                                    .with_children(|b| {
-                                        b.spawn(theme::text(l.label(), theme::FS_SMALL, theme::TEXT_PRIMARY));
-                                    });
-                            }
-                        });
-
-                    section.spawn(theme::text(mtxt::graphics_label(lang), theme::FS_SMALL, theme::TEXT_MUTED));
-                    section
-                        .spawn(menu_row())
-                        .with_children(|row| {
-                            for (q, label) in [
-                                (QualityPref::Auto, mtxt::quality_auto(lang)),
-                                (QualityPref::Low, mtxt::quality_low(lang)),
-                                (QualityPref::Medium, mtxt::quality_medium(lang)),
-                                (QualityPref::High, mtxt::quality_high(lang)),
-                            ] {
-                                let bg = if quality_pref == q { BTN_ACTIVE } else { theme::BTN };
-                                row.spawn(theme::button(Val::Percent(25.0), ff.btn_h(), bg))
-                                    .insert(QualityButton(q))
-                                    .with_children(|b| {
-                                        b.spawn(theme::text(label, theme::FS_SMALL, theme::TEXT_PRIMARY));
-                                    });
-                            }
-                        });
-
-                    section.spawn(theme::text(mtxt::sound_label(lang), theme::FS_SMALL, theme::TEXT_MUTED));
-                    section
-                        .spawn(theme::button(
-                            Val::Percent(100.0),
-                            ff.btn_h(),
-                            if audio.enabled { BTN_ACTIVE } else { theme::BTN },
+                // ------------------------------------- Account / Settings
+                // Two equal secondary buttons that open the respective modal
+                // overlay, keeping the login form and the settings off the
+                // landing.
+                col.spawn(Node {
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(theme::SP_SM),
+                    ..default()
+                })
+                .with_children(|row| {
+                    for (ov, label) in [
+                        (MenuOverlay::Account, mtxt::section_account(lang)),
+                        (MenuOverlay::Settings, mtxt::section_settings(lang)),
+                    ] {
+                        row.spawn((
+                            Button,
+                            Node {
+                                flex_grow: 1.0,
+                                flex_basis: Val::Px(0.0),
+                                height: Val::Px(ff.btn_h()),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                border: UiRect::all(Val::Px(1.0)),
+                                border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
+                                ..default()
+                            },
+                            BackgroundColor(theme::BTN),
+                            BorderColor::all(theme::BORDER),
+                            BaseColor(theme::BTN),
+                            OpenOverlayBtn(ov),
                         ))
-                        .insert(AudioToggleButton)
                         .with_children(|b| {
-                            let label = if audio.enabled { mtxt::sound_on(lang) } else { mtxt::sound_off(lang) };
-                            b.spawn((theme::text(label, theme::FS_SMALL, theme::TEXT_PRIMARY), AudioToggleLabel));
+                            b.spawn(theme::text(label, theme::FS_SMALL, theme::TEXT_PRIMARY));
                         });
+                    }
                 });
 
                 col.spawn(Node {
@@ -406,4 +302,7 @@ pub(crate) fn build_menu(
                 });
             });
         });
+
+    // Finally, the open modal (if any) on top of the landing.
+    spawn_overlay(&mut commands, overlay, lang, quality_pref, audio, ff);
 }

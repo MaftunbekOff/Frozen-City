@@ -44,6 +44,13 @@ fn move_survivor_sets_target_and_unassigns_work() {
         sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
         state.buildings.last().unwrap().id
     };
+    // V0.8: maydonchani bitirib, avto-brigadani bo'shatamiz — test bitgan
+    // binodagi yagona nomlangan slotni kuzatadi.
+    sim::finish_all_construction(&mut state);
+    let cur = state.find_building(sawmill).unwrap().workers as i8;
+    if cur > 0 {
+        sim::apply_command(&mut state, 1, &PlayerCommand::AdjustWorkers { building: sawmill, delta: -cur });
+    }
     let survivor = state.survivors[0].id;
     sim::apply_command(&mut state, 1, &PlayerCommand::AssignSurvivor { survivor, building: Some(sawmill) });
     assert_eq!(state.find_building(sawmill).unwrap().workers, 1);
@@ -153,6 +160,15 @@ fn assigned_survivor_walks_toward_their_building() {
     let (bx, by) = find_spot(&state, BuildingKind::Sawmill);
     sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x: bx, y: by });
     let sawmill = state.buildings.last().unwrap().id;
+    // V0.8: bitirib, avto-brigadani bo'shatamiz — nomlangan biriktirma uchun
+    // joy ochilsin.
+    sim::finish_all_construction(&mut state);
+    {
+        let cur = state.find_building(sawmill).unwrap().workers as i8;
+        if cur > 0 {
+            sim::apply_command(&mut state, 1, &PlayerCommand::AdjustWorkers { building: sawmill, delta: -cur });
+        }
+    }
     let survivor_id = state.survivors[0].id;
     // Start far from the building so the walk takes multiple ticks.
     {

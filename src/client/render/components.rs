@@ -13,11 +13,32 @@ pub struct TerrainViz {
     pub seen_tiles_version: u64,
 }
 
+/// Bitta binoning sahnadagi ifodasi + qaysi (daraja, qurilish-holati)
+/// juftligi uchun qurilgani. V0.8: daraja yoki qurilish holati o'zgarsa
+/// `sync_buildings` eski entity'ni buzib, yangisini quradi — bino ko'rinishi
+/// darajaga qarab o'zgaradi.
+pub struct BuildingVizEntry {
+    pub entity: Entity,
+    pub level: u8,
+    pub under_construction: bool,
+}
+
 #[derive(Resource, Default)]
-pub struct BuildingViz(pub HashMap<u32, Entity>);
+pub struct BuildingViz(pub HashMap<u32, BuildingVizEntry>);
 
 #[derive(Resource, Default)]
 pub struct SurvivorViz(pub HashMap<u32, Entity>);
+
+/// Aholining XP-daraja anjomi (V0.8 ko'rinish darajalari): `level` — shu
+/// anjom ko'rinishi uchun zarur minimal `xp_level` (1 = peshona tasmasi,
+/// 2 = qalpoq, 3 = oltin ko'krak nishoni). `sync_survivors` har snapshotda
+/// ko'rinishini yangilaydi; anjomlar kumulyativ ko'rinadi.
+#[derive(Component)]
+pub struct SurvivorGear {
+    pub id: u32,
+    pub level: u8,
+}
+
 
 /// Remote player cursors: world marker + screen-space name label.
 #[derive(Resource, Default)]

@@ -1,0 +1,10 @@
+CesiumMan.glb
+
+Manba: Khronos glTF-Sample-Assets
+https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CesiumMan
+
+Muallif / Author: Cesium (https://cesium.com/)
+Litsenziya / License: Creative Commons Attribution 4.0 International (CC-BY 4.0)
+https://creativecommons.org/licenses/by/4.0/
+
+O'zgartirishlar / Modifications: yo'q (asl fayl o'zgarishsiz ishlatilgan).

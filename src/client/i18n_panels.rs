@@ -508,3 +508,4 @@ pub fn tech_cost(wood: u32, coal: u32, l: Lang) -> String {
         Lang::Ru => format!("{wood}д {coal}у"),
     }
 }
+

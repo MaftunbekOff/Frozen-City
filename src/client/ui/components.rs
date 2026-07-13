@@ -27,6 +27,41 @@ pub struct BuildBtn(pub BuildingKind);
 #[derive(Component)]
 pub struct FurnaceLvlBtn(pub u8);
 
+/// Row of furnace-level buttons inside the selection panel; shown only while
+/// the Furnace is the selected building (see `selection_panel_update`), so the
+/// furnace level is adjusted from the furnace's own click-info.
+#[derive(Component)]
+pub struct FurnaceRow;
+
+// --- Build modal (corner button + centered modal) ---
+
+/// The Build modal's scrim root (despawn + UI-blocker + visibility
+/// target — see `build_panel_visibility`).
+#[derive(Component)]
+pub struct BuildPanelRoot;
+
+/// The bottom-right corner's single always-visible button (brass medallion
+/// with a hammer glyph) — toggles the Build/Manage modal.
+#[derive(Component)]
+pub struct BuildPanelToggleBtn;
+
+/// Whether the Build modal is open (`build_panel_toggle` writes,
+/// `build_panel_visibility` applies; picking a building closes it so the
+/// world is visible for placement).
+#[derive(Resource, Default)]
+pub struct BuildPanelOpen(pub bool);
+
+/// The build menu's deny/feedback line — "not enough wood" when the player
+/// clicks a tile they can't afford (`build_buttons` writes it, empty when
+/// there's nothing to say).
+#[derive(Component)]
+pub struct BuildDenyText;
+
+/// A build tile's cost badge text; `build_buttons` turns it danger-red while
+/// the building is unaffordable so the reason is visible before clicking.
+#[derive(Component)]
+pub struct BuildCostBadge(pub BuildingKind);
+
 /// Marks interactive UI containers so world clicks/zoom are suppressed there.
 #[derive(Component)]
 pub struct UiBlocker;
@@ -43,7 +78,23 @@ pub enum SelText {
     Title,
     Info,
     Count,
+    /// "Bo'sh ishchi: N" — the colony's idle-worker pool, shown inside the
+    /// workforce section so the player can see headroom without checking the
+    /// top bar (mirrors the "N available" column in the reference layout).
+    Avail,
+    /// V0.8: "Daraja 3/10" (bitgan bino) yoki "Qurilmoqda: 64% ustalar 2/3"
+    /// (maydoncha); pech/buildable-bo'lmaganlarda bo'sh.
+    Level,
+    /// V0.8: Yangilash tugmasining yorlig'i — "Yangilash → L4 (50 yog'och)"
+    /// yoki maksimal darajada mos matn.
+    Upgrade,
 }
+
+/// V0.8: raise the selected building one level (`UpgradeBuilding`). Shown
+/// only for finished, buildable, below-max buildings; its color is owned by
+/// `selection_panel_update` (affordability), so no `BaseColor` hover.
+#[derive(Component)]
+pub struct UpgradeBtn;
 
 #[derive(Component)]
 pub struct WorkerRow;
@@ -53,6 +104,22 @@ pub struct WorkerMinus;
 
 #[derive(Component)]
 pub struct WorkerPlus;
+
+/// Workforce quick-set: drop the building to zero anonymous workers. The
+/// server clamps to the named-assignment floor (`sim::command`'s
+/// `AdjustWorkers` arm), so this can never evict named survivors.
+#[derive(Component)]
+pub struct WorkerNoneBtn;
+
+/// Workforce quick-set: fill the building to `max_workers` (server caps the
+/// raise by the idle pool, so over-asking is safe).
+#[derive(Component)]
+pub struct WorkerMaxBtn;
+
+/// The bottom-center morale bar's fill node — width driven as a percent of
+/// `GameState::morale`, color by the same four tiers `hud_update` uses.
+#[derive(Component)]
+pub struct MoraleBarFill;
 
 #[derive(Component)]
 pub struct DemolishBtn;

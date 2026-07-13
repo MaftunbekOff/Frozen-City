@@ -129,6 +129,16 @@ fn worker_assignment_is_clamped() {
     sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
     let id = state.buildings.last().unwrap().id;
 
+    // V0.8: qurilish paytida sig'im — brigada capi.
+    sim::apply_command(&mut state, 1, &PlayerCommand::AdjustWorkers { building: id, delta: 100 });
+    assert_eq!(
+        state.find_building(id).unwrap().workers,
+        CONSTRUCTION_CREW_MAX,
+        "a construction site clamps to the crew cap"
+    );
+
+    // Bitgach — binoning o'z maksimumi.
+    sim::finish_all_construction(&mut state);
     sim::apply_command(&mut state, 1, &PlayerCommand::AdjustWorkers { building: id, delta: 100 });
     assert_eq!(
         state.find_building(id).unwrap().workers,

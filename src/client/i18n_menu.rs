@@ -69,23 +69,25 @@ pub fn btn_singleplayer(l: Lang) -> &'static str {
     }
 }
 
-/// `"Host Co-op (port {port})"` — the port a hosted game listens on. Native
-/// only: the browser cannot listen for connections (see `MenuAction::Host`).
+/// The "host a co-op game" action label. Native only: the browser cannot
+/// listen for connections (see `MenuAction::Host`). The listen port
+/// (`settings.host_port`, default 4595) is deliberately kept OFF the button —
+/// a raw port number reads as a dev tool, not a game — and surfaced elsewhere.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-pub fn btn_host_coop(l: Lang, port: u16) -> String {
+pub fn btn_host_coop(l: Lang) -> &'static str {
     match l {
-        Lang::Uz => format!("Ko'p o'yinchi (port {port})"),
-        Lang::En => format!("Host Co-op (port {port})"),
-        Lang::Ru => format!("Кооператив (порт {port})"),
+        Lang::Uz => "Ko'p o'yinchi",
+        Lang::En => "Host Co-op",
+        Lang::Ru => "Кооператив",
     }
 }
 
-/// `"Mehmon sifatida: Join {addr}"` — the address a guest join dials.
+/// The "join someone's game" action label, with the address it will dial.
 pub fn btn_join_guest(l: Lang, addr: &str) -> String {
     match l {
-        Lang::Uz => format!("Mehmon sifatida: {addr}"),
-        Lang::En => format!("Join as guest: {addr}"),
-        Lang::Ru => format!("Как гость: {addr}"),
+        Lang::Uz => format!("Qo'shilish: {addr}"),
+        Lang::En => format!("Join a game: {addr}"),
+        Lang::Ru => format!("Присоединиться: {addr}"),
     }
 }
 

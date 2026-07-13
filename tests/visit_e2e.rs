@@ -341,8 +341,9 @@ fn invite_and_visit_flow() {
         built_state
             .events
             .iter()
-            .any(|e| e.text.contains("Guestly") && e.text.contains("built")),
-        "the visitor's build must be attributed to their own name in the event feed: {:?}",
+            .any(|e| e.text.contains("Guestly") && e.text.contains("building")),
+        "the visitor's build must be attributed to their own name in the event feed \
+         (V0.8 wording: '<name> started building a <kind>.'): {:?}",
         built_state.events
     );
 

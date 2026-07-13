@@ -155,11 +155,13 @@ fn settings_path() -> Option<std::path::PathBuf> {
 
 // -------------------------------------------------------------------- font
 
-/// DejaVu Sans Mono, embedded so it works identically on native and wasm
-/// (this project loads no runtime asset files at all — see `render.rs`'s
+/// DejaVu Sans (proportional), embedded so it works identically on native and
+/// wasm (this project loads no runtime asset files at all — see `render.rs`'s
 /// module doc). Covers Cyrillic (needed for Russian), unlike Bevy's built-in
-/// default font (a FiraMono subset with Latin glyphs only).
-const FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/DejaVuSansMono.ttf");
+/// default font (a FiraMono subset with Latin glyphs only). Proportional (not
+/// the `Mono` sibling) so the UI reads as a game, not a terminal — the same
+/// permissive DejaVu license (`assets/fonts/LICENSE-DejaVu.txt`) covers both.
+const FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/DejaVuSans.ttf");
 
 /// Replaces Bevy's built-in default font with [`FONT_BYTES`] by overwriting
 /// the `Font` asset at the well-known default `AssetId` — the same id

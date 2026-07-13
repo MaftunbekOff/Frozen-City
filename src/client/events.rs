@@ -49,14 +49,16 @@ pub fn plugin(app: &mut App) {
 
 fn spawn_events_ui(mut commands: Commands, ff: Res<FormFactor>) {
     let ff = *ff;
-    // Active-event status line, centered just below the top bar.
+    // Active-event status line, centered just below the top bar (and, on
+    // Desktop, below the central temperature medallion + clock chip, which
+    // together hang down to ~130px — see `ui::hud::spawn_center_gauge`).
     commands
         .spawn((
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
                 right: Val::Px(0.0),
-                top: Val::Px(50.0),
+                top: Val::Px(134.0),
                 justify_content: JustifyContent::Center,
                 column_gap: Val::Px(theme::SP_LG),
                 ..default()

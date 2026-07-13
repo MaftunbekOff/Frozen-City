@@ -36,7 +36,15 @@ fn place(state: &mut GameState, kind: BuildingKind) -> u32 {
     state.stock.wood = 500.0;
     let (x, y) = find_spot(state, kind);
     sim::apply_command(state, 1, &PlayerCommand::Place { kind, x, y });
-    state.buildings.last().unwrap().id
+    let id = state.buildings.last().unwrap().id;
+    // V0.8: maydonchani darhol bitirib, avto-brigadani bo'shatamiz — testlar
+    // bo'sh binoni o'zi xohlagancha (nomlangan/anonim) to'ldiradi.
+    sim::finish_all_construction(state);
+    let cur = state.find_building(id).unwrap().workers as i8;
+    if cur > 0 {
+        sim::apply_command(state, 1, &PlayerCommand::AdjustWorkers { building: id, delta: -cur });
+    }
+    id
 }
 
 #[test]
@@ -124,6 +132,10 @@ fn higher_level_survivor_outproduces_a_fresh_one() {
     let (x, y) = find_sawmill_spot_near_forest(&control);
     sim::apply_command(&mut control, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
     let control_id = control.buildings.last().unwrap().id;
+    // V0.8: bitirish + brigada tozalash — test 1 nomlangan ishchini o'lchaydi.
+    sim::finish_all_construction(&mut control);
+    let cur = control.find_building(control_id).unwrap().workers as i8;
+    sim::apply_command(&mut control, 1, &PlayerCommand::AdjustWorkers { building: control_id, delta: -cur });
     let control_survivor = control.survivors[0].id;
     sim::apply_command(
         &mut control,
@@ -134,6 +146,9 @@ fn higher_level_survivor_outproduces_a_fresh_one() {
     let (x, y) = find_sawmill_spot_near_forest(&experiment);
     sim::apply_command(&mut experiment, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
     let exp_id = experiment.buildings.last().unwrap().id;
+    sim::finish_all_construction(&mut experiment);
+    let cur = experiment.find_building(exp_id).unwrap().workers as i8;
+    sim::apply_command(&mut experiment, 1, &PlayerCommand::AdjustWorkers { building: exp_id, delta: -cur });
     let exp_survivor = experiment.survivors[0].id;
     sim::apply_command(
         &mut experiment,

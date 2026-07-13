@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use frozen_city::game::types::BuildingKind;
+use frozen_city::game::types::{BuildingKind, CONSTRUCTION_CREW_MAX};
 
 use super::*;
 use crate::client::*;
@@ -24,11 +24,29 @@ pub fn sync_buildings(
     *seen = view.version;
 
     for b in &state.buildings {
-        if viz.0.contains_key(&b.id) {
+        // V0.8: bino ko'rinishi (daraja, qurilish-holati)ga bog'liq — juftlik
+        // o'zgargan zahoti eski entity buziladi va yangi shakl quriladi
+        // (SpawnGrow bitish/yangilashda kichik "o'sish" animatsiyasini beradi).
+        let uc = b.under_construction();
+        let fresh = match viz.0.get(&b.id) {
+            Some(v) => v.level != b.level || v.under_construction != uc,
+            None => true,
+        };
+        if !fresh {
             continue;
         }
+        if let Some(v) = viz.0.remove(&b.id) {
+            commands.entity(v.entity).despawn();
+        }
         let e = spawn_building(&mut commands, &assets, &mut materials, b, *quality == Quality::Low);
-        viz.0.insert(b.id, e);
+        viz.0.insert(
+            b.id,
+            BuildingVizEntry {
+                entity: e,
+                level: b.level,
+                under_construction: uc,
+            },
+        );
     }
 
     // Demolished / removed buildings.
@@ -39,8 +57,8 @@ pub fn sync_buildings(
         .copied()
         .collect();
     for id in gone {
-        if let Some(e) = viz.0.remove(&id) {
-            commands.entity(e).despawn();
+        if let Some(v) = viz.0.remove(&id) {
+            commands.entity(v.entity).despawn();
         }
     }
 
@@ -88,8 +106,40 @@ fn spawn_building(
         ))
         .id();
 
+    // V0.8: daraja o'sgan sari bino biroz kattalashadi (L10 ≈ +18%) — shakl
+    // alohida o'rama-entity ostida, SpawnGrow'ning root-masshtab animatsiyasi
+    // bilan to'qnashmaydi.
+    let size = 1.0 + 0.02 * b.level.saturating_sub(1) as f32;
     let mut roof_y = 0.6;
-    commands.entity(root).with_children(|p| {
+    commands.entity(root).with_children(|top| {
+        top.spawn((Transform::from_scale(Vec3::splat(size)), Visibility::Inherited))
+            .with_children(|p| {
+        if b.under_construction() {
+            // Qurilish maydonchasi: yog'och poydevor + 4 burchak ustun +
+            // ustki to'sinlar — bino bitmaguncha o'z shakli ko'rinmaydi
+            // (Frostpunk'dagi karkas bosqichi uslubida).
+            let planks = assets.warehouse_plank_mat.clone();
+            p.spawn((
+                Mesh3d(assets.cube.clone()),
+                MeshMaterial3d(planks.clone()),
+                Transform::from_xyz(0.0, 0.05, 0.0).with_scale(Vec3::new(0.9, 0.1, 0.9)),
+            ));
+            for (dx, dz) in [(-0.38, -0.38), (0.38, -0.38), (-0.38, 0.38), (0.38, 0.38)] {
+                p.spawn((
+                    Mesh3d(assets.cube.clone()),
+                    MeshMaterial3d(planks.clone()),
+                    Transform::from_xyz(dx, 0.38, dz).with_scale(Vec3::new(0.07, 0.66, 0.07)),
+                ));
+            }
+            for dz in [-0.38f32, 0.38] {
+                p.spawn((
+                    Mesh3d(assets.cube.clone()),
+                    MeshMaterial3d(planks.clone()),
+                    Transform::from_xyz(0.0, 0.69, dz).with_scale(Vec3::new(0.84, 0.06, 0.06)),
+                ));
+            }
+            roof_y = 0.82;
+        } else {
         match b.kind {
             BuildingKind::Furnace => {
                 let stone = assets.furnace_stone_mat.clone();
@@ -287,8 +337,37 @@ fn spawn_building(
             ));
         }
 
-        // Worker cubes above the roof.
-        let max = b.kind.max_workers();
+        // V0.8 daraja bezaklari: poydevor atrofidagi metall tasma + burchak
+        // bayrog'i (L2-4 bronza, L5-7 kumush, L8-10 oltin) — daraja uzoqdan
+        // ham o'qiladi.
+        if b.kind.buildable() && b.level >= 2 {
+            let tier = (((b.level - 2) / 3) as usize).min(2);
+            let mat = assets.tier_flag_mats[tier].clone();
+            p.spawn((
+                Mesh3d(assets.cube.clone()),
+                MeshMaterial3d(mat.clone()),
+                Transform::from_xyz(0.0, 0.035, 0.0).with_scale(Vec3::new(0.88, 0.07, 0.88)),
+            ));
+            p.spawn((
+                Mesh3d(assets.cylinder.clone()),
+                MeshMaterial3d(assets.warehouse_plank_mat.clone()),
+                Transform::from_xyz(0.40, 0.45, -0.40).with_scale(Vec3::new(0.05, 0.9, 0.05)),
+            ));
+            p.spawn((
+                Mesh3d(assets.cube.clone()),
+                MeshMaterial3d(mat),
+                Transform::from_xyz(0.31, 0.84, -0.40).with_scale(Vec3::new(0.16, 0.10, 0.03)),
+            ));
+        }
+        } // qurilish maydonchasi / bitgan bino tarmoqlari
+
+        // Worker cubes above the roof — qurilishda usta-brigada o'rinlari,
+        // bitganda binoning o'z kasb o'rinlari.
+        let max = if b.under_construction() {
+            CONSTRUCTION_CREW_MAX
+        } else {
+            b.kind.max_workers()
+        };
         if max > 0 {
             let w_mat = assets.worker_mat.clone();
             for i in 0..max {
@@ -305,6 +384,7 @@ fn spawn_building(
                 ));
             }
         }
+            });
     });
 
     if let Some(fire_mat) = fire_mat {

@@ -13,14 +13,16 @@ use frozen_city::game::types::*;
 
 const SEED: u64 = 12345;
 
-/// Places `kind` at `(x, y)` and assigns `workers` to it, returning the new
-/// building's id. Panics (via the underlying asserts in callers) only if the
-/// placement or assignment silently failed to reach the requested worker
-/// count — callers check that explicitly.
+/// Places `kind` at `(x, y)`, instantly finishes its construction (these
+/// tests probe a FINISHED building's effect — the construction phase has its
+/// own suite, `construction_tests.rs`) and staffs it to exactly `workers`,
+/// returning the new building's id.
 fn place_and_staff(state: &mut GameState, kind: BuildingKind, x: u8, y: u8, workers: i8) -> u32 {
     sim::apply_command(state, 1, &PlayerCommand::Place { kind, x, y });
     let id = state.buildings.last().unwrap().id;
-    sim::apply_command(state, 1, &PlayerCommand::AdjustWorkers { building: id, delta: workers });
+    sim::finish_all_construction(state);
+    let cur = state.find_building(id).unwrap().workers as i8;
+    sim::apply_command(state, 1, &PlayerCommand::AdjustWorkers { building: id, delta: workers - cur });
     id
 }
 

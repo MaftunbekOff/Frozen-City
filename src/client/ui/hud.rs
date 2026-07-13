@@ -1,10 +1,9 @@
 use bevy::prelude::*;
 
-use frozen_city::game::types::{BuildingKind, FURNACE_COAL_PER_DAY_PER_LEVEL};
+use frozen_city::game::types::FURNACE_COAL_PER_DAY_PER_LEVEL;
 
 use super::super::i18n::Lang;
 use super::super::i18n_hud;
-use super::super::i18n_names;
 use super::super::theme::{
     self, BG_PANEL, BORDER, BTN, BTN_DANGER, FS_BODY, FS_MICRO, FS_SMALL, FS_TITLE, RES_COAL,
     RES_FOOD, RES_WOOD, SP_MD, SP_SM, SP_XS, TEXT_MUTED, TEXT_PRIMARY,
@@ -18,9 +17,17 @@ fn btn_px(w: f32, h: f32, bg: Color) -> impl Bundle {
     theme::button(Val::Px(w), h, bg)
 }
 
-pub fn spawn_hud(mut commands: Commands, ff: Res<theme::FormFactor>, lang: Res<Lang>) {
+pub fn spawn_hud(
+    mut commands: Commands,
+    ff: Res<theme::FormFactor>,
+    lang: Res<Lang>,
+    mut panel_open: ResMut<BuildPanelOpen>,
+) {
     let ff = *ff;
     let lang = *lang;
+    // Every game entry starts with the Build modal CLOSED (the resource
+    // otherwise persists last session's state).
+    panel_open.0 = false;
 
     // --- Top bar: one compact row on Desktop/Tablet; two rows on Mobile so
     // nothing gets clipped at phone widths (resources up top, status +
@@ -31,125 +38,22 @@ pub fn spawn_hud(mut commands: Commands, ff: Res<theme::FormFactor>, lang: Res<L
     if ff.compact() {
         spawn_top_bar_mobile(&mut commands, lang);
     } else {
-        spawn_top_bar_desktop(&mut commands, lang);
+        spawn_top_bar_desktop(&mut commands, ff, lang);
+    }
+    // Pastki morale bari faqat Desktopda: planshet/telefonda pastki chekka
+    // joy tanqis — u yerda kayfiyat yuqori panel satrida qoladi. (Markaziy
+    // harorat medalyoni yuqori panelning O'Z bolasi — `spawn_top_bar_desktop`
+    // ichida — shunda u har doim panel USTIDA chiziladi.)
+    if ff == theme::FormFactor::Desktop {
+        spawn_morale_bar(&mut commands);
     }
 
-    // --- Bottom build bar ---
-    let build_bar_height = if ff.compact() { 96.0 } else { 88.0 };
-    let mut build_bar = commands.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(0.0),
-            right: Val::Px(0.0),
-            bottom: Val::Px(0.0),
-            height: Val::Px(build_bar_height),
-            padding: UiRect::axes(Val::Px(SP_MD), Val::Px(SP_SM)),
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(SP_SM),
-            // Mobile: the bar no longer shrinks to fit every button (see
-            // `touch::fit_ui_scale`'s widened pivot) — instead it scrolls
-            // horizontally so all 8 buildings + 4 furnace levels stay at a
-            // comfortably tappable size.
-            overflow: if ff.compact() {
-                Overflow::scroll_x()
-            } else {
-                Overflow::clip()
-            },
-            border: UiRect::top(Val::Px(1.0)),
-            ..default()
-        },
-        BackgroundColor(BG_PANEL),
-        BorderColor::all(BORDER),
-        Interaction::default(),
-        UiBlocker,
-        DespawnOnExit(Screen::Game),
-    ));
-    if ff.compact() {
-        build_bar.insert(ScrollPosition::default());
-    }
-    build_bar.with_children(|p| {
-        let btn_h = if ff.compact() { 46.0_f32.max(ff.btn_h()) } else { 62.0 };
-        for (i, kind) in BuildingKind::BUILDABLE.into_iter().enumerate() {
-            p.spawn((
-                Button,
-                Node {
-                    width: Val::Px(92.0),
-                    height: Val::Px(btn_h),
-                    flex_direction: FlexDirection::Column,
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    row_gap: Val::Px(3.0),
-                    flex_shrink: 0.0,
-                    ..default()
-                },
-                BackgroundColor(BTN),
-                BaseColor(BTN),
-                BuildBtn(kind),
-            ))
-            .with_children(|b| {
-                b.spawn(theme::text(i18n_names::building_name(kind, lang), FS_MICRO + 0.5, TEXT_PRIMARY));
-                // Hotkey hint only makes sense where a physical keyboard
-                // exists — hidden on Mobile.
-                let hotkey = if ff.compact() { None } else { Some(i + 1) };
-                b.spawn(theme::text(
-                    i18n_hud::build_cost_badge(kind.cost_wood(), hotkey, lang),
-                    FS_MICRO - 1.0,
-                    TEXT_MUTED,
-                ));
-            });
-        }
-        p.spawn(Node {
-            flex_grow: 1.0,
-            min_width: Val::Px(if ff.compact() { SP_SM } else { 0.0 }),
-            ..default()
-        });
-        p.spawn((
-            theme::text(i18n_hud::furnace_level_label(lang), FS_SMALL, TEXT_MUTED),
-            Node {
-                flex_shrink: 0.0,
-                ..default()
-            },
-        ));
-        for lvl in 0u8..=3 {
-            // Level 0 ("Off"/"O'chiq"/"Выкл") is a word, not a single digit —
-            // a fixed 42px box clips/overflows it into the neighboring "1"
-            // button, so it gets auto-width (like the other text-buttons in
-            // this design system) with the same horizontal padding; the
-            // numeric 1-3 buttons stay fixed-width squares since a single
-            // digit always fits.
-            let node = if lvl == 0 {
-                Node {
-                    width: Val::Auto,
-                    height: Val::Px(btn_h.min(48.0).max(if ff.compact() { ff.btn_h() } else { 40.0 })),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    padding: UiRect::horizontal(Val::Px(SP_SM)),
-                    flex_shrink: 0.0,
-                    ..default()
-                }
-            } else {
-                Node {
-                    width: Val::Px(42.0),
-                    height: Val::Px(btn_h.min(48.0).max(if ff.compact() { ff.btn_h() } else { 40.0 })),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    flex_shrink: 0.0,
-                    ..default()
-                }
-            };
-            p.spawn((Button, node, BackgroundColor(BTN), BaseColor(BTN), FurnaceLvlBtn(lvl)))
-                .with_children(|b| {
-                    let label = if lvl == 0 {
-                        i18n_hud::furnace_off_label(lang).to_string()
-                    } else {
-                        lvl.to_string()
-                    };
-                    b.spawn(theme::text(label, FS_BODY - 1.0, TEXT_PRIMARY));
-                });
-        }
-    });
+    // --- Qurish: pastki-o'ng burchakda YAGONA dumaloq tugma, menyu esa
+    // bosilganda ochiladigan modal — qarang `spawn_build_panel`
+    // (`buildbar.rs`). ---
+    spawn_build_panel(&mut commands, ff, lang);
 
-    // --- Tooltip / hint line just above the build bar ---
+    // --- Tooltip / hint line, bottom-left (clear of the bottom-right panel) ---
     let hint = if ff.compact() {
         i18n_hud::default_hint_mobile(lang)
     } else {
@@ -159,7 +63,11 @@ pub fn spawn_hud(mut commands: Commands, ff: Res<theme::FormFactor>, lang: Res<L
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(14.0),
-            bottom: Val::Px(build_bar_height + 4.0),
+            bottom: Val::Px(SP_SM),
+            // Desktopda 40%: markazdagi morale bariga deyarli tegmaydi, lekin
+            // boshqaruv eslatmasi 2-3 qatordan oshib chat zonasiga (bottom
+            // 120+) ko'tarilib ketmaydi; mobilda pastki markaz bo'sh — kengroq.
+            max_width: Val::Percent(if ff.compact() { 55.0 } else { 40.0 }),
             ..default()
         },
         theme::text(hint, FS_SMALL, TEXT_MUTED),
@@ -176,7 +84,9 @@ pub fn spawn_hud(mut commands: Commands, ff: Res<theme::FormFactor>, lang: Res<L
             position_type: PositionType::Absolute,
             left: Val::Px(0.0),
             right: Val::Px(0.0),
-            top: Val::Px(160.0),
+            // Markaziy medalyon (~130px) va event/social bannerlari
+            // (134/172px) ostida.
+            top: Val::Px(216.0),
             justify_content: JustifyContent::Center,
             ..default()
         },
@@ -207,6 +117,9 @@ pub fn spawn_hud(mut commands: Commands, ff: Res<theme::FormFactor>, lang: Res<L
         right: Val::Px(12.0),
         top: Val::Px(54.0),
         padding: UiRect::all(Val::Px(SP_SM)),
+        // Chap qirradagi muz-ko'k urg'u chizig'i — lenta "jurnal kartasi"
+        // bo'lib o'qilsin (dizayn-tizim panellariga hamohang).
+        border: UiRect::left(Val::Px(2.0)),
         border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
         ..default()
     };
@@ -218,24 +131,28 @@ pub fn spawn_hud(mut commands: Commands, ff: Res<theme::FormFactor>, lang: Res<L
     commands
         .spawn((
             events_node,
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.25)),
+            BackgroundColor(Color::srgba(0.010, 0.025, 0.055, 0.50)),
+            BorderColor::all(Color::srgba(0.480, 0.780, 0.930, 0.35)),
             DespawnOnExit(Screen::Game),
         ))
         .with_children(|p| {
             p.spawn((theme::text("", events_font, Color::srgba(0.85, 0.90, 1.0, 0.9)), HudField::Events));
         });
 
-    // --- Selection panel --- (kept clear of the build bar on Mobile, where
-    // the bar is taller and the panel would otherwise overlap it)
-    let sel_bottom = if ff.compact() { build_bar_height + 12.0 } else { 100.0 };
+    // --- Selection panel --- anchored bottom-LEFT so it never collides with
+    // the bottom-right Build/Manage panel (`spawn_build_panel`). Frostpunk
+    // bino-paneli uslubi: markazlashgan mis sarlavha + mis chiziq, ma'lumot,
+    // "ISHCHI KUCHI" bo'limi (− / katta hisob / + va Hech kim / Maksimum
+    // tez-tugmalari, bo'sh-ishchi hisobi), oxirida to'liq-en buzish tugmasi.
+    let sel_bottom = if ff.compact() { 12.0 } else { 44.0 };
     commands
         .spawn((
             Node {
                 display: Display::None,
                 position_type: PositionType::Absolute,
-                right: Val::Px(12.0),
+                left: Val::Px(12.0),
                 bottom: Val::Px(sel_bottom),
-                width: Val::Px(260.0),
+                width: Val::Px(300.0),
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(SP_SM),
                 padding: UiRect::all(Val::Px(SP_MD)),
@@ -245,41 +162,175 @@ pub fn spawn_hud(mut commands: Commands, ff: Res<theme::FormFactor>, lang: Res<L
             },
             BackgroundColor(BG_PANEL),
             BorderColor::all(BORDER),
+            BoxShadow::new(
+                Color::srgba(0.0, 0.0, 0.0, 0.45),
+                Val::Px(0.0),
+                Val::Px(6.0),
+                Val::Px(2.0),
+                Val::Px(20.0),
+            ),
             Interaction::default(),
             UiBlocker,
             SelPanelRoot,
             DespawnOnExit(Screen::Game),
         ))
         .with_children(|p| {
-            p.spawn((theme::section("Building"), SelText::Title));
+            p.spawn((
+                theme::text("Building", theme::FS_SECTION, theme::BRASS),
+                Node {
+                    align_self: AlignSelf::Center,
+                    ..default()
+                },
+                SelText::Title,
+            ));
+            p.spawn(theme::brass_divider());
             p.spawn((theme::text("", FS_MICRO + 1.0, TEXT_MUTED), SelText::Info));
+            // V0.8: daraja / qurilish-holati qatori (muz-ko'k urg'u).
+            p.spawn((theme::text("", FS_MICRO + 1.0, theme::ACCENT_ICE), SelText::Level));
+            // Furnace level controls — shown only when the Furnace is selected
+            // (`selection_panel_update` toggles this row). The existing
+            // `furnace_buttons` system drives these `FurnaceLvlBtn`s.
             p.spawn((
                 Node {
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(10.0),
+                    display: Display::None,
+                    width: Val::Percent(100.0),
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(SP_XS),
+                    row_gap: Val::Px(SP_XS),
+                    ..default()
+                },
+                FurnaceRow,
+            ))
+            .with_children(|row| {
+                for lvl in 0u8..=3 {
+                    row.spawn((
+                        Button,
+                        Node {
+                            min_width: Val::Px(46.0),
+                            height: Val::Px(32.0),
+                            padding: UiRect::horizontal(Val::Px(SP_SM)),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
+                            ..default()
+                        },
+                        BackgroundColor(BTN),
+                        FurnaceLvlBtn(lvl),
+                    ))
+                    .with_children(|b| {
+                        let label = if lvl == 0 {
+                            i18n_hud::furnace_off_label(lang).to_string()
+                        } else {
+                            lvl.to_string()
+                        };
+                        b.spawn(theme::text(label, FS_BODY - 1.0, TEXT_PRIMARY));
+                    });
+                }
+            });
+            // Ishchi-kuchi bo'limi bitta konteyner (WorkerRow) — sarlavha,
+            // − / hisob / + qatori, Hech kim/Maksimum tez-tugmalari va bo'sh-
+            // ishchi hisobi birga ko'rinadi/yashirinadi (max_workers == 0
+            // binolarda `selection_panel_update` butun blokni o'chiradi).
+            p.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(SP_XS + 2.0),
                     ..default()
                 },
                 WorkerRow,
             ))
-            .with_children(|row| {
-                row.spawn((btn_px(34.0, 30.0, BTN), WorkerMinus))
+            .with_children(|w| {
+                w.spawn((
+                    theme::text(i18n_hud::workforce_section(lang), FS_MICRO, theme::TEXT_FAINT),
+                    Node {
+                        align_self: AlignSelf::Center,
+                        ..default()
+                    },
+                ));
+                w.spawn(Node {
+                    width: Val::Percent(100.0),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::SpaceBetween,
+                    column_gap: Val::Px(SP_SM),
+                    ..default()
+                })
+                .with_children(|row| {
+                    row.spawn((btn_px(44.0, 32.0, BTN), WorkerMinus))
+                        .with_children(|b| {
+                            b.spawn(theme::text("-", FS_BODY + 2.0, TEXT_PRIMARY));
+                        });
+                    row.spawn((theme::text("0/0", FS_TITLE, TEXT_PRIMARY), SelText::Count));
+                    row.spawn((btn_px(44.0, 32.0, BTN), WorkerPlus))
+                        .with_children(|b| {
+                            b.spawn(theme::text("+", FS_BODY + 2.0, TEXT_PRIMARY));
+                        });
+                });
+                w.spawn(Node {
+                    width: Val::Percent(100.0),
+                    column_gap: Val::Px(SP_SM),
+                    ..default()
+                })
+                .with_children(|row| {
+                    row.spawn((
+                        Button,
+                        Node {
+                            flex_grow: 1.0,
+                            flex_basis: Val::Px(0.0),
+                            height: Val::Px(26.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
+                            ..default()
+                        },
+                        BackgroundColor(BTN),
+                        BaseColor(BTN),
+                        BorderColor::all(BORDER),
+                        WorkerNoneBtn,
+                    ))
                     .with_children(|b| {
-                        b.spawn(theme::text("-", FS_BODY + 1.0, TEXT_PRIMARY));
+                        b.spawn(theme::text(i18n_hud::worker_none_label(lang), FS_MICRO + 1.0, TEXT_PRIMARY));
                     });
-                row.spawn((theme::text("0/0", FS_BODY, TEXT_PRIMARY), SelText::Count));
-                row.spawn((btn_px(34.0, 30.0, BTN), WorkerPlus))
+                    row.spawn((
+                        Button,
+                        Node {
+                            flex_grow: 1.0,
+                            flex_basis: Val::Px(0.0),
+                            height: Val::Px(26.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
+                            ..default()
+                        },
+                        BackgroundColor(BTN),
+                        BaseColor(BTN),
+                        BorderColor::all(BORDER),
+                        WorkerMaxBtn,
+                    ))
                     .with_children(|b| {
-                        b.spawn(theme::text("+", FS_BODY + 1.0, TEXT_PRIMARY));
+                        b.spawn(theme::text(i18n_hud::worker_max_label(lang), FS_MICRO + 1.0, TEXT_PRIMARY));
                     });
+                });
+                w.spawn((
+                    theme::text("", FS_MICRO, TEXT_MUTED),
+                    Node {
+                        align_self: AlignSelf::Center,
+                        ..default()
+                    },
+                    SelText::Avail,
+                ));
             });
             p.spawn((
                 Button,
                 Node {
                     display: Display::None,
-                    width: Val::Px(236.0),
+                    width: Val::Percent(100.0),
                     height: Val::Px(30.0),
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
+                    border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
                     ..default()
                 },
                 BackgroundColor(BTN),
@@ -289,8 +340,27 @@ pub fn spawn_hud(mut commands: Commands, ff: Res<theme::FormFactor>, lang: Res<L
             .with_children(|b| {
                 b.spawn((theme::text("", FS_MICRO + 1.0, TEXT_PRIMARY), AssignHereLabel));
             });
+            // V0.8: Yangilash tugmasi — rangini (yetarli/yetarsiz) va
+            // ko'rinishini `selection_panel_update` boshqaradi, shuning
+            // uchun BaseColor yo'q (generik hover u bilan urishmasin).
             p.spawn((
-                btn_px(220.0, 30.0, BTN_DANGER),
+                Button,
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(30.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
+                    ..default()
+                },
+                BackgroundColor(theme::BTN_SUCCESS),
+                UpgradeBtn,
+            ))
+            .with_children(|b| {
+                b.spawn((theme::text("", FS_SMALL, TEXT_PRIMARY), SelText::Upgrade));
+            });
+            p.spawn((
+                theme::button(Val::Percent(100.0), 30.0, BTN_DANGER),
                 DemolishBtn,
             ))
             .with_children(|b| {
@@ -339,9 +409,26 @@ pub fn spawn_hud(mut commands: Commands, ff: Res<theme::FormFactor>, lang: Res<L
         });
 }
 
-/// Desktop/Tablet top bar: a single row (unchanged layout from before the
-/// design-system pass, just theme colors + localized text).
-fn spawn_top_bar_desktop(commands: &mut Commands, lang: Lang) {
+/// One top-bar stat chip: colored marker dot + a live `HudField` text, inside
+/// the design system's pill capsule ([`theme::chip`]).
+fn res_chip(p: &mut ChildSpawnerCommands, dot_color: Color, initial: impl Into<String>, field: HudField) {
+    p.spawn(theme::chip()).with_children(|c| {
+        c.spawn(theme::dot(8.0, dot_color));
+        c.spawn((
+            theme::text(initial, FS_SMALL, TEXT_PRIMARY),
+            TextLayout::new(Justify::Left, LineBreak::NoWrap),
+            field,
+        ));
+    });
+}
+
+/// Desktop/Tablet top bar — Frostpunk-style three-zone strip: resource chips
+/// on the left, status chips + actions on the right. On Desktop the middle is
+/// deliberately left empty for the circular temperature medallion
+/// (`spawn_center_gauge`); Tablet has no medallion (too narrow), so the
+/// clock/temperature/morale readouts stay inline in the row instead.
+fn spawn_top_bar_desktop(commands: &mut Commands, ff: theme::FormFactor, lang: Lang) {
+    let desktop = ff == theme::FormFactor::Desktop;
     commands
         .spawn((
             Node {
@@ -352,33 +439,48 @@ fn spawn_top_bar_desktop(commands: &mut Commands, lang: Lang) {
                 height: Val::Px(46.0),
                 padding: UiRect::horizontal(Val::Px(14.0)),
                 align_items: AlignItems::Center,
-                column_gap: Val::Px(20.0),
+                column_gap: Val::Px(SP_SM),
                 border: UiRect::bottom(Val::Px(1.0)),
                 ..default()
             },
             BackgroundColor(BG_PANEL),
-            BorderColor::all(BORDER),
+            // Ostki chiziq mis tusda — panelning "ornate" metall detali.
+            BorderColor::all(theme::BRASS_DIM),
             Interaction::default(),
             UiBlocker,
             DespawnOnExit(Screen::Game),
         ))
         .with_children(|p| {
-            p.spawn((theme::text(i18n_hud::hud_wood(0, lang), FS_BODY, RES_WOOD), HudField::Wood));
-            p.spawn((theme::text(i18n_hud::hud_coal(0, lang), FS_BODY, RES_COAL), HudField::Coal));
-            p.spawn((theme::text(i18n_hud::hud_food(0, lang), FS_BODY, RES_FOOD), HudField::Food));
-            p.spawn((theme::text(i18n_hud::hud_pop(0, 0, lang), FS_BODY, TEXT_PRIMARY), HudField::Pop));
+            res_chip(p, RES_WOOD, i18n_hud::hud_wood(0, lang), HudField::Wood);
+            res_chip(p, RES_COAL, i18n_hud::hud_coal(0, lang), HudField::Coal);
+            res_chip(p, RES_FOOD, i18n_hud::hud_food(0, lang), HudField::Food);
+            res_chip(p, theme::ACCENT_ICE, i18n_hud::hud_pop(0, 0, lang), HudField::Pop);
             p.spawn(Node {
                 flex_grow: 1.0,
                 ..default()
             });
-            p.spawn((theme::text(i18n_hud::hud_clock(1, 1, 6, 0, lang), FS_BODY, TEXT_PRIMARY), HudField::Clock));
-            p.spawn((theme::text("-0 C", FS_BODY, Color::srgb(0.55, 0.80, 0.95)), HudField::Temp));
-            p.spawn(Node {
-                flex_grow: 1.0,
-                ..default()
-            });
-            p.spawn((theme::text("Furnace L1", FS_BODY, TEXT_PRIMARY), HudField::Furnace));
-            p.spawn((theme::text("Morale --", FS_BODY, TEXT_PRIMARY), HudField::Morale));
+            if !desktop {
+                p.spawn((
+                    theme::text(i18n_hud::hud_clock(1, 1, 6, 0, lang), FS_SMALL, TEXT_PRIMARY),
+                    TextLayout::new(Justify::Left, LineBreak::NoWrap),
+                    HudField::Clock,
+                ));
+                p.spawn((
+                    theme::text("-0 C", FS_SMALL, Color::srgb(0.55, 0.80, 0.95)),
+                    TextLayout::new(Justify::Left, LineBreak::NoWrap),
+                    HudField::Temp,
+                ));
+                p.spawn(Node {
+                    flex_grow: 1.0,
+                    ..default()
+                });
+            }
+            res_chip(p, theme::ACCENT_WARM, "Furnace L1", HudField::Furnace);
+            if !desktop {
+                // Desktopda kayfiyat pastki-markaz barga ko'chgan
+                // (`spawn_morale_bar`); planshetda satrda qoladi.
+                res_chip(p, theme::SUCCESS, "Morale --", HudField::Morale);
+            }
             p.spawn((
                 Button,
                 Node {
@@ -386,6 +488,7 @@ fn spawn_top_bar_desktop(commands: &mut Commands, lang: Lang) {
                     height: Val::Px(30.0),
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
+                    border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
                     // Hidden until `world_switch_button` decides this session
                     // may switch worlds at all.
                     display: Display::None,
@@ -402,7 +505,166 @@ fn spawn_top_bar_desktop(commands: &mut Commands, lang: Lang) {
                 .with_children(|b| {
                     b.spawn(theme::text(i18n_hud::menu_button(lang), FS_SMALL, TEXT_PRIMARY));
                 });
+            if desktop {
+                spawn_center_gauge(p, lang);
+            }
         });
+}
+
+/// Desktop markaziy harorat medalyoni — yuqori panelning ABSOLUTE bolasi
+/// (alohida root emas!), shunda u panel fonidan KEYIN, ya'ni doim panel
+/// USTIDA chiziladi va pastga erkin osilib turadi (Frostpunk'ning -40°
+/// doirasi). Ichida joriy harorat, ostida kun/soat chipi; matnlarni
+/// `hud_update` yangilaydi (`HudField::Temp`/`Clock`), sovuq to'lqin matn
+/// suffiksi o'rniga qizil rang bilan bildiriladi (doiraga suffiks sig'maydi).
+fn spawn_center_gauge(bar: &mut ChildSpawnerCommands, lang: Lang) {
+    bar.spawn(Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(0.0),
+        right: Val::Px(0.0),
+        top: Val::Px(4.0),
+        flex_direction: FlexDirection::Column,
+        align_items: AlignItems::Center,
+        row_gap: Val::Px(SP_XS),
+        ..default()
+    })
+    .with_children(|p| {
+        p.spawn((
+            Node {
+                width: Val::Px(84.0),
+                height: Val::Px(84.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                border: UiRect::all(Val::Px(2.0)),
+                border_radius: BorderRadius::MAX,
+                ..default()
+            },
+            BackgroundColor(BG_PANEL),
+            BorderColor::all(theme::BRASS),
+            BoxShadow::new(
+                Color::srgba(0.0, 0.0, 0.0, 0.45),
+                Val::Px(0.0),
+                Val::Px(6.0),
+                Val::Px(2.0),
+                Val::Px(16.0),
+            ),
+            Interaction::default(),
+            UiBlocker,
+        ))
+        .with_children(|ring| {
+            // Ichki disk panel fonidan ochroq (BTN toni) — medalyon panelga
+            // "cho'kib" ketmasin, aniq qatlam bo'lib o'qilsin.
+            ring.spawn((
+                Node {
+                    width: Val::Px(72.0),
+                    height: Val::Px(72.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::MAX,
+                    ..default()
+                },
+                BackgroundColor(BTN),
+                BorderColor::all(theme::BORDER_STRONG),
+            ))
+            .with_children(|inner| {
+                inner.spawn((
+                    theme::text("-0 C", FS_TITLE + 2.0, theme::ACCENT_ICE),
+                    TextLayout::new(Justify::Center, LineBreak::NoWrap),
+                    HudField::Temp,
+                ));
+            });
+        });
+        p.spawn(theme::chip()).with_children(|c| {
+            c.spawn((
+                theme::text(i18n_hud::hud_clock(1, 1, 6, 0, lang), FS_SMALL, TEXT_PRIMARY),
+                TextLayout::new(Justify::Center, LineBreak::NoWrap),
+                HudField::Clock,
+            ));
+        });
+    });
+}
+
+/// Pastki-markaz kayfiyat bari (Frostpunk'ning "Umid" chizig'i uslubida) —
+/// faqat Desktop: yorliq matni + to'rt-darajali rangli to'ldirma. Matnni
+/// `hud_update` (`HudField::Morale`), to'ldirmani [`morale_bar_update`]
+/// boshqaradi.
+fn spawn_morale_bar(commands: &mut Commands) {
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                bottom: Val::Px(SP_SM),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                row_gap: Val::Px(3.0),
+                ..default()
+            },
+            DespawnOnExit(Screen::Game),
+        ))
+        .with_children(|p| {
+            // Yorliq chip ichida — yorug' qor sahnasi ustida ham o'qilsin
+            // (gauge ostidagi soat chipi bilan bir xil kapsula uslubi).
+            p.spawn(theme::chip()).with_children(|c| {
+                c.spawn((
+                    theme::text("Morale --", FS_SMALL, TEXT_PRIMARY),
+                    TextLayout::new(Justify::Center, LineBreak::NoWrap),
+                    HudField::Morale,
+                ));
+            });
+            p.spawn(theme::stat_bar_track(Val::Px(300.0), 12.0))
+                .with_children(|track| {
+                    track.spawn((
+                        Node {
+                            width: Val::Percent(50.0),
+                            height: Val::Percent(100.0),
+                            border_radius: BorderRadius::MAX,
+                            ..default()
+                        },
+                        BackgroundColor(theme::ACCENT_WARM),
+                        MoraleBarFill,
+                    ));
+                });
+        });
+}
+
+/// `GameState::morale_multiplier` bilan aynan mos to'rt daraja rangi (motam
+/// binafshasi ustuvor) — HUD matni (`hud_update`) va pastki bar to'ldirmasi
+/// ([`morale_bar_update`]) bir xil rangda gapirsin.
+pub(crate) fn morale_tier_color(morale: f32, mourning: bool) -> Color {
+    if mourning {
+        Color::srgb(0.70, 0.55, 0.85)
+    } else if morale < 25.0 {
+        Color::srgb(0.90, 0.30, 0.25)
+    } else if morale < 50.0 {
+        Color::srgb(0.92, 0.62, 0.28)
+    } else if morale <= 75.0 {
+        Color::srgb(0.85, 0.88, 0.60)
+    } else {
+        Color::srgb(0.55, 0.90, 0.50)
+    }
+}
+
+/// Pastki-markaz kayfiyat barining to'ldirmasi: kengligi `morale`ning foizi,
+/// rangi `morale_tier_color` darajasi. Desktop bo'lmagan sessiyalarda bar
+/// spawn qilinmagani uchun query bo'sh — tizim bekorga ish qilmaydi.
+pub fn morale_bar_update(
+    view: Res<GameView>,
+    mut fills: Query<(&mut Node, &mut BackgroundColor), With<MoraleBarFill>>,
+) {
+    let Some(state) = view.state.as_ref() else { return };
+    let want_w = Val::Percent(state.morale.clamp(0.0, 100.0));
+    let want_c = morale_tier_color(state.morale, state.mourning_active());
+    for (mut node, mut bg) in &mut fills {
+        if node.width != want_w {
+            node.width = want_w;
+        }
+        if bg.0 != want_c {
+            bg.0 = want_c;
+        }
+    }
 }
 
 /// A single-line HUD text node: `flex_shrink: 0.0` so a tight mobile row
@@ -659,8 +921,18 @@ pub fn hud_update(
                 let key = (temp.round() as i32, state.cold_snap);
                 if cache.temp != Some((key.0, key.1, lang)) {
                     cache.temp = Some((key.0, key.1, lang));
-                    let snap = if state.cold_snap { i18n_hud::hud_cold_snap(lang) } else { "" };
-                    text.0 = i18n_hud::hud_temp(temp, snap, lang);
+                    if *ff == theme::FormFactor::Desktop {
+                        // Desktopda harorat markaziy gauge doirasi ichida —
+                        // "SOVUQ TO'LQINI!" suffiksi sig'maydi, o'rniga rang
+                        // ogohlantiradi (muz-ko'k → xavf-qizil).
+                        text.0 = i18n_hud::hud_temp(temp, "", lang);
+                        if let Some(mut c) = color {
+                            c.0 = if state.cold_snap { theme::DANGER } else { theme::ACCENT_ICE };
+                        }
+                    } else {
+                        let snap = if state.cold_snap { i18n_hud::hud_cold_snap(lang) } else { "" };
+                        text.0 = i18n_hud::hud_temp(temp, snap, lang);
+                    }
                 }
             }
             HudField::Furnace => {
@@ -710,18 +982,19 @@ pub fn hud_update(
                     cache.morale = Some((key.0, key.1, lang));
                     // Four-tier band matching `GameState::morale_multiplier`'s
                     // thresholds exactly, so the HUD symbol always agrees with
-                    // the actual production multiplier in effect.
-                    let (tier, tier_color) = if state.morale < 25.0 {
-                        (i18n_hud::morale_tier_critical(lang), Color::srgb(0.90, 0.30, 0.25))
+                    // the actual production multiplier in effect (colors:
+                    // `morale_tier_color`, shared with the bottom morale bar).
+                    let tier = if state.morale < 25.0 {
+                        i18n_hud::morale_tier_critical(lang)
                     } else if state.morale < 50.0 {
-                        (i18n_hud::morale_tier_low(lang), Color::srgb(0.92, 0.62, 0.28))
+                        i18n_hud::morale_tier_low(lang)
                     } else if state.morale <= 75.0 {
-                        (i18n_hud::morale_tier_steady(lang), Color::srgb(0.85, 0.88, 0.60))
+                        i18n_hud::morale_tier_steady(lang)
                     } else {
-                        (i18n_hud::morale_tier_high(lang), Color::srgb(0.55, 0.90, 0.50))
+                        i18n_hud::morale_tier_high(lang)
                     };
                     if let Some(mut c) = color {
-                        c.0 = if mourning { Color::srgb(0.70, 0.55, 0.85) } else { tier_color };
+                        c.0 = morale_tier_color(state.morale, mourning);
                     }
                     let mourn_tag = if mourning { i18n_hud::hud_mourning_tag(lang) } else { "" };
                     text.0 = i18n_hud::hud_morale(state.morale, tier, mourn_tag, lang);

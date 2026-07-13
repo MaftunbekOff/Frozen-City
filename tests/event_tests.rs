@@ -128,6 +128,8 @@ fn caravan_accept_adds_survivors_and_costs_food() {
         let (x, y) = find_spot(&state, BuildingKind::Tent);
         sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
     }
+    // V0.8: bitmagan chodir joy bermaydi — maydonchalarni darhol bitiramiz.
+    sim::finish_all_construction(&mut state);
 
     let pop_before = state.survivors.len();
     let food_before = state.stock.food;
@@ -205,6 +207,8 @@ fn caravan_accept_respects_capacity_and_food() {
         let (x, y) = find_spot(&state2, BuildingKind::Tent);
         sim::apply_command(&mut state2, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
     }
+    // V0.8: bitmagan chodir joy bermaydi — maydonchalarni darhol bitiramiz.
+    sim::finish_all_construction(&mut state2);
     state2.stock.food = 5.0; // less than the offer's food_cost
     let pop_before2 = state2.survivors.len();
     state2.pending_event = Some(CaravanOffer { count: 5, food_cost: 20, expires: state2.tick + 100 });

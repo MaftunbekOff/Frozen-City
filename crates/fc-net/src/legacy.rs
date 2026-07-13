@@ -82,6 +82,39 @@ pub struct BuildingV2 {
     pub owner: Option<u64>,
 }
 
+/// `Building`'s shape in V3 AND V4 (unchanged between them — it only grew
+/// `level`/`build_left` in V5). Reused by `GameStateV3` and `GameStateV4`
+/// below instead of duplicating the struct.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct BuildingV4 {
+    pub id: u32,
+    pub kind: fc_game::types::BuildingKind,
+    pub x: u8,
+    pub y: u8,
+    pub workers: u8,
+    pub progress: f32,
+    pub owner: Option<u64>,
+    pub owner_account: Option<i64>,
+}
+
+/// Convenience for tests fabricating legacy bytes from a live `GameState`
+/// (whose `Building` now has V5's `level`/`build_left` fields) — drops
+/// exactly the fields V4 predates.
+impl From<&Building> for BuildingV4 {
+    fn from(b: &Building) -> BuildingV4 {
+        BuildingV4 {
+            id: b.id,
+            kind: b.kind,
+            x: b.x,
+            y: b.y,
+            workers: b.workers,
+            progress: b.progress,
+            owner: b.owner,
+            owner_account: b.owner_account,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct GameStateV1 {
     pub tick: u64,
@@ -227,7 +260,7 @@ impl From<GameStateV2> for GameStateV3 {
             buildings: v2
                 .buildings
                 .into_iter()
-                .map(|b| Building {
+                .map(|b| BuildingV4 {
                     id: b.id,
                     kind: b.kind,
                     x: b.x,
@@ -276,17 +309,16 @@ impl From<GameStateV2> for GameStateV3 {
 }
 
 /// V3 (pre-V0.7 "survivor management") shape: what `persist.rs` wrote under
-/// the `FCWORLD3` header before this change — identical to the live
-/// `GameState` minus positions/movement/leader/professions/xp/morale.
-/// `Survivor` is mirrored as `SurvivorV3`; `Building` already has
-/// `owner_account` as of V3, so it's reused from `types` directly (it's
-/// `PlayerInfo` that hasn't changed since V2, not `Building`).
+/// the `FCWORLD3` header before this change — identical to the V4 shape
+/// minus positions/movement/leader/professions/xp/morale. `Survivor` is
+/// mirrored as `SurvivorV3`, `Building` as `BuildingV4` (its shape was the
+/// same in V3 and V4).
 #[derive(Serialize, Deserialize)]
 pub struct GameStateV3 {
     pub tick: u64,
     pub win_days: u32,
     pub tiles: Vec<Tile>,
-    pub buildings: Vec<Building>,
+    pub buildings: Vec<BuildingV4>,
     pub survivors: Vec<SurvivorV3>,
     pub stock: Stockpile,
     pub furnace_level: u8,
@@ -315,14 +347,55 @@ pub struct GameStateV3 {
     pub central_ledger: Vec<LedgerEntry>,
 }
 
-impl From<GameStateV3> for GameState {
-    fn from(v3: GameStateV3) -> GameState {
-        GameState {
+/// V4 (V0.7 "survivor management", pre-building-levels) shape: what
+/// `persist.rs` wrote under the `FCWORLD4` header before this change —
+/// identical to the live `GameState` minus `Building::level`/`build_left`
+/// (mirrored as `BuildingV4`). `Survivor`/`PlayerInfo` are unchanged since
+/// V4, so they're reused from `types` directly.
+#[derive(Serialize, Deserialize)]
+pub struct GameStateV4 {
+    pub tick: u64,
+    pub win_days: u32,
+    pub tiles: Vec<Tile>,
+    pub buildings: Vec<BuildingV4>,
+    pub survivors: Vec<Survivor>,
+    pub stock: Stockpile,
+    pub furnace_level: u8,
+    pub furnace_lit: bool,
+    pub cold_snap: bool,
+    pub players: Vec<PlayerInfo>,
+    pub phase: GamePhase,
+    pub events: Vec<GameEvent>,
+    pub total_events: u64,
+    pub chat: Vec<ChatLine>,
+    pub total_chat: u64,
+    pub pings: Vec<Ping>,
+    pub missions: Vec<Mission>,
+    pub tunnel: TunnelState,
+    pub graduated: bool,
+    pub central: bool,
+    pub techs: Vec<Tech>,
+    pub disease_until: u64,
+    pub blizzard_until: u64,
+    pub pending_event: Option<CaravanOffer>,
+    pub event_rng: u64,
+    pub guest_perm: GuestPermission,
+    pub owner_id: Option<u64>,
+    pub next_id: u32,
+    pub rng: u64,
+    pub central_ledger: Vec<LedgerEntry>,
+    pub leader: Option<u32>,
+    pub mourning_until: u64,
+    pub morale: f32,
+}
+
+impl From<GameStateV3> for GameStateV4 {
+    fn from(v3: GameStateV3) -> GameStateV4 {
+        GameStateV4 {
             tick: v3.tick,
             win_days: v3.win_days,
             tiles: v3.tiles,
-            // `Building` is unchanged between V3 and the live format — no
-            // per-field remap needed, unlike the V2 -> V3 hop above.
+            // `Building` is unchanged between V3 and V4 — no remap needed.
             buildings: v3.buildings,
             survivors: v3
                 .survivors
@@ -388,18 +461,84 @@ impl From<GameStateV3> for GameState {
     }
 }
 
-/// V2 -> V4 straight through V3, needed by `persist::load_at`'s one-hop
-/// `FCWORLD2` path (a V2 file goes all the way to the live format in a
+impl From<GameStateV4> for GameState {
+    fn from(v4: GameStateV4) -> GameState {
+        GameState {
+            tick: v4.tick,
+            win_days: v4.win_days,
+            tiles: v4.tiles,
+            buildings: v4
+                .buildings
+                .into_iter()
+                .map(|b| Building {
+                    id: b.id,
+                    kind: b.kind,
+                    x: b.x,
+                    y: b.y,
+                    workers: b.workers,
+                    progress: b.progress,
+                    owner: b.owner,
+                    owner_account: b.owner_account,
+                    // V4 predates building levels/construction: every old
+                    // building loads as a FINISHED level-1 building — exactly
+                    // how it behaved before the feature existed.
+                    level: 1,
+                    build_left: 0.0,
+                })
+                .collect(),
+            survivors: v4.survivors,
+            stock: v4.stock,
+            furnace_level: v4.furnace_level,
+            furnace_lit: v4.furnace_lit,
+            cold_snap: v4.cold_snap,
+            players: v4.players,
+            phase: v4.phase,
+            events: v4.events,
+            total_events: v4.total_events,
+            chat: v4.chat,
+            total_chat: v4.total_chat,
+            pings: v4.pings,
+            missions: v4.missions,
+            tunnel: v4.tunnel,
+            graduated: v4.graduated,
+            central: v4.central,
+            techs: v4.techs,
+            disease_until: v4.disease_until,
+            blizzard_until: v4.blizzard_until,
+            pending_event: v4.pending_event,
+            event_rng: v4.event_rng,
+            guest_perm: v4.guest_perm,
+            owner_id: v4.owner_id,
+            next_id: v4.next_id,
+            rng: v4.rng,
+            central_ledger: v4.central_ledger,
+            leader: v4.leader,
+            mourning_until: v4.mourning_until,
+            morale: v4.morale,
+        }
+    }
+}
+
+/// V3 -> V5 straight through V4, needed by `persist::load_at`'s one-hop
+/// `FCWORLD3` path (a V3 file goes all the way to the live format in a
 /// single `.into()`).
+impl From<GameStateV3> for GameState {
+    fn from(v3: GameStateV3) -> GameState {
+        GameStateV4::from(v3).into()
+    }
+}
+
+/// V2 -> V5 straight through V3 -> V4, needed by `persist::load_at`'s
+/// one-hop `FCWORLD2` path.
 impl From<GameStateV2> for GameState {
     fn from(v2: GameStateV2) -> GameState {
         GameStateV3::from(v2).into()
     }
 }
 
-/// V1 -> V4 straight through V2 -> V3, for `persist::load_at`'s one-shot
-/// fallback path (a V1 file goes all the way to the live format in a single
-/// `.into()`).
+/// V1 -> V5 straight through V2 -> V3 -> V4, for `persist::load_at`'s
+/// one-shot fallback path (a V1 file goes all the way to the live format in
+/// a single `.into()`).
 impl From<GameStateV1> for GameState {
     fn from(v1: GameStateV1) -> GameState {
         GameStateV2::from(v1).into()

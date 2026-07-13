@@ -9,9 +9,10 @@ edition = "2021"
 
 [dependencies]
 # `wav` adds the WAV decoder so the procedurally-synthesized SFX
-# (src/client/audio.rs) can be decoded; bevy's default features (which
-# include webgl2) are kept.
-bevy = { version = "0.19", features = ["wav"] }
+# (src/client/audio.rs) can be decoded; `jpeg` decodes the survivor model's
+# (assets/models/CesiumMan.glb) embedded JPEG texture; bevy's default
+# features (which include webgl2) are kept.
+bevy = { version = "0.19", features = ["wav", "jpeg"] }
 fc-game = { path = "crates/fc-game" }
 fc-net = { path = "crates/fc-net" }
 

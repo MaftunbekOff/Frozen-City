@@ -112,8 +112,8 @@ pub fn login_form_keyboard(
                 match submit(&form, &settings, &mut net, &mut view, &mut session, *lang) {
                     Ok(()) => next.set(Screen::Game),
                     Err(e) => {
-                        if let Ok(mut t) = error_text.single_mut() {
-                            t.0 = e;
+                        for mut t in &mut error_text {
+                            t.0 = e.clone();
                         }
                     }
                 }
@@ -189,8 +189,8 @@ pub fn account_login_button(
         match submit(&form, &settings, &mut net, &mut view, &mut session, *lang) {
             Ok(()) => next.set(Screen::Game),
             Err(e) => {
-                if let Ok(mut t) = error_text.single_mut() {
-                    t.0 = e;
+                for mut t in &mut error_text {
+                    t.0 = e.clone();
                 }
             }
         }

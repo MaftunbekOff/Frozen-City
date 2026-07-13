@@ -69,16 +69,28 @@ fn spawn_panel(mut commands: Commands, ff: Res<FormFactor>) {
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(theme::SP_XS),
                 padding: UiRect::all(Val::Px(theme::SP_SM)),
+                border: UiRect::all(Val::Px(1.0)),
                 border_radius: BorderRadius::all(Val::Px(theme::RAD_PANEL)),
                 ..default()
             },
             BackgroundColor(theme::BG_PANEL),
+            BorderColor::all(theme::BORDER),
+            BoxShadow::new(
+                Color::srgba(0.0, 0.0, 0.0, 0.35),
+                Val::Px(0.0),
+                Val::Px(4.0),
+                Val::Px(1.0),
+                Val::Px(12.0),
+            ),
             Interaction::default(),
             UiBlocker,
             DespawnOnExit(Screen::Game),
         ))
         .with_children(|p| {
-            p.spawn((theme::text("", theme::FS_SMALL, theme::TEXT_PRIMARY), TitleText));
+            // Maqsad-tracker sarlavhasi: mis rang + mis ostki chiziq —
+            // skrinshotdagi vazifa kartasi uslubi (dizayn-tizim BRASS urg'usi).
+            p.spawn((theme::text("", theme::FS_SMALL, theme::BRASS), TitleText));
+            p.spawn(theme::brass_divider());
             for i in 0..ROWS {
                 p.spawn((theme::text("", row_font, theme::TEXT_MUTED), MissionRow(i)));
             }

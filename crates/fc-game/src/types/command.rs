@@ -32,4 +32,9 @@ pub enum PlayerCommand {
     /// owned worlds; refused outright in the central world (no single
     /// leader for the shared city — see `GameState::leader`).
     SetLeader { survivor: u32 },
+    /// V0.8: raise a finished building one level (2..=`BUILDING_MAX_LEVEL`).
+    /// Wood is charged up front (`BuildingKind::upgrade_cost_wood`), then the
+    /// building becomes a construction site again (`Building::build_left`)
+    /// and produces nothing until its crew finishes the work.
+    UpgradeBuilding { building: u32 },
 }

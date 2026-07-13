@@ -1,5 +1,6 @@
 use bevy::anti_alias::fxaa::Fxaa;
 use bevy::camera::Hdr;
+use bevy::gltf::GltfAssetLabel;
 use bevy::light::{CascadeShadowConfigBuilder, DirectionalLightShadowMap};
 use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::post_process::bloom::Bloom;
@@ -37,8 +38,6 @@ pub struct GameAssets {
     /// Shared vertex-color material for the merged terrain meshes.
     pub terrain_mat: Handle<StandardMaterial>,
     pub snow_mat: Handle<StandardMaterial>,
-    /// Health tiers (healthy -> critical); shared so survivors batch.
-    pub survivor_mats: [Handle<StandardMaterial>; 4],
     /// One shared material for every building window; its emissive is
     /// animated with the time of day (warm at night, dead by day).
     pub window_mat: Handle<StandardMaterial>,
@@ -68,6 +67,25 @@ pub struct GameAssets {
     pub warehouse_plank_mat: Handle<StandardMaterial>,
     /// Roof worker-indicator cube; identical for every building.
     pub worker_mat: Handle<StandardMaterial>,
+    /// V0.8 bino daraja-bayroqlari: [bronza (L2-4), kumush (L5-7),
+    /// oltin (L8-10)] — barcha binolar bo'ylab umumiy, batching saqlanadi.
+    pub tier_flag_mats: [Handle<StandardMaterial>; 3],
+    /// XP-daraja anjomlari: peshona tasmasi (L1) va qalpoq (L2); L3 nishoni
+    /// oltin `tier_flag_mats[2]`ni qayta ishlatadi.
+    pub gear_band_mat: Handle<StandardMaterial>,
+    pub gear_cap_mat: Handle<StandardMaterial>,
+}
+
+/// Aholi 3D modeli (V0.8): singdirilgan CesiumMan sahna + yurish
+/// animatsiyasi grafi. Har aholi o'z SceneRoot nusxasini oladi;
+/// `setup_survivor_animations` yangi AnimationPlayer'larga grafni ulaydi,
+/// `drive_survivor_animations` yurish/turish tezligini boshqaradi.
+#[derive(Resource)]
+pub struct SurvivorModel {
+    /// glTF sahnasi — Bevy 0.19 da `WorldAsset` (eski nomi `Scene`).
+    pub scene: Handle<WorldAsset>,
+    pub graph: Handle<AnimationGraph>,
+    pub walk: AnimationNodeIndex,
 }
 
 /// Shared body material handle for a building kind — keeps same-kind
@@ -86,9 +104,23 @@ pub(crate) fn building_mat(assets: &GameAssets, kind: BuildingKind) -> Handle<St
 pub fn setup_camera_and_assets(
     mut commands: Commands,
     quality: Res<Quality>,
+    asset_server: Res<AssetServer>,
+    mut graphs: ResMut<Assets<AnimationGraph>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    // Aholi modeli: singdirilgan GLB'dan sahna + yagona yurish klipi
+    // (CesiumMan'da bitta animatsiya bor) — graf bir marta quriladi,
+    // barcha aholi bo'ylab ulashiladi.
+    let walk_clip = asset_server
+        .load(GltfAssetLabel::Animation(0).from_asset("embedded://models/CesiumMan.glb"));
+    let (graph, walk) = AnimationGraph::from_clip(walk_clip);
+    commands.insert_resource(SurvivorModel {
+        scene: asset_server
+            .load(GltfAssetLabel::Scene(0).from_asset("embedded://models/CesiumMan.glb")),
+        graph: graphs.add(graph),
+        walk,
+    });
     let camera = commands
         .spawn((
             Camera3d::default(),
@@ -166,17 +198,6 @@ pub fn setup_camera_and_assets(
             base_color: Color::srgb(0.96, 0.97, 1.0),
             unlit: true,
             ..default()
-        }),
-        survivor_mats: std::array::from_fn(|i| {
-            let sick = i as f32 / 3.0;
-            materials.add(StandardMaterial {
-                base_color: Color::srgb(
-                    0.30 + 0.60 * sick,
-                    0.38 - 0.20 * sick,
-                    0.55 - 0.43 * sick,
-                ),
-                ..default()
-            })
         }),
         window_mat: materials.add(StandardMaterial {
             base_color: Color::srgb(0.35, 0.28, 0.16),
@@ -259,6 +280,31 @@ pub fn setup_camera_and_assets(
         worker_mat: materials.add(StandardMaterial {
             base_color: Color::srgb(0.95, 0.97, 1.0),
             emissive: LinearRgba::rgb(0.6, 0.65, 0.75),
+            ..default()
+        }),
+        tier_flag_mats: {
+            let tiers = [
+                Color::srgb(0.72, 0.48, 0.28), // bronza
+                Color::srgb(0.80, 0.83, 0.88), // kumush
+                Color::srgb(1.00, 0.82, 0.25), // oltin
+            ];
+            std::array::from_fn(|i| {
+                materials.add(StandardMaterial {
+                    base_color: tiers[i],
+                    emissive: tiers[i].to_linear() * 0.15,
+                    metallic: 0.6,
+                    perceptual_roughness: 0.4,
+                    ..default()
+                })
+            })
+        },
+        gear_band_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.92, 0.93, 0.96),
+            ..default()
+        }),
+        gear_cap_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.30, 0.24, 0.18),
+            perceptual_roughness: 0.9,
             ..default()
         }),
     };

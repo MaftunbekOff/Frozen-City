@@ -65,6 +65,22 @@ pub const WOOD_FUEL_PENALTY: f32 = 1.5;
 pub const DEMOLISH_REFUND: f32 = 0.4;
 pub const TENT_CAPACITY: usize = 4;
 
+// --- V0.8: bino qurilishi va darajalar (construction & upgrades) ---
+
+/// Binolar 1 dan shu darajagacha, bittalab yangilanadi.
+pub const BUILDING_MAX_LEVEL: u8 = 10;
+/// Bitta qurilish maydonchasi (yangi bino yoki yangilash) sig'diradigan
+/// ustalar soni — `AdjustWorkers` qurilish paytida shu bilan cheklanadi.
+pub const CONSTRUCTION_CREW_MAX: u8 = 3;
+/// 1-daraja binoni tiklash uchun kerak usta-kunlar, bazaviy yog'och narxining
+/// har birligiga (Chodir 15y ≈ 0.3 usta-kun; Issiqxona 35y ≈ 0.7).
+pub const BUILD_WORKDAYS_PER_WOOD: f32 = 0.02;
+/// 1-darajadan yuqori har bir daraja uchun ishlab-chiqarish/effekt bonusi
+/// (+12%/daraja, L10 ≈ +108%).
+pub const LEVEL_PRODUCTION_BONUS: f32 = 0.12;
+/// Chodir 1-darajadan yuqori har bir darajada qo'shimcha joy oladi.
+pub const TENT_CAPACITY_PER_LEVEL: usize = 1;
+
 // --- V0.7: survivor management (positions/movement, leader, professions,
 // XP/levels, morale) ---
 
@@ -99,6 +115,22 @@ pub const XP_DAYS_LEVEL_3: f32 = 6.0;
 /// Per-level contribution multiplier bonus (level 1 -> +5%, 2 -> +10%, 3 -> +15%).
 pub const XP_LEVEL_BONUS_PER_LEVEL: f32 = 0.05;
 pub const XP_MAX_LEVEL: u8 = 3;
+
+/// XP level (0..=XP_MAX_LEVEL) from accrued in-game work-days, thresholded by
+/// `XP_DAYS_LEVEL_*` (cumulative totals, not per-level slices). Shared by the
+/// sim's contribution math and the client's roster/appearance tiers, so the
+/// two can never disagree about a survivor's level.
+pub fn xp_level(xp: f32) -> u8 {
+    if xp >= XP_DAYS_LEVEL_3 {
+        3
+    } else if xp >= XP_DAYS_LEVEL_2 {
+        2
+    } else if xp >= XP_DAYS_LEVEL_1 {
+        1
+    } else {
+        0
+    }
+}
 
 /// Morale starts here on a fresh world and is what every existing balance
 /// test implicitly assumes (multiplier 1.0 — see `morale_multiplier`), so a

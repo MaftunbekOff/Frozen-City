@@ -165,7 +165,9 @@ pub fn camera_control(
     if dir != Vec2::ZERO {
         let dir = dir.normalize();
         let forward = Vec3::new(-rig.yaw.sin(), 0.0, -rig.yaw.cos());
-        let right = Vec3::new(-rig.yaw.cos(), 0.0, rig.yaw.sin());
+        // Screen-right for this yaw = cross(forward, up). The earlier value was
+        // negated, so A/D (and Left/Right) panned the opposite way.
+        let right = Vec3::new(rig.yaw.cos(), 0.0, -rig.yaw.sin());
         let speed = 0.55 * rig.dist * time.delta_secs();
         rig.focus += (forward * dir.y + right * dir.x) * speed;
     }

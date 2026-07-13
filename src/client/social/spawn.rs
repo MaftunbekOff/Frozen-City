@@ -173,7 +173,9 @@ pub(crate) fn spawn_social_ui(mut commands: Commands, ff: Res<FormFactor>) {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
                 right: Val::Px(0.0),
-                top: Val::Px(96.0),
+                // Markaziy harorat medalyoni (~130px) va "visiting" banneri
+                // (134px) ostida — uchalasi ham markazda suzadi.
+                top: Val::Px(172.0),
                 justify_content: JustifyContent::Center,
                 ..default()
             },
@@ -225,7 +227,9 @@ pub(crate) fn spawn_social_ui(mut commands: Commands, ff: Res<FormFactor>) {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
                 right: Val::Px(0.0),
-                top: Val::Px(50.0),
+                // Markaziy harorat medalyoni ostida (Desktop) — qarang:
+                // `ui::hud::spawn_center_gauge`.
+                top: Val::Px(134.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 column_gap: Val::Px(theme::SP_MD),

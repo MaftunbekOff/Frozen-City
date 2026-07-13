@@ -105,8 +105,8 @@ pub fn pending_switch(
             next.set(Screen::Game);
         }
         Err(e) => {
-            if let Ok(mut t) = error_text.single_mut() {
-                t.0 = e;
+            for mut t in &mut error_text {
+                t.0 = e.clone();
             }
         }
     }
@@ -139,8 +139,8 @@ pub fn autostart(
     match result {
         Ok(()) => next.set(Screen::Game),
         Err(e) => {
-            if let Ok(mut t) = error_text.single_mut() {
-                t.0 = e;
+            for mut t in &mut error_text {
+                t.0 = e.clone();
             }
         }
     }

@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use frozen_city::game::rng::Rng;
+use frozen_city::game::types::xp_level;
 
 use super::*;
 use crate::client::*;
@@ -20,12 +21,10 @@ pub fn sync_survivors(
     mut commands: Commands,
     view: Res<GameView>,
     assets: Res<GameAssets>,
+    model: Res<SurvivorModel>,
     mut viz: ResMut<SurvivorViz>,
-    mut dots: Query<(
-        &SurvivorDot,
-        &mut Wander,
-        &mut MeshMaterial3d<StandardMaterial>,
-    )>,
+    mut dots: Query<(&SurvivorDot, &mut Wander)>,
+    mut gear: Query<(&SurvivorGear, &mut Visibility)>,
     mut seen: Local<u64>,
 ) {
     let Some(state) = view.ready() else { return };
@@ -39,11 +38,14 @@ pub fn sync_survivors(
             continue;
         }
         let pos = survivor_sim_world(s);
+        // Haqiqiy 3D odam modeli (CesiumMan — skelet + yurish animatsiyasi):
+        // har aholi o'z SceneRoot nusxasini oladi, animatsiyani
+        // `setup_survivor_animations`/`drive_survivor_animations` boshqaradi.
+        // Root'ning o'zida mesh yo'q — u pozitsiya/burilish/bob tashuvchisi.
         let e = commands
             .spawn((
-                Mesh3d(assets.capsule.clone()),
-                MeshMaterial3d(assets.survivor_mats[0].clone()),
                 Transform::from_translation(pos + Vec3::Y * 0.24),
+                Visibility::Inherited,
                 SurvivorDot { id: s.id },
                 Wander {
                     sim_pos: pos,
@@ -52,8 +54,61 @@ pub fn sync_survivors(
                 },
                 DespawnOnExit(Screen::Game),
             ))
+            .with_children(|p| {
+                // Model ~1.5 birlik bo'yli, tagligi oyoqda — o'yin
+                // masshtabiga ~0.5 birlikka keltiramiz; root y=0.24 da
+                // turgani uchun sahna -0.24 ga tushiriladi (oyoq yerda).
+                // (`WorldAssetRoot` — Bevy 0.19 dagi eski `SceneRoot`.)
+                p.spawn((
+                    WorldAssetRoot(model.scene.clone()),
+                    Transform::from_xyz(0.0, -0.24, 0.0).with_scale(Vec3::splat(0.32)),
+                ));
+                // XP-daraja anjomlari (yashirin tug'iladi; pastdagi gear-sikl
+                // haqiqiy darajaga qarab ochadi): L1 peshona tasmasi,
+                // L2 charm qalpoq, L3 oltin ko'krak nishoni.
+                p.spawn((
+                    Mesh3d(assets.cylinder.clone()),
+                    MeshMaterial3d(assets.gear_band_mat.clone()),
+                    Transform::from_xyz(0.0, 0.27, 0.0).with_scale(Vec3::new(0.17, 0.035, 0.17)),
+                    Visibility::Hidden,
+                    SurvivorGear { id: s.id, level: 1 },
+                ));
+                p.spawn((
+                    Mesh3d(assets.cone.clone()),
+                    MeshMaterial3d(assets.gear_cap_mat.clone()),
+                    Transform::from_xyz(0.0, 0.34, 0.0).with_scale(Vec3::new(0.20, 0.12, 0.20)),
+                    Visibility::Hidden,
+                    SurvivorGear { id: s.id, level: 2 },
+                ));
+                p.spawn((
+                    Mesh3d(assets.cube.clone()),
+                    MeshMaterial3d(assets.tier_flag_mats[2].clone()),
+                    Transform::from_xyz(0.0, 0.12, 0.09).with_scale(Vec3::new(0.07, 0.07, 0.03)),
+                    Visibility::Hidden,
+                    SurvivorGear { id: s.id, level: 3 },
+                ));
+            })
             .id();
         viz.0.insert(s.id, e);
+    }
+
+    // XP-daraja anjomlarining ko'rinishi — daraja oshgan sari qo'shilib
+    // boradi (kumulyativ), o'lgan/ketgan aholiniki root bilan yo'qoladi.
+    for (g, mut vis) in &mut gear {
+        let lvl = state
+            .survivors
+            .iter()
+            .find(|s| s.id == g.id)
+            .map(|s| xp_level(s.xp))
+            .unwrap_or(0);
+        let want = if lvl >= g.level {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != want {
+            *vis = want;
+        }
     }
 
     let gone: Vec<u32> = viz
@@ -68,19 +123,60 @@ pub fn sync_survivors(
         }
     }
 
-    // Refresh each entity's sim-position goal and health tint (a shared
-    // material per health tier).
-    for (dot, mut wander, mut mat) in &mut dots {
+    // Refresh each entity's sim-position goal.
+    for (dot, mut wander) in &mut dots {
         if let Some(s) = state.survivors.iter().find(|s| s.id == dot.id) {
             let pos = survivor_sim_world(s);
             if wander.sim_pos.distance(pos) > 0.001 {
                 wander.sim_pos = pos;
             }
-            let sick = 1.0 - (s.hp / 100.0).clamp(0.0, 1.0);
-            let tier = ((sick * 3.99) as usize).min(3);
-            if mat.0 != assets.survivor_mats[tier] {
-                mat.0 = assets.survivor_mats[tier].clone();
+        }
+    }
+}
+
+/// Sahna nusxasi ichida tug'ilgan har yangi `AnimationPlayer`ga umumiy
+/// yurish-grafini ulab, klipni aylanma qilib qo'yadi (o'yinda sahna
+/// instansiyalaydigan yagona model — aholi, shuning uchun global `Added`
+/// filtri yetarli).
+pub fn setup_survivor_animations(
+    mut commands: Commands,
+    model: Res<SurvivorModel>,
+    mut players: Query<(Entity, &mut AnimationPlayer), Added<AnimationPlayer>>,
+) {
+    for (e, mut player) in &mut players {
+        commands
+            .entity(e)
+            .insert(AnimationGraphHandle(model.graph.clone()));
+        player.play(model.walk).repeat();
+    }
+}
+
+/// Yurish klipi tezligini haqiqiy harakatga bog'laydi: sim-maqsad sari
+/// ketayotganda to'liq qadam, joyida turganda juda sekin "depsinish".
+/// AnimationPlayer sahna skeleti ichida — ota zanjiridan `SurvivorDot`
+/// root'ini topamiz (zanjir qisqa, aholi soni ≤ 60 — arzon).
+pub fn drive_survivor_animations(
+    roots: Query<(&Transform, &Wander), With<SurvivorDot>>,
+    parents: Query<&ChildOf>,
+    model: Res<SurvivorModel>,
+    mut players: Query<(Entity, &mut AnimationPlayer)>,
+) {
+    for (e, mut player) in &mut players {
+        let mut cur = e;
+        let mut found = None;
+        for _ in 0..8 {
+            let Ok(co) = parents.get(cur) else { break };
+            cur = co.parent();
+            if let Ok(r) = roots.get(cur) {
+                found = Some(r);
+                break;
             }
+        }
+        let Some((tr, w)) = found else { continue };
+        let pos = Vec3::new(tr.translation.x, 0.0, tr.translation.z);
+        let moving = pos.distance(w.sim_pos) > 0.34;
+        if let Some(anim) = player.animation_mut(model.walk) {
+            anim.set_speed(if moving { 1.3 } else { 0.2 });
         }
     }
 }
@@ -126,6 +222,13 @@ pub fn animate_survivors(
             let np = pos.lerp(w.sim_pos, blend);
             t.translation.x = np.x;
             t.translation.z = np.z;
+            // Model yurish yo'nalishiga yuzlanadi (glTF modellari +Z ga
+            // qaraydi) — silliq burilish, keskin sakramaydi.
+            let dir = w.sim_pos - pos;
+            if dir.length() > 0.05 {
+                let yaw = dir.x.atan2(dir.z);
+                t.rotation = t.rotation.slerp(Quat::from_rotation_y(yaw), blend);
+            }
         }
         // A tiny walking bob.
         t.translation.y = 0.24 + (time.elapsed_secs() * 7.0 + t.translation.x * 3.0).sin().abs() * 0.02;
@@ -202,7 +305,8 @@ pub fn sync_leader_crown(
                     // Tip-up (the mesh's default orientation) so it reads as
                     // a crown sitting on the survivor's head, unlike the
                     // downward-pointing cones used for cursor/ping markers.
-                    Transform::from_xyz(0.0, 0.30, 0.0).with_scale(Vec3::new(0.16, 0.16, 0.16)),
+                    // (V0.8: bosh 0.30 da — toj undan yuqorida turadi.)
+                    Transform::from_xyz(0.0, 0.46, 0.0).with_scale(Vec3::new(0.16, 0.16, 0.16)),
                     LeaderCrown,
                     ChildOf(parent),
                 ))

@@ -23,13 +23,21 @@ fn find_spot(state: &GameState, kind: BuildingKind) -> (u8, u8) {
     panic!("no valid spot for {kind:?}");
 }
 
-/// Places `kind` at a valid spot and returns its building id (workers left
-/// at 0 — tests staff it explicitly, named or anonymous, as needed).
+/// Places `kind` at a valid spot, instantly finishes its construction (the
+/// V0.8 build phase has its own suite — `construction_tests.rs`) and drains
+/// the auto-crew, returning its building id with workers at exactly 0 —
+/// tests staff it explicitly, named or anonymous, as needed.
 fn place(state: &mut GameState, kind: BuildingKind) -> u32 {
     state.stock.wood = 500.0;
     let (x, y) = find_spot(state, kind);
     sim::apply_command(state, 1, &PlayerCommand::Place { kind, x, y });
-    state.buildings.last().unwrap().id
+    let id = state.buildings.last().unwrap().id;
+    sim::finish_all_construction(state);
+    let cur = state.find_building(id).unwrap().workers as i8;
+    if cur > 0 {
+        sim::apply_command(state, 1, &PlayerCommand::AdjustWorkers { building: id, delta: -cur });
+    }
+    id
 }
 
 #[test]
