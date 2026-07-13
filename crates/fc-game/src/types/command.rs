@@ -1,0 +1,35 @@
+//! The commands a player may issue. The server validates every one of them
+//! through [`super::GameState::can_issue`].
+
+use serde::{Deserialize, Serialize};
+
+use super::{BuildingKind, Tech};
+
+/// Commands a player may issue; the server validates every one of them.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub enum PlayerCommand {
+    Place { kind: BuildingKind, x: u8, y: u8 },
+    Demolish { building: u32 },
+    AdjustWorkers { building: u32, delta: i8 },
+    /// Assign (or, with `building: None`, unassign) one named survivor to
+    /// work at a specific building. Distinct from `AdjustWorkers`: this
+    /// targets an identity, not a headcount.
+    AssignSurvivor { survivor: u32, building: Option<u32> },
+    SetFurnaceLevel { level: u8 },
+    /// Contribute resources toward excavating the Tunnel (once unlocked).
+    InvestTunnel,
+    /// Spend resources to permanently unlock a technology.
+    Research { tech: Tech },
+    /// Answer a pending event choice (e.g. a refugee caravan).
+    RespondEvent { accept: bool },
+    /// V0.7: walk a named survivor to a tile under player control. Unassigns
+    /// them from work (a manually walked survivor becomes idle) — see the
+    /// `move_target` field doc on `Survivor`.
+    /// (This and everything below it: appended in order, never reordered —
+    /// bincode enum indices are positional.)
+    MoveSurvivor { survivor: u32, x: u8, y: u8 },
+    /// V0.7: appoint a survivor as the city's leader. Owner-only in
+    /// owned worlds; refused outright in the central world (no single
+    /// leader for the shared city — see `GameState::leader`).
+    SetLeader { survivor: u32 },
+}

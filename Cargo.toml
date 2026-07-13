@@ -58,3 +58,5 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 bcrypt = "0.15"
 tungstenite = "0.29.0"
 bincode = "1.3"
+# Parses the JSONL telemetry file in tests/telemetry_e2e.rs.
+serde_json = "1"

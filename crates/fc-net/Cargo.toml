@@ -19,6 +19,9 @@ getrandom = "0.2"
 rusqlite = { version = "0.31", features = ["bundled"] }
 # Verifies passwords against the bcrypt hashes the bot stores.
 bcrypt = "0.15"
+# One-line-per-event JSONL playtest telemetry (server-side only, `telemetry.rs`).
+# Already in the lock as a transitive dep; making it direct adds no new download.
+serde_json = "1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3.103"

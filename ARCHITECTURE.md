@@ -77,12 +77,21 @@ thread) boradi. Akkaunt bilan kirish (`Login`/`EnterCentral`) esa
 
 ## 2. Modullar
 
+> **Katalog-modul konvensiyasi.** Eng katta uch modul — `types`, `sim`
+> (fc-game) va `server` (fc-net) — domen bo'yicha submodullarga bo'lingan
+> (Rust 2018 uslubi: `X.rs` modul-ildiz bo'lib qoladi, `mod Y; pub use Y::*;`
+> orqali `X/Y.rs` submodullarni fasad qilib qayta eksport qiladi). Shu sabab
+> butun kod bazasi ular ichidagi tiplarni **avvalgidek** `game::types::T`,
+> `sim::tick`, `server::start` deb chaqiraveradi — tashqi API o'zgarmagan.
+> Yangi tip/funksiya qo'shganda mos submodulga qo'ying; `pub(crate)`
+> ko'rinishni fasad qayta eksportida ham `pub(crate)` saqlang.
+
 ### `crates/fc-game/src/` — sof simulyatsiya (Bevy'siz, paket `fc-game`)
 
 | Fayl | Mas'uliyat | Asosiy tiplar/funksiyalar | Kim ishlatadi |
 |---|---|---|---|
-| `types.rs` | Butun sim ma'lumot modeli: xarita, binolar, aholi, buyruqlar, ruxsat mantig'i | `GameState` (yagona haqiqat manbai — `tick`, `tiles`, `buildings`, `survivors`, `stock`, `players`, `phase`, `missions`, `tunnel`, `techs`, `central`, `graduated`, ...), `Survivor` (`hp`/`hunger`/`assigned_building`/`owner: Option<i64>` — akkaunt egaligi), `Building`, `PlayerInfo`, `PlayerCommand` (enum: `Place`/`Demolish`/`AdjustWorkers`/`AssignSurvivor`/`SetFurnaceLevel`/`InvestTunnel`/`Research`/`RespondEvent`), `GameState::can_issue` (buyruq ruxsatining **yagona** tekshiruv nuqtasi — server ham, sim ham, client UI ham shundan foydalanadi) | `sim.rs`, `fc-net` (`server.rs`, `protocol.rs`), butun `client/` |
-| `sim.rs` | Determinstik state-mashina: xarita generatsiyasi, tick mantig'i, buyruq qo'llash | `new_game(seed, win_days)` (shaxsiy/umumiy olam), `new_game_central(seed)` (markaziy olam — aholisiz, missiyasiz), `tick(state)` (har 200ms: ochlik/harorat/ishlab-chiqarish/voqealar — `central` bo'lsa ochlik/o'lim/g'alaba/voqealar o'tkazib yuboriladi), `apply_command(state, player, cmd)` (`can_issue`ni tekshirib bajaradi), `extract_migrants`/`inject_migrants` (Tunnel orqali ko'chish), `player_joined_as`/`player_rejoined`/`kick_player` | `fc-net`'s `server.rs` (`sim_loop`), `client/local_server.rs` (wasm inline), barcha `tests/*.rs` |
+| `types/` (modul-ildiz `types.rs` + submodullar: `world`·`building`·`people`·`economy`·`progression`·`events`·`command`·`state`; konstantalar va `tile_index`/`in_bounds` ildizda) | Butun sim ma'lumot modeli: xarita, binolar, aholi, buyruqlar, ruxsat mantig'i | `GameState` (yagona haqiqat manbai — `tick`, `tiles`, `buildings`, `survivors`, `stock`, `players`, `phase`, `missions`, `tunnel`, `techs`, `central`, `graduated`, ...), `Survivor` (`hp`/`hunger`/`assigned_building`/`owner: Option<i64>` — akkaunt egaligi), `Building`, `PlayerInfo`, `PlayerCommand` (enum: `Place`/`Demolish`/`AdjustWorkers`/`AssignSurvivor`/`SetFurnaceLevel`/`InvestTunnel`/`Research`/`RespondEvent`), `GameState::can_issue` (buyruq ruxsatining **yagona** tekshiruv nuqtasi — server ham, sim ham, client UI ham shundan foydalanadi) | `sim.rs`, `fc-net` (`server.rs`, `protocol.rs`), butun `client/` |
+| `sim/` (modul-ildiz `sim.rs` + submodullar: `mapgen`·`text`·`players`·`command`·`tick`) | Determinstik state-mashina: xarita generatsiyasi, tick mantig'i, buyruq qo'llash | `new_game(seed, win_days)` (shaxsiy/umumiy olam), `new_game_central(seed)` (markaziy olam — aholisiz, missiyasiz), `tick(state)` (har 200ms: ochlik/harorat/ishlab-chiqarish/voqealar — `central` bo'lsa ochlik/o'lim/g'alaba/voqealar o'tkazib yuboriladi), `apply_command(state, player, cmd)` (`can_issue`ni tekshirib bajaradi), `extract_migrants`/`inject_migrants` (Tunnel orqali ko'chish), `player_joined_as`/`player_rejoined`/`kick_player` | `fc-net`'s `server.rs` (`sim_loop`), `client/local_server.rs` (wasm inline), barcha `tests/*.rs` |
 | `rng.rs` | Determinstik RNG | `Rng` (SplitMix64, `u64` state — `GameState.rng`/`event_rng` ichida saqlanadi, shu bilan butun sim bitta seed'dan takrorlanadi) | `sim.rs` (mapgen, voqealar), testlar |
 
 ### `crates/fc-net/src/` — protokol, server, persistensiya (paket `fc-net`, `fc-game`ga bog'liq)
@@ -90,13 +99,14 @@ thread) boradi. Akkaunt bilan kirish (`Login`/`EnterCentral`) esa
 | Fayl | Mas'uliyat | Asosiy tiplar/funksiyalar | Kim ishlatadi |
 |---|---|---|---|
 | `protocol.rs` | Wire format | `ClientMsg` (`Hello`/`Cmd`/`Cursor`/`Chat`/`Ping`/`SetGuestPermission`/`Kick`/`Login`/`EnterCentral`), `ServerMsg` (`Welcome`/`State`/`AuthFailed`), `Included` (delta-snapshot bayroqlari), `encode`/`decode` (bincode + `miniz_oxide` deflate), `write_frame`/`read_frame` (4-bayt little-endian uzunlik prefiksi). **MUHIM:** bincode positional bo'lgani uchun `ClientMsg`/`ServerMsg` enum variantlari **faqat OXIRIGA** qo'shiladi — o'rtaga qo'shish yoki tartibni o'zgartirish eski client/saqlovlarni buzadi | `server.rs`, `client.rs`, `ws.rs`, `legacy.rs` (saqlashda ham xuddi shu tamoyil) |
-| `server.rs` | TCP/WS/HTTP qabul qilish + sim_loop + persistensiya orkestratsiyasi | `sim_loop` (asosiy tick tsikli — `pub(crate)`, `world_manager.rs` ham qayta ishlatadi), `accept_loop`/`handle_socket` (4-bayt sniffing: `"GET "` → HTTP/WS, aks holda native), `route_first_msg` (Hello/Login/EnterCentral marshrutlash), `RateLimiter` (Cmd 30/s, Chat 4/s, Ping 6/s, Cursor 60/s), sessiya tokenlari (`fresh_token()` — OS CSPRNG, har reconnect'da rotatsiya), `ServerConfig`/`ServerHandle`, `MAX_CONNECTIONS=128`, auto-reset (`WORLD_RESET_AFTER`), avtosaqlash (`AUTOSAVE_INTERVAL=20s`) | `main.rs` (`run_dedicated`), `client/menu.rs` (host/singleplayer in-process), `world_manager.rs` |
+| `server/` (modul-ildiz `server.rs` + submodullar: `config`·`listener`·`native`·`web`·`ratelimit`·`messages`·`simloop`·`util`) | TCP/WS/HTTP qabul qilish + sim_loop + persistensiya orkestratsiyasi | `sim_loop` (asosiy tick tsikli — `pub(crate)`, `world_manager.rs` ham qayta ishlatadi), `accept_loop`/`handle_socket` (4-bayt sniffing: `"GET "` → HTTP/WS, aks holda native), `route_first_msg` (Hello/Login/EnterCentral marshrutlash), `RateLimiter` (Cmd 30/s, Chat 4/s, Ping 6/s, Cursor 60/s), sessiya tokenlari (`fresh_token()` — OS CSPRNG, har reconnect'da rotatsiya), `ServerConfig`/`ServerHandle`, `MAX_CONNECTIONS=128`, auto-reset (`WORLD_RESET_AFTER`), avtosaqlash (`AUTOSAVE_INTERVAL=20s`) | `main.rs` (`run_dedicated`), `client/menu.rs` (host/singleplayer in-process), `world_manager.rs` |
 | `world_manager.rs` | Akkaunt → shaxsiy olam marshrutlash, lazy-spawn/idle-evict | `WorldManager::join_account` (login → akkauntning o'z `sim_loop` thread'i, birinchi so'rovda spawn qilinadi), `enter_central` (Tunnel bitirgan akkauntni markaziy olamga kiritadi, `extract_migrants`/`inject_migrants` orqali aholi ko'chiradi, `CENTRAL_MIGRANTS_PER_ACCOUNT=5`gacha), idle-evict 300s'dan keyin (`IDLE_SHUTDOWN`), `MAX_ACCOUNT_WORLDS=200` cap (markaziy olam bundan mustasno) | `main.rs` (`run_dedicated`, faqat asosiy region), `server.rs::route_first_msg` |
 | `accounts.rs` | Akkaunt autentifikatsiyasi (SQLite, o'qish-only) | `authenticate(login, password)` → `(account_id, display_name)` yoki `None` (barcha xato holatlar — DB yo'q, login topilmadi, parol xato — bir xil `None`ga tushadi, enumeration oldini olish uchun), bcrypt tekshiruvi | `server.rs::route_first_msg` |
 | `persist.rs` | Diskka saqlash/yuklash, versiyalangan format | `save_at`/`load_at` (`MAGIC_V2 = b"FCWORLD2"` header + bincode; atomik yozish: temp fayl + rename), magic'siz fayl `legacy.rs`dagi V1 ko'zgu orqali o'qiladi va migratsiya qilinadi | `server.rs` (`sim_loop`, `save_world`), `world_manager.rs`, `examples/checksave.rs` |
 | `legacy.rs` | V1 (markaziy-olamgacha) format ko'zgusi — **hech qachon o'zgartirilmaydi** | `GameStateV1`/`SurvivorV1`/`PlayerInfoV1` (V1 layout aynan), `impl From<GameStateV1> for GameState` (yangi maydonlarga default: `owner: None`, `account: None`, `central: false`) | `persist.rs::load_at` (magic yo'q fayllar uchun) |
 | `client.rs` | Client-tomon ulanish abstraktsiyasi | `ClientConn` enum (`Channels` — TCP pump thread yoki in-process kanal; `WebSocket` — faqat wasm), `connect_tcp`/`connect_tcp_with` (native TCP + reader/writer thread'lar), `poll()`/`send()` | `client/menu.rs`, `client/net_sync.rs`, `server.rs::connect_local` |
 | `ws.rs` | Brauzer WebSocket transporti (**faqat wasm**) | `connect`/`connect_with` (`web_sys::WebSocket`, thread-local `SOCKETS` registr — JS qiymatlari `Send` emas), `send`/`is_closed`/`close` | `client.rs::ClientConn::WebSocket` (wasm branch) |
+| `telemetry.rs` | Playtest telemetriyasi (server-tomon, native) — «kim, qancha vaqt, qay darajagacha o'ynadi» | `Event` (`SessionStart`/`SessionEnd` — oxirgisi progress snapshot bilan: kun/faza/graduated/binolar/aholi/missiya/tunnel/zaxira), `record` (env `FC_TELEMETRY_PATH` sozlagan process-keng `OnceLock` sink; o'rnatilmasa **no-op**, disk tegilmaydi), alohida yozuvchi thread JSONL append qiladi — tick **hech qachon** disk I/O'da bloklanmaydi | `server.rs::sim_loop` (Join → `session_start`, `disconnect`/kick → `session_end`) |
 
 ### `src/client/` — Bevy 0.19 render/UI/input
 
@@ -107,16 +117,17 @@ koordinata konvertatsiya funksiyalari `tile_center_world`/`world_to_tile`).
 
 | Fayl | Mas'uliyat | Kim ishlatadi / bog'liqligi |
 |---|---|---|
-| `menu.rs` | Bosh menyu: singleplayer/host/join/akkaunt kirish, avtostart (`--host`/`--join`/`--smoke`) | `net::server` (host in-process), `net::client`/`net::ws` (join) |
+| `menu/` (modul: `layout`·`buttons`·`account`·`start`) | Bosh menyu: singleplayer/host/join/akkaunt kirish, avtostart (`--host`/`--join`/`--smoke`) | `net::server` (host in-process), `net::client`/`net::ws` (join) |
 | `net_sync.rs` | Snapshot qabul qilish → `GameView`ga ko'chirish, shaffof auto-reconnect (fon-thread'da qayta ulanish, sessiya tokeni bilan) | `NetConn`, `ClientConn::poll` |
-| `render.rs` | 3D protsedural sahna: teren, binolar, aholi, kecha-kunduz, pech yorug'i, qor, kursorlar — hammasi assetsiz | `GameView` (snapshot o'qish), `Quality` (grafika darajasi) |
+| `render/` (modul: `components`·`assets`·`meshes`·`scene`·`terrain`·`buildings`·`survivors`·`cursors`·`effects`) | 3D protsedural sahna: teren, binolar, aholi, kecha-kunduz, pech yorug'i, qor, kursorlar — hammasi assetsiz | `GameView` (snapshot o'qish), `Quality` (grafika darajasi) |
 | `input.rs` | Kamera boshqaruvi, qurish input'i, tanlash | `BuildMode`, `Selection`, `PlayerCommand` yuborish |
 | `touch.rs` | Mobil touch: pan/tap/pinch/twist/tilt | `input.rs`ning touch ekvivalenti |
-| `ui.rs` | HUD, qurish paneli, tanlash paneli, game-over ekrani | `GameView`, `PlayerCommand` |
+| `ui/` (modul: `components`·`hud`·`buildbar`·`selection`·`gameover`) | HUD, qurish paneli, tanlash paneli, game-over ekrani | `GameView`, `PlayerCommand` |
 | `chat.rs` | Matnli chat (Enter bilan ochiladi) | `GameState.chat`, `ClientMsg::Chat` |
 | `minimap.rs` | Burchak mini-xaritasi (CPU teksturaga bake) | `GameView`, `RelativeCursorPosition` (bosib borish) |
 | `roles.rs` | Rollar/egalik paneli: `GuestPermission` sozlash, kick | `ClientMsg::SetGuestPermission`/`Kick` |
-| `roster.rs` | Aholi ro'yxati modali, `AssignSurvivor` | `ClientMsg::Cmd(AssignSurvivor)` |
+| `roster/` (modul: `components`·`panel`·`card`) | Aholi ro'yxati modali, `AssignSurvivor` | `ClientMsg::Cmd(AssignSurvivor)` |
+| `social/` (modul: `components`·`spawn`·`panel`·`friends`·`toast`) | Do'stlar/taklif/tashrif paneli, yaqin-atrof chat pufakchalari, tashrif siyosati | `ClientMsg` (Invite/VisitFriend/…), `Social` snapshot |
 | `missions.rs` | Missiya va Tunnel paneli | `ClientMsg::Cmd(InvestTunnel)` |
 | `research.rs` | Texnologiya daraxti modali (`R` tugmasi) | `ClientMsg::Cmd(Research)` |
 | `events.rs` | Karvon-tanlov popup + kasallik/bo'ron status | `ClientMsg::Cmd(RespondEvent)` |
@@ -192,7 +203,7 @@ production saqlovlar nusxasi `examples/checksave.rs` bilan tekshiriladi.
 
 | Xizmat | Vazifasi | Port | Eslatma |
 |---|---|---|---|
-| `frozen-city` | Asosiy region — umumiy olam + akkauntlar/markaziy olam | 4595 | `/ws`; `--days 60`, `RuntimeMaxSec=10800` |
+| `frozen-city` | Asosiy region — umumiy olam + akkauntlar/markaziy olam | 4595 | `/ws`; `--days 60`, `RuntimeMaxSec=10800`, `FC_TELEMETRY_PATH` |
 | `frozen-city-region2` | Qo'shimcha static region | 4596 | `/ws-r2`; `FC_DISABLE_ACCOUNTS` yo'q lekin server kodi region2/3'da hech qachon `world_manager` bilan ishga tushmaydi — faqat asosiy `main.rs::run_dedicated` chaqiruv nuqtasi orqali |
 | `frozen-city-region3` | Qo'shimcha static region | 4597 | `/ws-r3` |
 | `frozen-city-bot` | Telegram ro'yxatdan o'tish boti (`bot/register_bot.py`) | — | SQLite accounts DB yagona yozuvchisi (`/var/lib/frozen-city-accounts/accounts.db`) |
@@ -229,3 +240,23 @@ Ikkalasi ham `wasm-opt -Oz` bilan siqiladi (agar binaryen o'rnatilgan bo'lsa)
 va `gzip -9` bilan oldindan siqilgan `.gz` nusxa yaratiladi (`web/boot.js`
 sahifa ochilganda haqiqiy `navigator.gpu.requestAdapter()` sinovi bilan
 mosini tanlaydi — shunchaki `navigator.gpu` borligini emas).
+
+### Playtest telemetriyasi (`FC_TELEMETRY_PATH`)
+
+Server har ulanishga ikki voqea yozadi — join'da `session_start`, ketishda
+progress-snapshot bilan `session_end` (`crates/fc-net/src/telemetry.rs`). Bu
+bizga **haqiqiy o'yinchini o'lchash** imkonini beradi (shu paytgacha barcha
+raqam botlardan edi): DAU/bir vaqtdagi cho'qqi, sessiya uzunligi, **qaysi
+o'yin-kunida tashlab ketishadi** (survival o'yin uchun eng muhim retention
+signali) va vizyon-funneli (Tunnel → graduatsiya → Global Olam).
+
+- **Yoqish:** systemd unit'ida `Environment=FC_TELEMETRY_PATH=/var/lib/frozen-city/telemetry.jsonl`.
+  O'rnatilmasa telemetriya **butunlay no-op** (test/singleplayer/`--host` disk tegmaydi).
+- **Dizayn:** `persist`/`accounts` kabi process-keng, env bilan sozlanadigan
+  yagona sink — shuning uchun `ServerConfig`ga, `start()`ga yoki testlarga
+  tegmaydi. Barcha `sim_loop`'lar (umumiy, har akkaunt, markaziy) bitta
+  kanalga voqea tashlaydi; alohida yozuvchi thread JSONL append qiladi —
+  tick hech qachon disk I/O'da bloklanmaydi.
+- **O'qish:** `python3 bot/analyze_telemetry.py [/var/lib/frozen-city/telemetry.jsonl]`
+  — matn hisobot (kunlik faollik, sessiya uzunligi persentillari, tashlab-
+  ketish-kun gistogrammasi, funnel). Batafsil playtest protokoli: [PLAYTEST.md](PLAYTEST.md).

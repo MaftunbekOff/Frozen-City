@@ -8,6 +8,8 @@ pub mod persist;
 pub mod protocol;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod server;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod telemetry;
 #[cfg(target_arch = "wasm32")]
 pub mod ws;
 #[cfg(not(target_arch = "wasm32"))]
