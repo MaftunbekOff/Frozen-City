@@ -167,6 +167,7 @@ pub fn furnace_buttons(
 ///    shell as roster/social): a brass "Qurish" header and every building
 ///    grouped by category (Housing / Production / Services). Visibility is
 ///    synced from the `BuildPanelOpen` resource by [`build_panel_visibility`].
+///
 /// Picking a building auto-closes the modal (`build_buttons`) — placement
 /// needs the world visible.
 /// Reuses the existing `BuildBtn` markers, so `build_buttons` styles and
