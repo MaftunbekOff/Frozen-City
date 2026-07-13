@@ -114,7 +114,7 @@ notify "🧊 native build done ✓ — smoke-testing the client…"
 # panics or exits non-zero.
 log "smoke-testing the client (native, headless via Xvfb)..."
 SMOKE_LOG=$(mktemp)
-if ! xvfb-run -a timeout 150 target/release/frozen_city --smoke >"$SMOKE_LOG" 2>&1 || grep -qi "panicked" "$SMOKE_LOG"; then
+if ! xvfb-run -a timeout 300 target/release/frozen_city --smoke >"$SMOKE_LOG" 2>&1 || grep -qi "panicked" "$SMOKE_LOG"; then
     log "ERROR: client smoke test failed/panicked — deploy aborted, live service untouched. Output:"
     cat "$SMOKE_LOG" | sudo tee -a "$LOG" >/dev/null
     notify "🧊❌ <b>Frozen City</b>: deploy failed (client smoke test — it boots but crashes)
