@@ -10,6 +10,8 @@ use bevy::prelude::*;
 use frozen_city::net::server::{self, ServerConfig};
 use frozen_city::net::protocol::ClientMsg;
 
+#[cfg(target_arch = "wasm32")]
+use super::buttons::with_path;
 use super::super::i18n::Lang;
 use super::super::i18n_menu as mtxt;
 use super::super::{
