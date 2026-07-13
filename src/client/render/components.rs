@@ -86,6 +86,20 @@ pub struct SurvivorDot {
     pub id: u32,
 }
 
+/// Which profession model variant this survivor root spawned with, plus the
+/// sim facts the animation driver needs (`assets::SurvivorModels` is indexed
+/// by `variant`). Lives on the same root entity as [`SurvivorDot`]; the
+/// spawned `AnimationPlayer`s sit deep inside the glTF scene instance, so
+/// `setup/drive_survivor_animations` walk up the parent chain to read this.
+#[derive(Component)]
+pub struct SurvivorRig {
+    /// Index into `SurvivorModels::variants` (`Profession::ALL` order).
+    pub variant: usize,
+    /// Assigned to a building — walking survivors haul supplies
+    /// (`Walk_Carry`) instead of strolling empty-handed.
+    pub carrying: bool,
+}
+
 /// Drives a survivor entity toward the sim-authoritative position
 /// (`Survivor.x/y`, see `types.rs`'s V0.7 doc comment), smoothed with an
 /// exponential lerp — the same pattern `sync_player_cursors`/`sync_avatars`

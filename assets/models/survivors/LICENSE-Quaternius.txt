@@ -1,0 +1,14 @@
+Survivor character models (Chef_Male, Cowboy_Female, Cowboy_Male,
+Doctor_Female_Young, Viking_Male, Worker_Male)
+
+From the "Ultimate Animated Character Pack" by Quaternius
+  https://quaternius.com
+  Mirrored at: https://opengameart.org/content/animated-characters-pack
+
+License: CC0 1.0 Universal (public domain) — free for personal,
+educational and commercial use, no attribution required.
+  https://creativecommons.org/publicdomain/zero/1.0/
+
+Converted from the pack's FBX sources to binary glTF with FBX2glTF
+v0.9.7 (https://github.com/facebookincubator/FBX2glTF), no other
+modifications.

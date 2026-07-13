@@ -1,7 +1,9 @@
+use std::time::Duration;
+
 use bevy::prelude::*;
 
 use frozen_city::game::rng::Rng;
-use frozen_city::game::types::xp_level;
+use frozen_city::game::types::{xp_level, Profession};
 
 use super::*;
 use crate::client::*;
@@ -21,9 +23,9 @@ pub fn sync_survivors(
     mut commands: Commands,
     view: Res<GameView>,
     assets: Res<GameAssets>,
-    model: Res<SurvivorModel>,
+    models: Res<SurvivorModels>,
     mut viz: ResMut<SurvivorViz>,
-    mut dots: Query<(&SurvivorDot, &mut Wander)>,
+    mut dots: Query<(&SurvivorDot, &mut Wander, &mut SurvivorRig)>,
     mut gear: Query<(&SurvivorGear, &mut Visibility)>,
     mut seen: Local<u64>,
 ) {
@@ -38,15 +40,24 @@ pub fn sync_survivors(
             continue;
         }
         let pos = survivor_sim_world(s);
-        // Haqiqiy 3D odam modeli (CesiumMan — skelet + yurish animatsiyasi):
-        // har aholi o'z SceneRoot nusxasini oladi, animatsiyani
-        // `setup_survivor_animations`/`drive_survivor_animations` boshqaradi.
-        // Root'ning o'zida mesh yo'q — u pozitsiya/burilish/bob tashuvchisi.
+        // Kasbiga mos 3D odam modeli (Quaternius, skelet + idle/yurish/yuk
+        // animatsiyalari): har aholi o'z SceneRoot nusxasini oladi,
+        // animatsiyani `setup_survivor_animations`/`drive_survivor_animations`
+        // boshqaradi. Root'ning o'zida mesh yo'q — u pozitsiya/burilish
+        // tashuvchisi.
+        let variant = Profession::ALL
+            .iter()
+            .position(|&p| p == s.profession)
+            .unwrap_or(0);
         let e = commands
             .spawn((
                 Transform::from_translation(pos + Vec3::Y * 0.24),
                 Visibility::Inherited,
                 SurvivorDot { id: s.id },
+                SurvivorRig {
+                    variant,
+                    carrying: s.assigned_building.is_some(),
+                },
                 Wander {
                     sim_pos: pos,
                     shuffle_target: pos,
@@ -55,13 +66,13 @@ pub fn sync_survivors(
                 DespawnOnExit(Screen::Game),
             ))
             .with_children(|p| {
-                // Model ~1.5 birlik bo'yli, tagligi oyoqda — o'yin
+                // Model ~2 birlik bo'yli, tagligi oyoqda — o'yin
                 // masshtabiga ~0.5 birlikka keltiramiz; root y=0.24 da
                 // turgani uchun sahna -0.24 ga tushiriladi (oyoq yerda).
                 // (`WorldAssetRoot` — Bevy 0.19 dagi eski `SceneRoot`.)
                 p.spawn((
-                    WorldAssetRoot(model.scene.clone()),
-                    Transform::from_xyz(0.0, -0.24, 0.0).with_scale(Vec3::splat(0.32)),
+                    WorldAssetRoot(models.variants[variant].scene.clone()),
+                    Transform::from_xyz(0.0, -0.24, 0.0).with_scale(Vec3::splat(0.26)),
                 ));
                 // XP-daraja anjomlari (yashirin tug'iladi; pastdagi gear-sikl
                 // haqiqiy darajaga qarab ochadi): L1 peshona tasmasi,
@@ -123,45 +134,66 @@ pub fn sync_survivors(
         }
     }
 
-    // Refresh each entity's sim-position goal.
-    for (dot, mut wander) in &mut dots {
+    // Refresh each entity's sim-position goal and hauling state.
+    for (dot, mut wander, mut rig) in &mut dots {
         if let Some(s) = state.survivors.iter().find(|s| s.id == dot.id) {
             let pos = survivor_sim_world(s);
             if wander.sim_pos.distance(pos) > 0.001 {
                 wander.sim_pos = pos;
             }
+            let carrying = s.assigned_building.is_some();
+            if rig.carrying != carrying {
+                rig.carrying = carrying;
+            }
         }
     }
 }
 
-/// Sahna nusxasi ichida tug'ilgan har yangi `AnimationPlayer`ga umumiy
-/// yurish-grafini ulab, klipni aylanma qilib qo'yadi (o'yinda sahna
-/// instansiyalaydigan yagona model — aholi, shuning uchun global `Added`
-/// filtri yetarli).
+/// Sahna nusxasi ichida tug'ilgan har yangi `AnimationPlayer`ga o'z
+/// kasb-variantining grafini ulab, idle klipdan boshlaydi (o'yinda sahna
+/// instansiyalaydigan yagona model turi — aholi, shuning uchun global
+/// `Added` filtri yetarli). Variantni ota zanjiridagi `SurvivorRig`dan
+/// o'qiydi — player sahna skeleti ichida, root esa bir necha pog'ona tepada.
 pub fn setup_survivor_animations(
     mut commands: Commands,
-    model: Res<SurvivorModel>,
+    models: Res<SurvivorModels>,
+    rigs: Query<&SurvivorRig>,
+    parents: Query<&ChildOf>,
     mut players: Query<(Entity, &mut AnimationPlayer), Added<AnimationPlayer>>,
 ) {
     for (e, mut player) in &mut players {
+        let mut cur = e;
+        let mut variant = None;
+        for _ in 0..8 {
+            let Ok(co) = parents.get(cur) else { break };
+            cur = co.parent();
+            if let Ok(rig) = rigs.get(cur) {
+                variant = Some(rig.variant);
+                break;
+            }
+        }
+        let Some(v) = variant else { continue };
+        let v = &models.variants[v];
+        let mut transitions = AnimationTransitions::new();
+        transitions.play(&mut player, v.idle, Duration::ZERO).repeat();
         commands
             .entity(e)
-            .insert(AnimationGraphHandle(model.graph.clone()));
-        player.play(model.walk).repeat();
+            .insert((AnimationGraphHandle(v.graph.clone()), transitions));
     }
 }
 
-/// Yurish klipi tezligini haqiqiy harakatga bog'laydi: sim-maqsad sari
-/// ketayotganda to'liq qadam, joyida turganda juda sekin "depsinish".
-/// AnimationPlayer sahna skeleti ichida — ota zanjiridan `SurvivorDot`
-/// root'ini topamiz (zanjir qisqa, aholi soni ≤ 60 — arzon).
+/// Holatga mos klipni tanlaydi va silliq krossfeyd bilan almashtiradi:
+/// sim-maqsad sari ketayotganda yurish (biriktirilgan aholi yuk ko'tarib —
+/// `Walk_Carry`), joyida turganda idle. AnimationPlayer sahna skeleti
+/// ichida — ota zanjiridan `SurvivorDot` root'ini topamiz (zanjir qisqa,
+/// aholi soni ≤ 60 — arzon).
 pub fn drive_survivor_animations(
-    roots: Query<(&Transform, &Wander), With<SurvivorDot>>,
+    roots: Query<(&Transform, &Wander, &SurvivorRig), With<SurvivorDot>>,
     parents: Query<&ChildOf>,
-    model: Res<SurvivorModel>,
-    mut players: Query<(Entity, &mut AnimationPlayer)>,
+    models: Res<SurvivorModels>,
+    mut players: Query<(Entity, &mut AnimationPlayer, &mut AnimationTransitions)>,
 ) {
-    for (e, mut player) in &mut players {
+    for (e, mut player, mut transitions) in &mut players {
         let mut cur = e;
         let mut found = None;
         for _ in 0..8 {
@@ -172,11 +204,23 @@ pub fn drive_survivor_animations(
                 break;
             }
         }
-        let Some((tr, w)) = found else { continue };
+        let Some((tr, w, rig)) = found else { continue };
         let pos = Vec3::new(tr.translation.x, 0.0, tr.translation.z);
         let moving = pos.distance(w.sim_pos) > 0.34;
-        if let Some(anim) = player.animation_mut(model.walk) {
-            anim.set_speed(if moving { 1.3 } else { 0.2 });
+        let v = &models.variants[rig.variant];
+        let want = if moving {
+            if rig.carrying {
+                v.carry
+            } else {
+                v.walk
+            }
+        } else {
+            v.idle
+        };
+        if transitions.get_main_animation() != Some(want) {
+            transitions
+                .play(&mut player, want, Duration::from_millis(220))
+                .repeat();
         }
     }
 }
@@ -230,8 +274,8 @@ pub fn animate_survivors(
                 t.rotation = t.rotation.slerp(Quat::from_rotation_y(yaw), blend);
             }
         }
-        // A tiny walking bob.
-        t.translation.y = 0.24 + (time.elapsed_secs() * 7.0 + t.translation.x * 3.0).sin().abs() * 0.02;
+        // Qadam ritmi endi yurish klipining o'zida — sun'iy bob kerak emas.
+        t.translation.y = 0.24;
     }
 }
 

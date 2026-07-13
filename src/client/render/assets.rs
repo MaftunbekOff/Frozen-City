@@ -76,17 +76,36 @@ pub struct GameAssets {
     pub gear_cap_mat: Handle<StandardMaterial>,
 }
 
-/// Aholi 3D modeli (V0.8): singdirilgan CesiumMan sahna + yurish
-/// animatsiyasi grafi. Har aholi o'z SceneRoot nusxasini oladi;
-/// `setup_survivor_animations` yangi AnimationPlayer'larga grafni ulaydi,
-/// `drive_survivor_animations` yurish/turish tezligini boshqaradi.
-#[derive(Resource)]
-pub struct SurvivorModel {
+/// Bitta kasbning aholi modeli: glTF sahnasi + animatsiya grafi va undagi
+/// uch klip-tugun. Barcha modellar bitta rigda (Quaternius pack) — klip
+/// indekslari [`ANIM_IDLE`]/[`ANIM_WALK`]/[`ANIM_CARRY`] hammasida bir xil.
+pub struct SurvivorVariant {
     /// glTF sahnasi — Bevy 0.19 da `WorldAsset` (eski nomi `Scene`).
     pub scene: Handle<WorldAsset>,
     pub graph: Handle<AnimationGraph>,
+    pub idle: AnimationNodeIndex,
     pub walk: AnimationNodeIndex,
+    /// `Walk_Carry` — biriktirilgan (ishlayotgan) aholi yurganda yuk
+    /// ko'tarib boradi; bo'sh aholi oddiy yuradi.
+    pub carry: AnimationNodeIndex,
 }
+
+/// Aholi 3D modellari (V0.8): kasb boshiga bitta variant, indeks
+/// `Profession::ALL` tartibida (embed ro'yxati `client::SURVIVOR_MODELS`
+/// bilan bir xil tartib). Har aholi o'z SceneRoot nusxasini oladi;
+/// `setup_survivor_animations` yangi AnimationPlayer'larga mos grafni
+/// ulaydi, `drive_survivor_animations` idle/yurish o'tishlarini boshqaradi.
+#[derive(Resource)]
+pub struct SurvivorModels {
+    pub variants: [SurvivorVariant; 6],
+}
+
+/// Quaternius GLB'laridagi animatsiya indekslari (barcha 6 faylda tartib
+/// tasdiqlangan-bir xil: Defeat, Idle, PickUp, Punch, RecieveHit,
+/// Shoot_OneHanded, SitDown, StandUp, Victory, Walk, Walk_Carry).
+const ANIM_IDLE: usize = 1;
+const ANIM_WALK: usize = 9;
+const ANIM_CARRY: usize = 10;
 
 /// Shared body material handle for a building kind — keeps same-kind
 /// buildings batched into a single draw call instead of each getting its
@@ -109,18 +128,25 @@ pub fn setup_camera_and_assets(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // Aholi modeli: singdirilgan GLB'dan sahna + yagona yurish klipi
-    // (CesiumMan'da bitta animatsiya bor) — graf bir marta quriladi,
-    // barcha aholi bo'ylab ulashiladi.
-    let walk_clip = asset_server
-        .load(GltfAssetLabel::Animation(0).from_asset("embedded://models/CesiumMan.glb"));
-    let (graph, walk) = AnimationGraph::from_clip(walk_clip);
-    commands.insert_resource(SurvivorModel {
-        scene: asset_server
-            .load(GltfAssetLabel::Scene(0).from_asset("embedded://models/CesiumMan.glb")),
-        graph: graphs.add(graph),
-        walk,
+    // Aholi modellari: har kasb varianti uchun singdirilgan GLB'dan sahna
+    // + idle/yurish/yuk-tashish klipli graf — graflar bir marta quriladi,
+    // shu kasbdagi barcha aholi bo'ylab ulashiladi.
+    let variants = crate::client::SURVIVOR_MODELS.map(|(path, _)| {
+        let clip = |i: usize| {
+            asset_server.load(GltfAssetLabel::Animation(i).from_asset(format!("embedded://{path}")))
+        };
+        let (graph, nodes) =
+            AnimationGraph::from_clips([clip(ANIM_IDLE), clip(ANIM_WALK), clip(ANIM_CARRY)]);
+        SurvivorVariant {
+            scene: asset_server
+                .load(GltfAssetLabel::Scene(0).from_asset(format!("embedded://{path}"))),
+            graph: graphs.add(graph),
+            idle: nodes[0],
+            walk: nodes[1],
+            carry: nodes[2],
+        }
     });
+    commands.insert_resource(SurvivorModels { variants });
     let camera = commands
         .spawn((
             Camera3d::default(),

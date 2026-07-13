@@ -443,24 +443,54 @@ pub fn player_color(idx: u8) -> Color {
     Color::srgb(r, g, b)
 }
 
-/// Aholi 3D modeli (CesiumMan, CC-BY 4.0 — qarang
-/// `assets/models/LICENSE-CesiumMan.txt`). Font kabi binary ichiga
-/// singdirilgan: native va wasm'da bir xil, tashqi fayl/HTTP talab qilmaydi.
-const SURVIVOR_MODEL_BYTES: &[u8] = include_bytes!("../../assets/models/CesiumMan.glb");
+/// Aholi 3D modellari — kasbiga mos bittadan (Quaternius "Ultimate Animated
+/// Character Pack", CC0 — qarang `assets/models/survivors/LICENSE-Quaternius.txt`).
+/// Font kabi binary ichiga singdirilgan: native va wasm'da bir xil, tashqi
+/// fayl/HTTP talab qilmaydi. Tartib `Profession::ALL` bilan bir xil —
+/// `render::assets` shu indeks bo'yicha variant tanlaydi.
+pub(crate) const SURVIVOR_MODELS: [(&str, &[u8]); 6] = [
+    (
+        "models/survivors/Viking_Male.glb", // Lumberjack
+        include_bytes!("../../assets/models/survivors/Viking_Male.glb"),
+    ),
+    (
+        "models/survivors/Worker_Male.glb", // Miner
+        include_bytes!("../../assets/models/survivors/Worker_Male.glb"),
+    ),
+    (
+        "models/survivors/Cowboy_Male.glb", // Hunter
+        include_bytes!("../../assets/models/survivors/Cowboy_Male.glb"),
+    ),
+    (
+        "models/survivors/Cowboy_Female.glb", // Farmer
+        include_bytes!("../../assets/models/survivors/Cowboy_Female.glb"),
+    ),
+    (
+        "models/survivors/Doctor_Female_Young.glb", // Medic
+        include_bytes!("../../assets/models/survivors/Doctor_Female_Young.glb"),
+    ),
+    (
+        "models/survivors/Chef_Male.glb", // Cook
+        include_bytes!("../../assets/models/survivors/Chef_Male.glb"),
+    ),
+];
 
 pub struct ClientPlugin;
 
 impl Plugin for ClientPlugin {
     fn build(&self, app: &mut App) {
-        // Singdirilgan GLB'ni `embedded://` asset manbasiga ro'yxatlaydi —
-        // `render::setup_camera_and_assets` shu yo'ldan yuklaydi.
-        app.world()
-            .resource::<bevy::asset::io::embedded::EmbeddedAssetRegistry>()
-            .insert_asset(
-                std::path::PathBuf::from("models/CesiumMan.glb"),
-                std::path::Path::new("models/CesiumMan.glb"),
-                SURVIVOR_MODEL_BYTES,
+        // Singdirilgan GLB'larni `embedded://` asset manbasiga ro'yxatlaydi —
+        // `render::setup_camera_and_assets` shu yo'llardan yuklaydi.
+        let registry = app
+            .world()
+            .resource::<bevy::asset::io::embedded::EmbeddedAssetRegistry>();
+        for (path, bytes) in SURVIVOR_MODELS {
+            registry.insert_asset(
+                std::path::PathBuf::from(path),
+                std::path::Path::new(path),
+                bytes,
             );
+        }
         app.init_state::<Screen>()
             .init_resource::<input::CamRig>()
             .init_resource::<touch::TouchCtl>()
