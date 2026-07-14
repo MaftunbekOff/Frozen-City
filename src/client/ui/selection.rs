@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use frozen_city::game::types::{
     BuildingKind, PlayerCommand, BUILDING_MAX_LEVEL, CONSTRUCTION_CREW_MAX,
-    FURNACE_COAL_PER_DAY_PER_LEVEL,
+    FURNACE_COAL_PER_DAY_PER_LEVEL, FURNACE_LOGS_NEEDED,
 };
 use frozen_city::net::protocol::ClientMsg;
 
@@ -50,8 +50,20 @@ pub fn selection_panel_update(
     let Some(b) = sel else { return };
 
     // V0.8: qurilish maydonchasi ham ishchi (usta) boshqaruvini ko'rsatadi —
-    // hatto bitganda ishchisiz turlar (Chodir) uchun ham.
-    let has_workers = b.under_construction() || b.kind.max_workers() > 0;
+    // hatto bitganda ishchisiz turlar (Chodir) uchun ham. Pechning ENG
+    // BIRINCHI (hali yonmagan, `furnace_level == 0`) qurilishi bundan
+    // mustasno: uning progressini FAQAT nomlangan `AssignSurvivor` (o'tin
+    // chopish sikli) siljitadi, anonim `AdjustWorkers` +/- esa u yerda hech
+    // narsaga ta'sir qilmaydi — shuning uchun bu qatorni o'sha bosqichda
+    // ko'rsatmaymiz. Biroq V0.9 daraja-yangilash (`furnace_level > 0` bo'lgan
+    // holda qayta `under_construction()`) — bu allaqachon oddiy usta-kunlar
+    // tizimi, boshqa binolar kabi, shuning uchun bu qator u yerda ko'rinadi.
+    // MARKAZIY olamda esa `AdjustWorkers` umuman rad etiladi (har bir aholi
+    // akkauntga tegishli), shuning uchun bu qator u yerda ham ko'rsatilmaydi
+    // — "Shu yerga tayinlash" (`AssignSurvivor`) orqali ishlash kerak.
+    let has_workers = !state.central
+        && ((b.under_construction() && (b.kind != BuildingKind::Furnace || state.furnace_level > 0))
+            || b.kind.max_workers() > 0);
     let workers_display = if has_workers { Display::Flex } else { Display::None };
     for mut node in &mut nodes.p1() {
         if node.display != workers_display {
@@ -59,9 +71,11 @@ pub fn selection_panel_update(
         }
     }
 
-    // V0.8: Yangilash tugmasi — faqat bitgan, qurilsa bo'ladigan va
-    // maksimumga yetmagan binoda; rangi yog'och yetarliligini aks ettiradi.
-    let show_upgrade = b.kind.buildable() && !b.under_construction() && !b.at_max_level();
+    // V0.8/V0.9: Yangilash tugmasi — faqat bitgan, yangilansa bo'ladigan
+    // (`upgradeable` — Pech ham shu jumladan, garchi `buildable` bo'lmasa
+    // ham) va maksimumga yetmagan binoda; rangi yog'och yetarliligini aks
+    // ettiradi.
+    let show_upgrade = b.kind.upgradeable() && !b.under_construction() && !b.at_max_level();
     let affordable = show_upgrade
         && state.stock.wood >= b.kind.upgrade_cost_wood(b.level + 1) as f32;
     for (mut node, mut bg) in &mut nodes.p4() {
@@ -84,8 +98,17 @@ pub fn selection_panel_update(
             node.display = demolish_display;
         }
     }
-    // Furnace level buttons appear only for the Furnace itself.
-    let furnace_display = if b.kind == BuildingKind::Furnace {
+    // Burn-intensity buttons (0-3, `state.furnace_level`) appear only for
+    // the Furnace, only once it's been lit at least once (`SetFurnaceLevel`
+    // is a no-op before that — see `state.furnace_level > 0` below, kept
+    // rather than `!b.under_construction()` since a V0.9 level upgrade,
+    // a SEPARATE `b.level` 1-10 axis, re-sets `build_left` too but the
+    // furnace is still lit throughout), AND only once it's grown past the
+    // rough "gulxan" tier into an established `Pech` (`b.level >= 7`,
+    // matching `render/buildings.rs`'s two-tier model) — a campfire has no
+    // damper to dial in, only a real furnace does. `SetFurnaceLevel`
+    // enforces the same level-7 floor server-side.
+    let furnace_display = if b.kind == BuildingKind::Furnace && state.furnace_level > 0 && b.level >= 7 {
         Display::Flex
     } else {
         Display::None
@@ -97,11 +120,18 @@ pub fn selection_panel_update(
     }
 
     let info = match b.kind {
+        // Only the very first (unlit) construction reads as "not built
+        // yet" — a later V0.9 level upgrade is already a working furnace,
+        // just being improved, so it keeps showing the normal burn stats.
+        BuildingKind::Furnace if b.under_construction() && state.furnace_level == 0 => {
+            i18n_hud::sel_info_furnace_building(lang)
+        }
         BuildingKind::Furnace => i18n_hud::sel_info_furnace(
             state.furnace_level,
             state.furnace_level as f32 * FURNACE_COAL_PER_DAY_PER_LEVEL,
             frozen_city::game::types::WOOD_FUEL_PENALTY,
             state.heat_radius(),
+            b.level >= 7,
             lang,
         ),
         BuildingKind::Tent => i18n_hud::sel_info_tent(
@@ -149,6 +179,13 @@ pub fn selection_panel_update(
                 i18n_hud::sel_info_warehouse_unstaffed(cut, lang)
             }
         }
+        BuildingKind::Tunnel => i18n_hud::sel_info_tunnel(
+            state.tunnel.unlocked,
+            state.tunnel.stage,
+            frozen_city::game::types::TUNNEL_STAGES,
+            state.pending_migrant.map(|m| m.count),
+            lang,
+        ),
     };
 
     for (mut text, kind) in &mut texts {
@@ -166,10 +203,17 @@ pub fn selection_panel_update(
             }
             SelText::Avail => i18n_hud::workers_available(state.idle_workers(), lang),
             SelText::Level => {
-                if !b.kind.buildable() {
-                    // Pechning o'z darajasi (0-3) bor — V0.8 qatori unga
-                    // taalluqli emas.
-                    String::new()
+                if b.kind == BuildingKind::Furnace && b.under_construction() && state.furnace_level == 0 {
+                    // `build_left` counts down in whole logs here, not
+                    // wood-cost-derived worker-days — see `FURNACE_LOGS_NEEDED`.
+                    let delivered = FURNACE_LOGS_NEEDED.saturating_sub(b.build_left.round() as u32);
+                    i18n_hud::furnace_construction_line(
+                        delivered,
+                        FURNACE_LOGS_NEEDED,
+                        b.workers,
+                        CONSTRUCTION_CREW_MAX,
+                        lang,
+                    )
                 } else if b.under_construction() {
                     let total = if b.level <= 1 {
                         b.kind.build_workdays()
@@ -178,6 +222,10 @@ pub fn selection_panel_update(
                     };
                     let pct = (((1.0 - b.build_left / total.max(1e-6)).clamp(0.0, 1.0)) * 100.0) as u32;
                     i18n_hud::construction_line(pct, b.workers, CONSTRUCTION_CREW_MAX, lang)
+                } else if !b.kind.buildable() {
+                    // Pechning o'z darajasi (0-3) bor — V0.8 qatori unga
+                    // taalluqli emas.
+                    String::new()
                 } else {
                     i18n_hud::level_line(b.level, BUILDING_MAX_LEVEL, lang)
                 }
@@ -194,6 +242,46 @@ pub fn selection_panel_update(
             text.0 = new;
         }
     }
+}
+
+/// Anchors the building info panel next to the selected building's on-screen
+/// position instead of a fixed screen corner — re-projected every frame via
+/// `Camera::world_to_viewport`, the same trick `chat.rs`'s speech bubbles and
+/// `render::update_cursor_labels`'s nameplates use. Prefers floating above
+/// the building; flips below when there isn't room, and clamps to the
+/// window so it never slides off-screen as the camera orbits/zooms.
+pub fn sync_selection_panel_position(
+    view: Res<GameView>,
+    selection: Res<Selection>,
+    camera: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mut panel: Query<&mut Node, With<SelPanelRoot>>,
+) {
+    // The panel's own width is fixed (`hud.rs`); its height varies with
+    // content (Furnace level row, worker row, ...) but computed layout size
+    // isn't available until after this frame renders, so a generous fixed
+    // estimate is used for the above/below flip and the clamp instead.
+    const WIDTH: f32 = 300.0;
+    const EST_HEIGHT: f32 = 380.0;
+    const GAP: f32 = 28.0;
+
+    let Some(state) = view.ready() else { return };
+    let Some(b) = selection.0.and_then(|id| state.find_building(id)) else { return };
+    let Ok((cam, cam_gt)) = camera.single() else { return };
+    let Ok(mut node) = panel.single_mut() else { return };
+    let Ok(window) = windows.single() else { return };
+
+    let Ok(p) = cam.world_to_viewport(cam_gt, building_center_world(b) + Vec3::Y * 0.9) else {
+        return;
+    };
+
+    let max_left = (window.width() - WIDTH).max(0.0);
+    let max_top = (window.height() - EST_HEIGHT).max(0.0);
+    let above = p.y - EST_HEIGHT - GAP;
+    let top = if above >= 0.0 { above } else { p.y + GAP };
+
+    node.left = Val::Px((p.x - WIDTH / 2.0).clamp(0.0, max_left));
+    node.top = Val::Px(top.clamp(0.0, max_top));
 }
 
 #[allow(clippy::too_many_arguments)]

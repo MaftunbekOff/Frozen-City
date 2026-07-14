@@ -24,8 +24,8 @@ fn find_sawmill_spot_near_forest(state: &GameState) -> (u8, u8) {
 
 #[test]
 fn spawn_assigns_a_deterministic_profession() {
-    let a = sim::new_game(SEED, 12);
-    let b = sim::new_game(SEED, 12);
+    let a = sim::new_game_bootstrapped(SEED, 12);
+    let b = sim::new_game_bootstrapped(SEED, 12);
     let professions_a: Vec<Profession> = a.survivors.iter().map(|s| s.profession).collect();
     let professions_b: Vec<Profession> = b.survivors.iter().map(|s| s.profession).collect();
     assert_eq!(professions_a, professions_b, "same seed must yield the same professions");
@@ -113,6 +113,11 @@ fn mismatched_profession_gets_no_bonus() {
     let mut mismatched = sim::new_game(SEED, 12);
     for state in [&mut baseline, &mut mismatched] {
         state.stock.wood = 500.0;
+        // Isolate the profession-match bonus from the (V0.7) leader's own
+        // universal-profession bypass — both worlds start with their sole
+        // survivor auto-appointed leader (see `mapgen::new_game`), which
+        // would otherwise mask a mismatched profession's missing bonus.
+        state.leader = None;
     }
 
     let (x, y) = find_sawmill_spot_near_forest(&baseline);
@@ -150,5 +155,70 @@ fn mismatched_profession_gets_no_bonus() {
          one: baseline={}, mismatched={}",
         baseline.stock.wood,
         mismatched.stock.wood
+    );
+}
+
+/// The leader is a generalist for as long as they hold the seat — a
+/// mismatched profession still gets `PROFESSION_MATCH_BONUS` while leading,
+/// and loses it the moment someone else is appointed (their own
+/// `Profession` field never changes; only the bonus check does).
+#[test]
+fn leader_gets_the_profession_match_bonus_at_any_building() {
+    let mut baseline = sim::new_game(SEED, 12);
+    let mut led = sim::new_game(SEED, 12);
+    for state in [&mut baseline, &mut led] {
+        state.stock.wood = 500.0;
+    }
+
+    let (x, y) = find_sawmill_spot_near_forest(&baseline);
+    sim::apply_command(&mut baseline, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    let baseline_id = baseline.buildings.last().unwrap().id;
+    sim::finish_all_construction(&mut baseline);
+    let cur = baseline.find_building(baseline_id).unwrap().workers as i8;
+    sim::apply_command(&mut baseline, 1, &PlayerCommand::AdjustWorkers { building: baseline_id, delta: -cur });
+    sim::apply_command(&mut baseline, 1, &PlayerCommand::AdjustWorkers { building: baseline_id, delta: 1 });
+
+    let (x, y) = find_sawmill_spot_near_forest(&led);
+    sim::apply_command(&mut led, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    let led_id = led.buildings.last().unwrap().id;
+    sim::finish_all_construction(&mut led);
+    let cur = led.find_building(led_id).unwrap().workers as i8;
+    sim::apply_command(&mut led, 1, &PlayerCommand::AdjustWorkers { building: led_id, delta: -cur });
+    let survivor = led.survivors[0].id;
+    // A Cook (mismatched) working a Sawmill — but appointed leader first.
+    led.survivors.iter_mut().find(|s| s.id == survivor).unwrap().profession = Profession::Cook;
+    sim::apply_command(&mut led, 1, &PlayerCommand::SetLeader { survivor });
+    sim::apply_command(&mut led, 1, &PlayerCommand::AssignSurvivor { survivor, building: Some(led_id) });
+
+    for _ in 0..(TICKS_PER_DAY * 3) {
+        sim::tick(&mut baseline);
+        sim::tick(&mut led);
+    }
+
+    assert!(
+        led.stock.wood > baseline.stock.wood,
+        "a mismatched-profession leader should still out-produce an anonymous worker: \
+         baseline={}, led={}",
+        baseline.stock.wood,
+        led.stock.wood
+    );
+
+    // Strip the leader seat away (appoint nobody by clearing it directly —
+    // there's no `SetLeader(None)` command, only appointing a different
+    // survivor) and confirm the very next tick's production reverts to
+    // ordinary mismatched behavior: no more bonus than the anonymous baseline.
+    led.leader = None;
+    let wood_before = led.stock.wood;
+    let control_before = baseline.stock.wood;
+    for _ in 0..(TICKS_PER_DAY / 2) {
+        sim::tick(&mut baseline);
+        sim::tick(&mut led);
+    }
+    let led_gain = led.stock.wood - wood_before;
+    let control_gain = baseline.stock.wood - control_before;
+    assert!(
+        (led_gain - control_gain).abs() < 0.01,
+        "once the leader seat is empty, the Cook's own (mismatched) profession applies again: \
+         control_gain={control_gain}, led_gain={led_gain}"
     );
 }

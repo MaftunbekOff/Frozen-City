@@ -468,10 +468,13 @@ edi (V0.6 → V1.0); alohida bosqich sifatida keyin qo'shildi.
       qor bo'roni shamoli (blizzard'da kuchayadi). Qoldi: fon musiqasi, ko'proq SFX.
 - [~] **Vizual sayqal**: ✅ bino qurilish animatsiyasi (o'sish), qor bo'roni effekti
       (qalin qor + whiteout osmon/tuman + sovuq tint), tunda aurora. ✅ aholi
-      personaj-modellari (2026-07-13): kasbiga mos 6 ta CC0 low-poly model
-      (Quaternius Ultimate Animated Character Pack, `assets/models/survivors/`),
-      idle/yurish/yuk-tashish animatsiya krossfeydlari (biriktirilgan aholi
-      yurganda yuk ko'taradi). Qoldi: tutun sayqal, o'tishlar.
+      personaj-modellari (2026-07-14): protsedural (assetsiz) qishki
+      ko'rinish — kasbiga mos plash rangi + bosh kiyimi (peshtaxta/kaska/
+      to'quv shlyapa) + qurol/anjom (bolta, kirka, miltiq, savat, xoch
+      nishoni, cho'mich) — har biri ish joyining o'z materialini qayta
+      ishlatadi (masalan o'tinchi boltasi arra zavodi tig'idan). Yurganda
+      oyoqlar protsedural tebranadi (`animate_survivor_legs`); yuk
+      ko'targanda orqada taxta ko'rinadi. Qoldi: tutun sayqal, o'tishlar.
 - [~] **Unumdorlik va deploy**: ✅ WebGPU, gzip serving + cache header, umumiy bino
       materiallari (draw-call kamaytirish), release `strip`, Cargo.lock tracked,
       build-web.sh wasm o'lchamini ko'rsatadi, ✅ wasm-opt (binaryen), ✅ delta-snapshot

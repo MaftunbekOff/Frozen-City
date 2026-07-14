@@ -48,6 +48,8 @@ fn central_settlers_never_hunger_or_die() {
         profession: Profession::from_id_hash(1),
         xp: 0.0,
         trained_kind: None,
+        chop_target: None,
+        carrying_wood: false,
     }];
     sim::inject_migrants(&mut state, 42, "Aziz", migrants);
     state.stock.food = 0.0;
@@ -79,6 +81,8 @@ fn inject_reids_sets_owner_and_caps_per_account() {
         profession: Profession::from_id_hash(id),
         xp: 0.0,
         trained_kind: None,
+        chop_target: None,
+        carrying_wood: false,
     };
 
     // Two batches from "different personal worlds" with clashing ids.
@@ -112,14 +116,18 @@ fn inject_reids_sets_owner_and_caps_per_account() {
 
 #[test]
 fn extract_prefers_idle_and_frees_staffed_slots() {
-    let mut state = sim::new_game(5, 12);
+    // Needs several idle survivors alongside the two pinned to the sawmill
+    // (extract 2 idle without touching them, then drain the rest) — that's
+    // the bootstrapped population, not the 1-survivor furnace-building
+    // opening.
+    let mut state = sim::new_game_bootstrapped(5, 12);
     sim::player_joined(&mut state, 1, "Owner");
     let start_pop = state.survivors.len();
-    assert!(start_pop >= 4, "sanity: default start population");
+    assert!(start_pop >= 5, "sanity: default start population needs room for 2 pinned + idle");
 
-    // Stand up a sawmill and pin one named survivor to it. (V0.8: joylash
-    // maydoncha ochadi — bu test bitgan binoning slotlarini sinaydi, shuning
-    // uchun darhol bitirib, avto-brigadani bo'shatamiz.)
+    // Stand up a sawmill and pin it to its `max_workers()` (2), full up.
+    // (V0.8: joylash maydoncha ochadi — bu test bitgan binoning slotlarini
+    // sinaydi, shuning uchun darhol bitirib, avto-brigadani bo'shatamiz.)
     let (x, y) = find_spot(&state, BuildingKind::Sawmill);
     sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
     let sawmill = state.buildings.iter().find(|b| b.kind == BuildingKind::Sawmill).unwrap().id;
@@ -128,28 +136,38 @@ fn extract_prefers_idle_and_frees_staffed_slots() {
     if cur > 0 {
         sim::apply_command(&mut state, 1, &PlayerCommand::AdjustWorkers { building: sawmill, delta: -cur });
     }
-    let pinned = state.survivors[0].id;
-    sim::apply_command(
-        &mut state,
-        1,
-        &PlayerCommand::AssignSurvivor { survivor: pinned, building: Some(sawmill) },
-    );
-    assert_eq!(state.find_building(sawmill).unwrap().workers, 1);
+    // Two pinned, not one: with only one assigned survivor, the population
+    // floor (`extract_migrants` never drains below 1) always leaves exactly
+    // enough idle survivors to satisfy any request on its own — the single
+    // pinned one would never actually need to be reached. Two pinned makes
+    // the fallback-into-the-assigned-pool path unavoidable once idle runs
+    // low, so it's still exercised under the new floor.
+    let pinned: Vec<u32> = state.survivors.iter().take(2).map(|s| s.id).collect();
+    for &id in &pinned {
+        sim::apply_command(&mut state, 1, &PlayerCommand::AssignSurvivor { survivor: id, building: Some(sawmill) });
+    }
+    assert_eq!(state.find_building(sawmill).unwrap().workers, 2);
 
-    // Taking fewer than the idle pool must not touch the pinned worker.
+    // Taking fewer than the idle pool must not touch either pinned worker.
     let taken = sim::extract_migrants(&mut state, 2);
     assert_eq!(taken.len(), 2);
-    assert!(taken.iter().all(|s| s.id != pinned), "idle survivors go first");
-    assert_eq!(state.find_building(sawmill).unwrap().workers, 1);
+    assert!(taken.iter().all(|s| !pinned.contains(&s.id)), "idle survivors go first");
+    assert_eq!(state.find_building(sawmill).unwrap().workers, 2);
 
-    // Draining everyone must free the sawmill slot on the way out.
-    let rest = sim::extract_migrants(&mut state, 100);
-    assert_eq!(rest.len(), start_pop - 2);
-    assert!(state.survivors.is_empty());
-    assert_eq!(
-        state.find_building(sawmill).unwrap().workers,
-        0,
-        "a migrating worker must free their staffed slot"
+    // Draining "everyone" now must (a) fall back to the pinned pool once
+    // idle runs out, freeing at least one staffed slot, and (b) still never
+    // fully empty the world — one survivor always stays behind.
+    let remaining_before = state.survivors.len();
+    let rest = sim::extract_migrants(&mut state, 1000);
+    assert_eq!(rest.len(), remaining_before - 1, "leaves exactly one survivor behind");
+    assert_eq!(state.survivors.len(), 1, "extract_migrants never empties a personal world");
+    assert!(
+        state.find_building(sawmill).unwrap().workers < 2,
+        "at least one migrating worker must free their staffed slot"
+    );
+    assert!(
+        rest.iter().any(|s| pinned.contains(&s.id)),
+        "falls back to the assigned pool once idle runs out"
     );
     assert!(rest.iter().all(|s| s.assigned_building.is_none()));
 }
@@ -173,6 +191,8 @@ fn central_authority_follows_settler_ownership() {
         profession: Profession::from_id_hash(id),
         xp: 0.0,
         trained_kind: None,
+        chop_target: None,
+        carrying_wood: false,
     };
     sim::inject_migrants(&mut state, 1, "Aziz", vec![mk(1)]);
     sim::inject_migrants(&mut state, 2, "Vali", vec![mk(2)]);

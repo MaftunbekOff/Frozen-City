@@ -20,19 +20,24 @@ pub const DEFAULT_SAVE_PATH: &str = "/var/lib/frozen-city/world.bin";
 /// `Building::owner_account`, `GameState::central_ledger`; V4: survivor
 /// position/movement, leader/mourning, professions, xp/levels, morale — see
 /// the V0.7 "survivor management" fields on `Survivor`/`GameState`; V5:
-/// `Building::level`/`build_left` — V0.8 building levels & construction).
-/// Bincode is positional, so without a header there'd be no way to tell one
-/// version's file from another's — and misreading one version as another
-/// would "collapse to None" in `load_at` and silently wipe a production
-/// world on the first deploy after a format change. Files WITHOUT any
-/// recognized prefix are decoded through the frozen V1 mirror (`legacy.rs`)
-/// and migrated all the way to V5; files with `MAGIC_V2`/`MAGIC_V3`/
-/// `MAGIC_V4` decode through the matching mirror and migrate the rest of
-/// the way.
+/// `Building::level`/`build_left` — V0.8 building levels & construction;
+/// V6: `Survivor::chop_target`/`carrying_wood` — the Furnace's opening
+/// chop-and-carry construction cycle; V7: `GameState::pending_migrant` — the
+/// Tunnel migrant wait/accept/leave cycle). Bincode is positional, so
+/// without a header there'd be no way to tell one version's file from
+/// another's — and misreading one version as another would "collapse to
+/// None" in `load_at` and silently wipe a production world on the first
+/// deploy after a format change. Files WITHOUT any recognized prefix are
+/// decoded through the frozen V1 mirror (`legacy.rs`) and migrated all the
+/// way to V7; files with `MAGIC_V2`/`MAGIC_V3`/`MAGIC_V4`/`MAGIC_V5`/
+/// `MAGIC_V6` decode through the matching mirror and migrate the rest of the
+/// way.
 const MAGIC_V2: &[u8; 8] = b"FCWORLD2";
 const MAGIC_V3: &[u8; 8] = b"FCWORLD3";
 const MAGIC_V4: &[u8; 8] = b"FCWORLD4";
 const MAGIC_V5: &[u8; 8] = b"FCWORLD5";
+const MAGIC_V6: &[u8; 8] = b"FCWORLD6";
+const MAGIC_V7: &[u8; 8] = b"FCWORLD7";
 
 fn resolve_path() -> String {
     std::env::var("FC_WORLD_SAVE").unwrap_or_else(|_| DEFAULT_SAVE_PATH.to_string())
@@ -62,8 +67,8 @@ pub fn save_at(state: &GameState, path: &str) -> io::Result<()> {
     }
     let body =
         bincode::serialize(state).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    let mut bytes = Vec::with_capacity(MAGIC_V5.len() + body.len());
-    bytes.extend_from_slice(MAGIC_V5);
+    let mut bytes = Vec::with_capacity(MAGIC_V7.len() + body.len());
+    bytes.extend_from_slice(MAGIC_V7);
     bytes.extend_from_slice(&body);
     // Write to a sibling temp file and rename over the target: a kill mid-write
     // (the exact moment this feature exists to survive) leaves the previous,
@@ -77,34 +82,48 @@ pub fn save_at(state: &GameState, path: &str) -> io::Result<()> {
 
 pub fn load_at(path: &str) -> Option<GameState> {
     let bytes = fs::read(path).ok()?;
-    if let Some(body) = bytes.strip_prefix(MAGIC_V5.as_slice()) {
+    if let Some(body) = bytes.strip_prefix(MAGIC_V7.as_slice()) {
         return bincode::deserialize(body).ok();
+    }
+    if let Some(body) = bytes.strip_prefix(MAGIC_V6.as_slice()) {
+        // V6 (pre-Tunnel-migrants): decode through the frozen V6 mirror and
+        // migrate one hop to V7. The next autosave rewrites it as V7.
+        return bincode::deserialize::<crate::legacy::GameStateV6>(body)
+            .ok()
+            .map(GameState::from);
+    }
+    if let Some(body) = bytes.strip_prefix(MAGIC_V5.as_slice()) {
+        // V5 (pre-chop/carry): decode through the frozen V5 mirror and
+        // migrate two hops to V7. The next autosave rewrites it as V7.
+        return bincode::deserialize::<crate::legacy::GameStateV5>(body)
+            .ok()
+            .map(GameState::from);
     }
     if let Some(body) = bytes.strip_prefix(MAGIC_V4.as_slice()) {
         // V4 (pre-building-levels): decode through the frozen V4 mirror and
-        // migrate one hop to V5. The next autosave rewrites it as V5.
+        // migrate three hops to V7. The next autosave rewrites it as V7.
         return bincode::deserialize::<crate::legacy::GameStateV4>(body)
             .ok()
             .map(GameState::from);
     }
     if let Some(body) = bytes.strip_prefix(MAGIC_V3.as_slice()) {
         // V3 (pre-survivor-management): decode through the frozen V3 mirror
-        // and migrate two hops to V5. The next autosave rewrites it as V5.
+        // and migrate four hops to V7. The next autosave rewrites it as V7.
         return bincode::deserialize::<crate::legacy::GameStateV3>(body)
             .ok()
             .map(GameState::from);
     }
     if let Some(body) = bytes.strip_prefix(MAGIC_V2.as_slice()) {
         // V2 (pre-account-ownership/contribution-ledger): decode through the
-        // frozen V2 mirror and migrate three hops to V5. The next autosave
-        // rewrites it as V5.
+        // frozen V2 mirror and migrate five hops to V7. The next autosave
+        // rewrites it as V7.
         return bincode::deserialize::<crate::legacy::GameStateV2>(body)
             .ok()
             .map(GameState::from);
     }
     // No recognized header: a save written before versioning existed at
     // all — decode it through the frozen V1 mirror and migrate all the way
-    // to V5. The next autosave rewrites it as V5.
+    // to V7. The next autosave rewrites it as V7.
     bincode::deserialize::<crate::legacy::GameStateV1>(&bytes)
         .ok()
         .map(GameState::from)
@@ -241,9 +260,9 @@ mod tests {
         );
         assert!(loaded.central_ledger.is_empty(), "V1 predates the contribution ledger");
 
-        // And once re-saved (V5, with header), it round-trips as-is.
+        // And once re-saved (V7, with header), it round-trips as-is.
         save_at(&loaded, &path).unwrap();
-        assert_eq!(load_at(&path).expect("V4 reload"), loaded);
+        assert_eq!(load_at(&path).expect("V7 reload"), loaded);
         fs::remove_file(&path).ok();
     }
 
@@ -318,9 +337,9 @@ mod tests {
         );
         assert!(loaded.central_ledger.is_empty(), "V2 predates the contribution ledger");
 
-        // And once re-saved (V5, with header), it round-trips as-is.
+        // And once re-saved (V7, with header), it round-trips as-is.
         save_at(&loaded, &path).unwrap();
-        assert_eq!(load_at(&path).expect("V4 reload"), loaded);
+        assert_eq!(load_at(&path).expect("V7 reload"), loaded);
         fs::remove_file(&path).ok();
     }
 
@@ -401,19 +420,19 @@ mod tests {
             assert!(d < 10.0, "V3 survivors should migrate to a furnace-adjacent spawn, got ({}, {})", s.x, s.y);
         }
 
-        // And once re-saved (V5, with header), it round-trips as-is.
+        // And once re-saved (V7, with header), it round-trips as-is.
         save_at(&loaded, &path).unwrap();
-        assert_eq!(load_at(&path).expect("V5 reload"), loaded);
+        assert_eq!(load_at(&path).expect("V7 reload"), loaded);
         fs::remove_file(&path).ok();
     }
 
     /// A world saved under `FCWORLD4` (pre-building-levels: no
-    /// `Building::level`/`build_left`) must load and migrate one hop to V5
+    /// `Building::level`/`build_left`) must load and migrate two hops to V6
     /// with every old building as a FINISHED level-1 building — same
     /// non-negotiable "never collapses to None" guarantee as V1/V2/V3.
     #[test]
     fn v4_save_migrates() {
-        use crate::legacy::{BuildingV4, GameStateV4};
+        use crate::legacy::{BuildingV4, GameStateV4, SurvivorV5};
 
         let path = throwaway_path("v4-migrate");
         let mut modern = sim::new_game(41, 12);
@@ -424,7 +443,7 @@ mod tests {
             win_days: modern.win_days,
             tiles: modern.tiles.clone(),
             buildings: modern.buildings.iter().map(BuildingV4::from).collect(),
-            survivors: modern.survivors.clone(),
+            survivors: modern.survivors.iter().map(SurvivorV5::from).collect(),
             stock: modern.stock,
             furnace_level: modern.furnace_level,
             furnace_lit: modern.furnace_lit,
@@ -460,7 +479,10 @@ mod tests {
         fs::write(&path, bytes).unwrap();
 
         let loaded = load_at(&path).expect("V4 save must migrate, never wipe");
-        assert_eq!(loaded.survivors, modern.survivors, "V4 survivors are already live-shape");
+        assert_eq!(
+            loaded.survivors, modern.survivors,
+            "V4 predates chop/carry, but a fresh survivor's default (None/false) matches anyway"
+        );
         assert_eq!(loaded.players, modern.players);
         assert!(loaded.graduated, "graduation must survive migration");
         assert_eq!(loaded.stock, modern.stock);
@@ -472,9 +494,152 @@ mod tests {
         // set must match field-for-field after migration.
         assert_eq!(loaded.buildings, modern.buildings);
 
-        // And once re-saved (V5, with header), it round-trips as-is.
+        // And once re-saved (V7, with header), it round-trips as-is.
         save_at(&loaded, &path).unwrap();
-        assert_eq!(load_at(&path).expect("V5 reload"), loaded);
+        assert_eq!(load_at(&path).expect("V7 reload"), loaded);
+        fs::remove_file(&path).ok();
+    }
+
+    /// A world saved under `FCWORLD5` (pre-chop/carry: no
+    /// `Survivor::chop_target`/`carrying_wood`) must load and migrate one
+    /// hop to V6 with every old survivor defaulting to no errand in
+    /// progress — same non-negotiable "never collapses to None" guarantee
+    /// as V1/V2/V3/V4. `Building` is unchanged since V5, so it's cloned
+    /// straight from `modern` (no `BuildingV*::from` remap needed, unlike
+    /// the V4 test).
+    #[test]
+    fn v5_save_migrates() {
+        use crate::legacy::{GameStateV5, SurvivorV5};
+
+        let path = throwaway_path("v5-migrate");
+        let mut modern = sim::new_game(51, 12);
+        sim::player_joined(&mut modern, 8, "Bekzod");
+        modern.graduated = true;
+        let v5 = GameStateV5 {
+            tick: modern.tick,
+            win_days: modern.win_days,
+            tiles: modern.tiles.clone(),
+            buildings: modern.buildings.clone(),
+            survivors: modern.survivors.iter().map(SurvivorV5::from).collect(),
+            stock: modern.stock,
+            furnace_level: modern.furnace_level,
+            furnace_lit: modern.furnace_lit,
+            cold_snap: modern.cold_snap,
+            players: modern.players.clone(),
+            phase: modern.phase,
+            events: modern.events.clone(),
+            total_events: modern.total_events,
+            chat: modern.chat.clone(),
+            total_chat: modern.total_chat,
+            pings: modern.pings.clone(),
+            missions: modern.missions.clone(),
+            tunnel: modern.tunnel,
+            graduated: modern.graduated,
+            central: modern.central,
+            techs: modern.techs.clone(),
+            disease_until: modern.disease_until,
+            blizzard_until: modern.blizzard_until,
+            pending_event: modern.pending_event,
+            event_rng: modern.event_rng,
+            guest_perm: modern.guest_perm,
+            owner_id: modern.owner_id,
+            next_id: modern.next_id,
+            rng: modern.rng,
+            central_ledger: modern.central_ledger.clone(),
+            leader: modern.leader,
+            mourning_until: modern.mourning_until,
+            morale: modern.morale,
+        };
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(MAGIC_V5);
+        bytes.extend_from_slice(&bincode::serialize(&v5).unwrap());
+        fs::write(&path, bytes).unwrap();
+
+        let loaded = load_at(&path).expect("V5 save must migrate, never wipe");
+        assert_eq!(
+            loaded.survivors, modern.survivors,
+            "V5 predates chop/carry, but a fresh survivor's default (None/false) matches anyway"
+        );
+        for s in &loaded.survivors {
+            assert_eq!(s.chop_target, None, "V5 predates the chop errand");
+            assert!(!s.carrying_wood, "V5 predates carrying wood");
+        }
+        assert_eq!(loaded.players, modern.players);
+        assert!(loaded.graduated, "graduation must survive migration");
+        assert_eq!(loaded.stock, modern.stock);
+        assert_eq!(loaded.buildings, modern.buildings, "V5 already has level/build_left");
+
+        // And once re-saved (V7, with header), it round-trips as-is.
+        save_at(&loaded, &path).unwrap();
+        assert_eq!(load_at(&path).expect("V7 reload"), loaded);
+        fs::remove_file(&path).ok();
+    }
+
+    /// A world saved under `FCWORLD6` (pre-Tunnel-migrants: no
+    /// `GameState::pending_migrant`) must load and migrate one hop to V7
+    /// with no travelers mid-wait at the tunnel — same non-negotiable
+    /// "never collapses to None" guarantee as V1..V5. `Building` and
+    /// `Survivor` are both unchanged since V6, so they're cloned straight
+    /// from `modern` (no `*V*::from` remap needed, unlike the V4/V5 tests).
+    #[test]
+    fn v6_save_migrates() {
+        use crate::legacy::GameStateV6;
+
+        let path = throwaway_path("v6-migrate");
+        let mut modern = sim::new_game(61, 12);
+        sim::player_joined(&mut modern, 9, "Nodira");
+        modern.graduated = true;
+        let v6 = GameStateV6 {
+            tick: modern.tick,
+            win_days: modern.win_days,
+            tiles: modern.tiles.clone(),
+            buildings: modern.buildings.clone(),
+            survivors: modern.survivors.clone(),
+            stock: modern.stock,
+            furnace_level: modern.furnace_level,
+            furnace_lit: modern.furnace_lit,
+            cold_snap: modern.cold_snap,
+            players: modern.players.clone(),
+            phase: modern.phase,
+            events: modern.events.clone(),
+            total_events: modern.total_events,
+            chat: modern.chat.clone(),
+            total_chat: modern.total_chat,
+            pings: modern.pings.clone(),
+            missions: modern.missions.clone(),
+            tunnel: modern.tunnel,
+            graduated: modern.graduated,
+            central: modern.central,
+            techs: modern.techs.clone(),
+            disease_until: modern.disease_until,
+            blizzard_until: modern.blizzard_until,
+            pending_event: modern.pending_event,
+            event_rng: modern.event_rng,
+            guest_perm: modern.guest_perm,
+            owner_id: modern.owner_id,
+            next_id: modern.next_id,
+            rng: modern.rng,
+            central_ledger: modern.central_ledger.clone(),
+            leader: modern.leader,
+            mourning_until: modern.mourning_until,
+            morale: modern.morale,
+        };
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(MAGIC_V6);
+        bytes.extend_from_slice(&bincode::serialize(&v6).unwrap());
+        fs::write(&path, bytes).unwrap();
+
+        let loaded = load_at(&path).expect("V6 save must migrate, never wipe");
+        assert_eq!(loaded.pending_migrant, None, "V6 predates Tunnel migrants");
+        assert_eq!(loaded.survivors, modern.survivors);
+        assert_eq!(loaded.players, modern.players);
+        assert!(loaded.graduated, "graduation must survive migration");
+        assert_eq!(loaded.stock, modern.stock);
+        assert_eq!(loaded.buildings, modern.buildings, "V6 already has chop/carry");
+
+        // And once re-saved (V7, with header), it round-trips as-is.
+        save_at(&loaded, &path).unwrap();
+        assert_eq!(load_at(&path).expect("V7 reload"), loaded);
         fs::remove_file(&path).ok();
     }
 

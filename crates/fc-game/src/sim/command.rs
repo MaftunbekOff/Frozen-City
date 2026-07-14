@@ -14,12 +14,17 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
     match cmd {
         PlayerCommand::Place { kind, x, y } => {
             if state.can_place(*kind, *x, *y).is_ok() {
-                let warehouse_staffed = state
+                // V0.8: kasalxona/oshxona kabi, ombor darajasi ham
+                // chegirmani kuchaytiradi — eng yuqori darajali ishchili
+                // ombordan olinadi.
+                let warehouse_level_factor = state
                     .buildings
                     .iter()
-                    .any(|b| b.kind == BuildingKind::Warehouse && b.workers > 0 && !b.under_construction());
-                let discount = if warehouse_staffed {
-                    WAREHOUSE_BUILD_DISCOUNT
+                    .filter(|b| b.kind == BuildingKind::Warehouse && b.workers > 0 && !b.under_construction())
+                    .map(|b| b.level_factor())
+                    .fold(0.0f32, f32::max);
+                let discount = if warehouse_level_factor > 0.0 {
+                    (1.0 - (1.0 - WAREHOUSE_BUILD_DISCOUNT) * warehouse_level_factor).max(0.1)
                 } else {
                     1.0
                 };
@@ -81,10 +86,14 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
             if let Some(i) = state
                 .buildings
                 .iter()
-                .position(|b| b.id == *building && b.kind != BuildingKind::Furnace)
+                .position(|b| b.id == *building && b.kind.buildable())
             {
                 let b = state.buildings.remove(i);
-                state.stock.wood += b.kind.cost_wood() as f32 * DEMOLISH_REFUND;
+                // Refund scales with the building's level — the same way its
+                // upgrade cost did on the way up (`upgrade_cost_wood`) — so
+                // tearing down a heavily-upgraded building isn't worth
+                // identical salvage to a brand-new one.
+                state.stock.wood += b.kind.cost_wood() as f32 * DEMOLISH_REFUND * b.level_factor();
                 // The building's own worker slots go with it; don't leave any
                 // named survivor pointing at a building id that no longer exists.
                 for s in state.survivors.iter_mut() {
@@ -165,6 +174,18 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                         b.workers += 1;
                     }
                     state.survivors[s_idx].assigned_building = Some(*new_id);
+                    // Reassigning away from the Furnace (its only source)
+                    // drops any in-progress chop errand — they're not
+                    // building it anymore, so nothing should keep walking
+                    // them toward a tree or back. If they'd already chopped
+                    // a log and were mid-walk home, credit it to the
+                    // stockpile now — the tree is already gone either way,
+                    // so dropping the log too would just destroy it.
+                    if state.survivors[s_idx].carrying_wood {
+                        state.stock.wood += 1.0;
+                    }
+                    state.survivors[s_idx].chop_target = None;
+                    state.survivors[s_idx].carrying_wood = false;
                     // A different building KIND resets training progress —
                     // reassigning within the same kind (e.g. one Sawmill to
                     // another) keeps it, since the trade is what's learned,
@@ -181,6 +202,11 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                         b.workers = b.workers.saturating_sub(1);
                     }
                     state.survivors[s_idx].assigned_building = None;
+                    if state.survivors[s_idx].carrying_wood {
+                        state.stock.wood += 1.0;
+                    }
+                    state.survivors[s_idx].chop_target = None;
+                    state.survivors[s_idx].carrying_wood = false;
                     // Plain unassignment does NOT reset xp/trained_kind —
                     // only an assignment to a genuinely different kind does
                     // (see the `Some(new_id)` arm above). A temporarily
@@ -203,19 +229,84 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                     b.workers = b.workers.saturating_sub(1);
                 }
             }
+            state.survivors[s_idx].assigned_building = None;
+            // A log already chopped and mid-carry isn't dropped on the
+            // ground when redirected — it's credited immediately, same as a
+            // manual `ChopTile` chop (see below).
+            if state.survivors[s_idx].carrying_wood {
+                state.stock.wood += 1.0;
+            }
+            let s = &mut state.survivors[s_idx];
+            s.chop_target = None;
+            s.carrying_wood = false;
+            s.move_target = Some((*x, *y));
+        }
+        PlayerCommand::ChopTile { survivor, x, y } => {
+            if !in_bounds(*x as i32, *y as i32) {
+                return;
+            }
+            let idx = tile_index(*x, *y);
+            if state.tiles[idx].terrain != Terrain::Forest || state.tiles[idx].deposit == 0 {
+                return;
+            }
+            let Some(s_idx) = state.survivors.iter().position(|s| s.id == *survivor) else {
+                return;
+            };
+            // A manual chop is the same kind of override `MoveSurvivor` is —
+            // it replaces whatever they were doing, including a
+            // Furnace-building errand already in progress (see `tick.rs`'s
+            // chop/carry block, which only treats `chop_target` as a Furnace
+            // delivery while `assigned_building` still points at it).
+            if let Some(prev_id) = state.survivors[s_idx].assigned_building {
+                if let Some(b) = state.buildings.iter_mut().find(|b| b.id == prev_id) {
+                    b.workers = b.workers.saturating_sub(1);
+                }
+            }
+            // Redirecting to a new tree drops a log already chopped and
+            // mid-carry the same way — credited immediately rather than lost.
+            if state.survivors[s_idx].carrying_wood {
+                state.stock.wood += 1.0;
+            }
             let s = &mut state.survivors[s_idx];
             s.assigned_building = None;
-            s.move_target = Some((*x, *y));
+            s.move_target = None;
+            s.chop_target = Some((*x, *y));
+            s.carrying_wood = false;
         }
         PlayerCommand::SetLeader { survivor } => {
             if state.survivors.iter().any(|s| s.id == *survivor) {
                 state.leader = Some(*survivor);
+                // A freshly appointed leader ends mourning immediately —
+                // `leader_multiplier()` already gives a living leader
+                // priority over an active mourning penalty, so leaving
+                // `mourning_until` untouched would just let the client's
+                // (mourning_active()-driven) UI disagree with the
+                // production math for the rest of the window.
+                state.mourning_until = 0;
                 let name = state.survivors.iter().find(|s| s.id == *survivor).unwrap().name.clone();
                 push_event(state, format!("{} has been chosen as leader.", name));
             }
         }
         PlayerCommand::SetFurnaceLevel { level } => {
-            state.furnace_level = (*level).min(3);
+            // Can't dial in a burn level before the furnace itself exists —
+            // it's still a construction site until `build_left` runs out
+            // (`tick.rs` lights it and sets the level to 1 at that point).
+            // A LATER V0.9 level upgrade (`b.level` 1-10) also re-sets
+            // `build_left`, but by then `state.furnace_level` is already
+            // nonzero, so that alone wouldn't re-block this (mirrors
+            // `tick.rs`'s `furnace_info`/construction-loop gating, same
+            // `state.furnace_level == 0` signal) — but a rough "gulxan"
+            // (levels 1-6) has no damper to dial in either way: only once
+            // it's grown into an established `Pech` (`b.level >= 7`,
+            // matching `render/buildings.rs`'s two-tier model) is the burn
+            // setting under player control at all.
+            let furnace = state.buildings.iter().find(|b| b.kind == BuildingKind::Furnace);
+            let still_building = state.furnace_level == 0
+                && furnace.is_some_and(Building::under_construction);
+            let too_young = furnace.is_none_or(|b| b.level < 7);
+            if !still_building && !too_young {
+                state.furnace_level = (*level).min(3);
+            }
         }
         PlayerCommand::InvestTunnel => {
             if state.tunnel.unlocked
@@ -293,10 +384,12 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                     let b = &state.buildings[i];
                     (b.kind, b.level, b.under_construction())
                 };
-                // Faqat bitgan, qurilsa bo'ladigan va maksimumga yetmagan
+                // Faqat bitgan, yangilansa bo'ladigan va maksimumga yetmagan
                 // bino yangilanadi; yangilashlar zanjir — keyingisi faqat
-                // oldingisi bitgach.
-                if !kind.buildable() || busy || level >= BUILDING_MAX_LEVEL {
+                // oldingisi bitgach. `upgradeable` (`buildable`dan farqli) —
+                // Pech ham shu yo'ldan o'sadi, garchi qayta joylashtirib
+                // yoki buzib bo'lmasa ham.
+                if !kind.upgradeable() || busy || level >= BUILDING_MAX_LEVEL {
                     return;
                 }
                 let cost = kind.upgrade_cost_wood(level + 1) as f32;
@@ -313,7 +406,12 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                 b.level += 1;
                 b.build_left = kind.upgrade_workdays(b.level);
                 // Mavjud ishchilar ustaga aylanadi; brigada to'lmagan bo'lsa
-                // bo'sh ishchilardan avtomatik to'ldiriladi (Place'dagi kabi).
+                // bo'sh ishchilardan avtomatik to'ldiriladi (Place'dagi kabi) —
+                // lekin MARKAZIY olamda emas: `Place` singari, u yerda har bir
+                // aholi akkauntga tegishli, shuning uchun boshqa akkauntning
+                // bo'sh ko'chmanchisini so'rovsiz jalb qilib bo'lmaydi (egasi
+                // o'zi `AssignSurvivor` bilan biriktiradi).
+                let idle = if state.central { 0 } else { idle };
                 let add = (CONSTRUCTION_CREW_MAX.saturating_sub(b.workers) as u32).min(idle) as u8;
                 b.workers += add;
                 let target = b.level;
@@ -334,9 +432,19 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
 /// headcount uses. Composes the profession-match bonus with the XP/level
 /// bonus (see `xp_level` / `XP_LEVEL_BONUS_PER_LEVEL`) — both are per-survivor
 /// multipliers layered on top of the flat baseline of 1.0.
-pub(crate) fn survivor_contribution(s: &Survivor, kind: BuildingKind) -> f32 {
-    let profession_factor =
-        if s.profession.matching_building() == kind { PROFESSION_MATCH_BONUS } else { 1.0 };
+///
+/// The current leader (`leader`, i.e. `GameState.leader`) always gets the
+/// profession-match bonus regardless of their own trade — leading makes them
+/// a generalist for as long as they hold the seat, not a permanent change to
+/// `Survivor::profession` (which never changes after spawn); appoint someone
+/// else, or let the seat go empty, and they're back to their own trade's
+/// normal match/mismatch behavior next tick.
+pub(crate) fn survivor_contribution(s: &Survivor, kind: BuildingKind, leader: Option<u32>) -> f32 {
+    let profession_factor = if leader == Some(s.id) || s.profession.matching_building() == kind {
+        PROFESSION_MATCH_BONUS
+    } else {
+        1.0
+    };
     let level_factor = if s.trained_kind == Some(kind) {
         1.0 + xp_level(s.xp) as f32 * XP_LEVEL_BONUS_PER_LEVEL
     } else {
@@ -354,15 +462,15 @@ pub(crate) fn survivor_contribution(s: &Survivor, kind: BuildingKind) -> f32 {
 /// yozmaydi. Sim o'zi hech qachon chaqirmaydi; bitgan binoning EFFEKTINI
 /// sinaydigan testlar qurilish bosqichini shu bilan o'tkazib yuboradi.
 pub fn finish_all_construction(state: &mut GameState) {
-    let mut finished: Vec<(u32, u8)> = Vec::new();
+    let mut finished: Vec<(u32, u8, BuildingKind)> = Vec::new();
     for b in state.buildings.iter_mut() {
         if b.build_left > 0.0 {
             b.build_left = 0.0;
             b.workers = b.workers.min(b.kind.max_workers());
-            finished.push((b.id, b.kind.max_workers()));
+            finished.push((b.id, b.kind.max_workers(), b.kind));
         }
     }
-    for (id, max) in finished {
+    for (id, max, kind) in finished {
         let mut named = 0u8;
         for s in state.survivors.iter_mut() {
             if s.assigned_building == Some(id) {
@@ -371,6 +479,17 @@ pub fn finish_all_construction(state: &mut GameState) {
                     s.assigned_building = None;
                 }
             }
+        }
+        // Mirrors the tick.rs completion arm's two top-level fields (minus
+        // the event, matching this helper's existing no-event-logging
+        // contract) so a test that skips construction via this shortcut
+        // sees the same lit/level state a real tick would have produced —
+        // but only for the genuine first ignition. A V0.9 level upgrade
+        // (`furnace_level` already > 0) must NOT reset the player's chosen
+        // burn intensity back down to 1.
+        if kind == BuildingKind::Furnace && state.furnace_level == 0 {
+            state.furnace_lit = true;
+            state.furnace_level = 1;
         }
     }
 }

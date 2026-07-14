@@ -21,13 +21,46 @@ pub struct BuildingVizEntry {
     pub entity: Entity,
     pub level: u8,
     pub under_construction: bool,
+    /// `GameState.furnace_level` at spawn time — only meaningful for the
+    /// Furnace (0 for every other kind), which regrows its log-teepee
+    /// structure a tier at a time as this rises (see `spawn_building`'s
+    /// `BuildingKind::Furnace` arm). Tracked here so `sync_buildings`
+    /// rebuilds the furnace when the player changes its burn level, even
+    /// though `level`/`under_construction` didn't change.
+    pub furnace_level: u8,
+    /// `GameState.tunnel` at spawn time, encoded as 0 = not yet unlocked
+    /// (sealed mound) or `1 + stage` while unlocked (0..=3 excavation
+    /// stages) — only meaningful for the Tunnel (0 for every other kind).
+    /// Same rebuild-on-change trick as `furnace_level`.
+    pub tunnel_stage: u8,
 }
 
 #[derive(Resource, Default)]
 pub struct BuildingViz(pub HashMap<u32, BuildingVizEntry>);
 
 #[derive(Resource, Default)]
-pub struct SurvivorViz(pub HashMap<u32, Entity>);
+pub struct SurvivorViz(pub HashMap<u32, SurvivorVizEntry>);
+
+/// Traveler figures waiting at the Tunnel (`GameState.pending_migrant`) —
+/// purely cosmetic placeholders, not simulated `Survivor`s (no id in
+/// `state.survivors`, no XP/carry props). `sync_migrants` rebuilds the whole
+/// set whenever the pending batch's identity (`count`, `expires`) changes,
+/// the same trigger-on-change trick `BuildingViz` uses.
+#[derive(Resource, Default)]
+pub struct MigrantViz {
+    pub entities: Vec<Entity>,
+    pub key: Option<(u32, u64)>,
+}
+
+/// `sync_survivors` rebuilds a survivor's whole body when `is_leader`
+/// changes (appointment, succession, or losing the seat) — the trade-vs-
+/// leader look swaps entire meshes (coat color, headwear, tool vs.
+/// ceremonial staff), not just a material tweak, so it's simplest to
+/// despawn and respawn like `BuildingVizEntry` does for the Furnace.
+pub struct SurvivorVizEntry {
+    pub entity: Entity,
+    pub is_leader: bool,
+}
 
 /// Aholining XP-daraja anjomi (V0.8 ko'rinish darajalari): `level` — shu
 /// anjom ko'rinishi uchun zarur minimal `xp_level` (1 = peshona tasmasi,
@@ -86,18 +119,33 @@ pub struct SurvivorDot {
     pub id: u32,
 }
 
-/// Which profession model variant this survivor root spawned with, plus the
-/// sim facts the animation driver needs (`assets::SurvivorModels` is indexed
-/// by `variant`). Lives on the same root entity as [`SurvivorDot`]; the
-/// spawned `AnimationPlayer`s sit deep inside the glTF scene instance, so
-/// `setup/drive_survivor_animations` walk up the parent chain to read this.
+/// Sim facts the procedural body needs after spawn. Lives on the same root
+/// entity as [`SurvivorDot`]. There's no profession field — a survivor's
+/// trade never changes after spawn (assigned once from the sim RNG), so the
+/// coat/headwear/tool are picked once in `spawn_survivor_body` and never
+/// need to be looked up again.
 #[derive(Component)]
 pub struct SurvivorRig {
-    /// Index into `SurvivorModels::variants` (`Profession::ALL` order).
-    pub variant: usize,
-    /// Assigned to a building — walking survivors haul supplies
-    /// (`Walk_Carry`) instead of strolling empty-handed.
+    /// Assigned to a building — shows the carried-resource prop
+    /// (`SurvivorCarry`) while walking instead of strolling empty-handed.
     pub carrying: bool,
+}
+
+/// One of a survivor's two legs — a direct child of the [`SurvivorDot`]
+/// root, rotated by `animate_survivor_legs` into a walk-cycle swing while
+/// `Wander::moving` is true. `phase` offsets the two legs by half a cycle so
+/// they alternate instead of moving in lockstep.
+#[derive(Component)]
+pub struct SurvivorLeg {
+    pub phase: f32,
+}
+
+/// The small carried-resource prop shown while the owning survivor's
+/// `SurvivorRig::carrying` is true (mirrors [`SurvivorGear`]'s
+/// id-keyed visibility toggle, driven from `sync_survivors`).
+#[derive(Component)]
+pub struct SurvivorCarry {
+    pub id: u32,
 }
 
 /// Drives a survivor entity toward the sim-authoritative position
@@ -115,6 +163,10 @@ pub struct Wander {
     /// entity has visually caught up to `sim_pos`.
     pub shuffle_target: Vec3,
     pub speed: f32,
+    /// Actively walking toward `sim_pos` this frame (as opposed to the idle
+    /// shuffle) — read by `animate_survivor_legs` to gate the walk-cycle
+    /// swing so standing survivors don't shuffle their feet.
+    pub moving: bool,
 }
 
 #[derive(Component)]

@@ -37,4 +37,13 @@ pub enum PlayerCommand {
     /// building becomes a construction site again (`Building::build_left`)
     /// and produces nothing until its crew finishes the work.
     UpgradeBuilding { building: u32 },
+    /// Manually send a named survivor to chop a specific forest tile —
+    /// unassigns them from work exactly like `MoveSurvivor` (a manual
+    /// command always overrides the standing job), then walks them there
+    /// and chops it on arrival (`Survivor::chop_target`, `tick.rs`'s
+    /// chop/carry block). Unlike the Furnace-building errand that same
+    /// field also drives, a manual chop credits the wood to the stockpile
+    /// immediately on the chop — there's no assigned building to carry it
+    /// back to.
+    ChopTile { survivor: u32, x: u8, y: u8 },
 }

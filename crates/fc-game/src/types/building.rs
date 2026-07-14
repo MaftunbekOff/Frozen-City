@@ -18,6 +18,12 @@ pub enum BuildingKind {
     Hospital,
     Kitchen,
     Warehouse,
+    /// V0.9: the Tunnel to the Global World — a single always-present,
+    /// non-buildable fixture (same convention as `Furnace`), placed once by
+    /// `mapgen`. Its excavation state lives in `GameState.tunnel`
+    /// (`TunnelState`), not on this `Building` (`level`/`build_left` are
+    /// unused/inert for it — see `render/buildings.rs`).
+    Tunnel,
 }
 
 impl BuildingKind {
@@ -43,6 +49,7 @@ impl BuildingKind {
             BuildingKind::Hospital => "Hospital",
             BuildingKind::Kitchen => "Kitchen",
             BuildingKind::Warehouse => "Warehouse",
+            BuildingKind::Tunnel => "Tunnel",
         }
     }
 
@@ -57,12 +64,19 @@ impl BuildingKind {
             BuildingKind::Hospital => "+",
             BuildingKind::Kitchen => "K",
             BuildingKind::Warehouse => "W",
+            BuildingKind::Tunnel => "U",
         }
     }
 
     pub fn cost_wood(self) -> u32 {
         match self {
-            BuildingKind::Furnace => 0,
+            // Never actually spent on `Place` (neither kind is `buildable`),
+            // but the Furnace's value here still matters: it's the base
+            // `upgrade_cost_wood`/`upgrade_workdays` scale for its (V0.9)
+            // level 1-10 upgrade path (see `upgradeable`). The Tunnel has no
+            // such path, so it stays 0.
+            BuildingKind::Furnace => 50,
+            BuildingKind::Tunnel => 0,
             BuildingKind::Tent => 15,
             BuildingKind::Sawmill => 25,
             BuildingKind::CoalMine => 30,
@@ -76,7 +90,7 @@ impl BuildingKind {
 
     pub fn max_workers(self) -> u8 {
         match self {
-            BuildingKind::Furnace | BuildingKind::Tent => 0,
+            BuildingKind::Furnace | BuildingKind::Tent | BuildingKind::Tunnel => 0,
             BuildingKind::Sawmill => 2,
             BuildingKind::CoalMine => 3,
             BuildingKind::HunterHut => 2,
@@ -103,13 +117,23 @@ impl BuildingKind {
 
     pub fn size(self) -> (u8, u8) {
         match self {
-            BuildingKind::Furnace => (2, 2),
+            BuildingKind::Furnace | BuildingKind::Tunnel => (2, 2),
             _ => (1, 1),
         }
     }
 
     pub fn buildable(self) -> bool {
-        self != BuildingKind::Furnace
+        !matches!(self, BuildingKind::Furnace | BuildingKind::Tunnel)
+    }
+
+    /// V0.9: whether `UpgradeBuilding` accepts this kind — distinct from
+    /// `buildable` (which gates `Place`/`Demolish`). The Furnace is the one
+    /// exception: never placeable or demolishable (a single permanent
+    /// fixture), but still growable — level 1-6 stays a modest "gulxan"
+    /// (campfire), 7-10 becomes an established "Pech" (see
+    /// `render/buildings.rs`'s two-tier model). The Tunnel has no such path.
+    pub fn upgradeable(self) -> bool {
+        self.buildable() || self == BuildingKind::Furnace
     }
 
     /// V0.8: worker-days of construction to erect this building at level 1.
@@ -139,6 +163,7 @@ impl BuildingKind {
             BuildingKind::Hospital => "Staffed: heals survivors faster.",
             BuildingKind::Kitchen => "Staffed: the city eats more efficiently.",
             BuildingKind::Warehouse => "Staffed: new construction wastes less wood.",
+            BuildingKind::Tunnel => "The way to the Global World. Travelers pass through once it's open.",
         }
     }
 }

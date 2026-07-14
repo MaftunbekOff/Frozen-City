@@ -158,8 +158,11 @@ fn tunnel_migration_ownership_and_restart() {
     seed_two_accounts(&db_path);
 
     // Aziz's personal world exists on disk and has finished the Tunnel; the
-    // server will load exactly this when his account world spawns.
-    let mut aziz_world = sim::new_game(777, 12);
+    // server will load exactly this when his account world spawns. Use the
+    // bootstrapped starting state (furnace already lit, full population)
+    // since this test cares about a settled personal world with more than
+    // a fresh leader-only opening, not the furnace-building intro itself.
+    let mut aziz_world = sim::new_game_bootstrapped(777, 12);
     aziz_world.graduated = true;
     let aziz_start_pop = aziz_world.survivors.len();
     assert!(aziz_start_pop > CENTRAL_MIGRANTS_PER_ACCOUNT);

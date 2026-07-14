@@ -31,8 +31,8 @@ fn greenhouse_produces_food() {
     // Two otherwise-identical worlds; only `experiment` gets a staffed
     // Greenhouse. Comparing against the control isolates the greenhouse's
     // contribution from the (identical, seed-driven) baseline food economy.
-    let mut control = sim::new_game(SEED, 12);
-    let mut experiment = sim::new_game(SEED, 12);
+    let mut control = sim::new_game_bootstrapped(SEED, 12);
+    let mut experiment = sim::new_game_bootstrapped(SEED, 12);
 
     experiment.stock.wood = 500.0;
     let (x, y) = find_spot(&experiment, BuildingKind::Greenhouse);
@@ -62,11 +62,11 @@ fn greenhouse_produces_food() {
 
 #[test]
 fn staffed_hospital_speeds_healing() {
-    let mut control = sim::new_game(SEED, 12);
-    let mut experiment = sim::new_game(SEED, 12);
+    let mut control = sim::new_game_bootstrapped(SEED, 12);
+    let mut experiment = sim::new_game_bootstrapped(SEED, 12);
 
     // Same low-HP starting point in both runs. The furnace stays lit at
-    // level 1 (new_game's default), so neither population is freezing.
+    // level 1 (new_game_bootstrapped's default), so neither population is freezing.
     control.survivors[0].hp = 40.0;
     control.survivors[0].hunger = 10.0;
     experiment.survivors[0].hp = 40.0;

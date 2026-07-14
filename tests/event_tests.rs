@@ -180,7 +180,12 @@ fn caravan_expires_when_ignored() {
 fn caravan_accept_respects_capacity_and_food() {
     // Case A: no housing at all -> no room for anyone, but the offer is
     // still resolved (pending cleared) and no food is spent.
-    let mut state = sim::new_game(SEED, 12);
+    // Needs the bootstrapped (8-survivor, furnace-lit) starting point: with
+    // only `new_game`'s single leader, space = housing_capacity() + 2 - pop
+    // = 0 + 2 - 1 = 1, which *would* have room for one refugee — the zero-
+    // housing "no room" case only holds once population outstrips the +2
+    // buffer, as it does at the old 8-survivor start.
+    let mut state = sim::new_game_bootstrapped(SEED, 12);
     // V0.7: RespondEvent needs a living leader — see the comment in
     // `caravan_accept_adds_survivors_and_costs_food`.
     state.leader = Some(state.survivors[0].id);

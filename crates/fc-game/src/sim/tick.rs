@@ -86,11 +86,23 @@ pub fn tick(state: &mut GameState) {
     // bitgunicha hech narsa ishlab chiqarmaydi va hech kimni sig'dirmaydi
     // (production/housing hisoblari `under_construction`ni tekshiradi). ---
     for i in 0..state.buildings.len() {
-        let (crew, left) = {
+        let (crew, left, kind) = {
             let b = &state.buildings[i];
-            (b.workers, b.build_left)
+            (b.workers, b.build_left, b.kind)
         };
-        if left <= 0.0 || crew == 0 {
+        // While the Furnace is still on its very first (unlit) construction,
+        // `build_left` is cleared by chop-and-carry log deliveries instead
+        // (see the dedicated block further down) — the generic worker-days
+        // tick-down below doesn't apply yet. Once it's been lit at least
+        // once (`state.furnace_level > 0`, which — unlike the moment-to-
+        // moment `furnace_lit` fuel flag above — never resets back to 0),
+        // any further `build_left` came from a V0.9 level-1-10 upgrade
+        // (`UpgradeBuilding`) and progresses exactly like every other
+        // building's construction.
+        if left <= 0.0
+            || crew == 0
+            || (kind == BuildingKind::Furnace && state.furnace_level == 0)
+        {
             continue;
         }
         let mut finished: Option<(BuildingKind, u32, u8, u8)> = None;
@@ -118,6 +130,11 @@ pub fn tick(state: &mut GameState) {
                     }
                 }
             }
+            // The Furnace's very first ignition never reaches this arm (it's
+            // excluded above while `state.furnace_level == 0`, and completes
+            // via the dedicated chop-and-carry block instead) — so by the
+            // time a Furnace shows up here, `level` is always a genuine V0.9
+            // upgrade (>= 2), same as any other building's.
             if level > 1 {
                 push_event(state, format!("{} upgraded to L{}.", kind.name(), level));
             } else {
@@ -157,7 +174,7 @@ pub fn tick(state: &mut GameState) {
         for s in &state.survivors {
             if s.assigned_building == Some(b_id) {
                 named += 1;
-                units += survivor_contribution(s, kind);
+                units += survivor_contribution(s, kind, state.leader);
             }
         }
         units += (workers.saturating_sub(named)) as f32;
@@ -245,9 +262,11 @@ pub fn tick(state: &mut GameState) {
     // building: named Hospital workers contribute their boosted share,
     // remaining anonymous headcount contributes 1.0 each (identical to plain
     // `hospital_workers` when nobody is named — same neutrality property as
-    // the main production loop). Kitchen's effect is a flat boolean toggle
-    // (`kitchen_staffed`, `KITCHEN_FOOD_EFFICIENCY`) with no scalar to boost,
-    // so a matching Cook currently grants nothing — documented, not a bug.
+    // the main production loop). Kitchen's effect is still a flat boolean
+    // toggle in terms of WHO staffs it (`kitchen_staffed`) — a matching Cook
+    // currently grants nothing beyond any other worker — documented, not a
+    // bug; but it DOES now scale with the staffed Kitchen's own level, same
+    // as Hospital (`kitchen_level_factor`, below).
     let mut hospital_units = 0.0f32;
     for b in state
         .buildings
@@ -258,7 +277,7 @@ pub fn tick(state: &mut GameState) {
             state.survivors.iter().filter(|s| s.assigned_building == Some(b.id)).collect();
         let mut units = 0.0f32;
         for s in &named {
-            units += survivor_contribution(s, BuildingKind::Hospital);
+            units += survivor_contribution(s, BuildingKind::Hospital, state.leader);
         }
         units += b.workers.saturating_sub(named.len() as u8) as f32;
         // V0.8: kasalxona darajasi parvarish kuchini ham oshiradi.
@@ -266,6 +285,12 @@ pub fn tick(state: &mut GameState) {
     }
     let kitchen_staffed = state.buildings.iter()
         .any(|b| b.kind == BuildingKind::Kitchen && b.workers > 0 && !b.under_construction());
+    // V0.8: kasalxona kabi, oshxona darajasi ham samaradorlikni oshiradi —
+    // eng yuqori darajali ishchili oshxonaning `level_factor()`i olinadi.
+    let kitchen_level_factor = state.buildings.iter()
+        .filter(|b| b.kind == BuildingKind::Kitchen && b.workers > 0 && !b.under_construction())
+        .map(|b| b.level_factor())
+        .fold(0.0f32, f32::max);
     let medicine_factor = if state.has_tech(Tech::Medicine) {
         TECH_MEDICINE_CARE
     } else {
@@ -279,9 +304,15 @@ pub fn tick(state: &mut GameState) {
     } else {
         1.0
     };
-    let portion = FOOD_PER_SURVIVOR_DAY / TICKS_PER_DAY as f32
-        * if kitchen_staffed { KITCHEN_FOOD_EFFICIENCY } else { 1.0 }
-        * rationing_factor;
+    // The base discount (1.0 - KITCHEN_FOOD_EFFICIENCY) grows with the best
+    // staffed kitchen's level, floored at 10% of a portion so it can never
+    // reach (or cross) zero at high levels.
+    let kitchen_efficiency = if kitchen_level_factor > 0.0 {
+        (1.0 - (1.0 - KITCHEN_FOOD_EFFICIENCY) * kitchen_level_factor).max(0.1)
+    } else {
+        1.0
+    };
+    let portion = FOOD_PER_SURVIVOR_DAY / TICKS_PER_DAY as f32 * kitchen_efficiency * rationing_factor;
     let insulation_bonus = if state.has_tech(Tech::Insulation) {
         TECH_INSULATION_WARMTH
     } else {
@@ -300,24 +331,87 @@ pub fn tick(state: &mut GameState) {
         .iter()
         .map(|b| (b.id, (b.kind, b.x, b.y, b.workers)))
         .collect();
+    // Furnace snapshot for the chop/carry cycle below — `None`/not-building
+    // once it's lit, which quietly stops the whole dance for good (a V0.9
+    // level upgrade afterward re-sets `build_left` but must NOT restart the
+    // chop/carry dance — that crew just contributes worker-days like any
+    // other building's, see `tick`'s construction loop). Taken once up
+    // front for the same reason as `building_lookup`: reading
+    // `state.buildings` inside the survivors loop below would conflict with
+    // iterating `state.survivors` mutably.
+    let furnace_info = state
+        .buildings
+        .iter()
+        .find(|b| b.kind == BuildingKind::Furnace)
+        .map(|b| (b.id, b.x, b.y, b.under_construction() && state.furnace_level == 0));
+    // Deferred mutations the chop/carry cycle collects instead of touching
+    // `state.tiles`/`state.buildings`/`state.stock` directly from inside the
+    // survivors loop (applied once the loop's mutable borrow of
+    // `state.survivors` ends).
+    let mut chopped_tiles: Vec<(u8, u8)> = Vec::new();
+    let mut logs_delivered: u32 = 0;
+    let mut manual_wood_gained: u32 = 0;
     for s in state.survivors.iter_mut() {
-        // --- Movement: move_target (player-issued walk) takes priority over
-        // the assigned building's location; with neither, stand put.
-        let goal = s.move_target.map(|(x, y)| (x as f32 + 0.5, y as f32 + 0.5)).or_else(|| {
-            s.assigned_building
-                .and_then(|id| building_lookup.get(&id))
-                .map(|(_, bx, by, _)| (*bx as f32 + 0.5, *by as f32 + 0.5))
-        });
+        // --- Movement: move_target (player-issued walk) takes priority,
+        // then a furnace-building chop errand (`chop_target`), then the
+        // assigned building's location; with none of the three, stand put.
+        let goal = s.move_target.map(|(x, y)| (x as f32 + 0.5, y as f32 + 0.5))
+            .or_else(|| s.chop_target.map(|(x, y)| (x as f32 + 0.5, y as f32 + 0.5)))
+            .or_else(|| {
+                s.assigned_building
+                    .and_then(|id| building_lookup.get(&id))
+                    .map(|(_, bx, by, _)| (*bx as f32 + 0.5, *by as f32 + 0.5))
+            });
+        let mut arrived_at_chop_target = false;
+        let mut arrived_carrying_home = false;
         if let Some((gx, gy)) = goal {
             let (dx, dy) = (gx - s.x, gy - s.y);
             let dist = (dx * dx + dy * dy).sqrt();
             if dist <= ARRIVAL_EPSILON {
                 s.x = gx;
                 s.y = gy;
-                s.move_target = None; // arrived: clear a walk goal, then stand idle
+                if s.move_target.is_some() {
+                    s.move_target = None; // arrived: clear a walk goal, then stand idle
+                } else if s.chop_target.is_some() {
+                    arrived_at_chop_target = true;
+                } else if s.carrying_wood {
+                    arrived_carrying_home = true;
+                }
             } else {
                 s.x += dx / dist * SURVIVOR_SPEED_PER_TICK;
                 s.y += dy / dist * SURVIVOR_SPEED_PER_TICK;
+            }
+        }
+
+        // --- Chop/carry cycle: `chop_target` drives two different errands.
+        // A Furnace-building one (`assigned_building` still points at a
+        // still-unbuilt Furnace) auto-picks a new tree every time it's idle
+        // and carries each chopped log home to count toward
+        // `FURNACE_LOGS_NEEDED`. A manual one (`PlayerCommand::ChopTile`,
+        // `assigned_building` cleared when it was issued) is one-shot —
+        // chopping credits the stockpile immediately, since there's no
+        // assigned building to carry the log back to, and the survivor then
+        // just stands there idle rather than auto-continuing.
+        let furnace_errand = furnace_info.filter(|&(furnace_id, _, _, still_building)| {
+            still_building && s.assigned_building == Some(furnace_id)
+        });
+        if arrived_at_chop_target {
+            if let Some(pos) = s.chop_target.take() {
+                chopped_tiles.push(pos);
+                if furnace_errand.is_some() {
+                    s.carrying_wood = true;
+                } else {
+                    manual_wood_gained += 1;
+                }
+            }
+        } else if arrived_carrying_home {
+            // Only a Furnace errand ever sets `carrying_wood`, so this only
+            // ever fires for that case.
+            s.carrying_wood = false;
+            logs_delivered += 1;
+        } else if let Some((_, fx, fy, _)) = furnace_errand {
+            if s.chop_target.is_none() && !s.carrying_wood {
+                s.chop_target = find_forest_tile(&state.tiles, fx, fy, FURNACE_CHOP_RADIUS);
             }
         }
 
@@ -331,6 +425,55 @@ pub fn tick(state: &mut GameState) {
         if let Some((kind, _, _, workers)) = s.assigned_building.and_then(|id| building_lookup.get(&id)) {
             if *workers > 0 && s.trained_kind == Some(*kind) {
                 s.xp += 1.0 / TICKS_PER_DAY as f32;
+            }
+        }
+    }
+
+    // Apply the chop/carry cycle's deferred mutations (collected above
+    // instead of touching `state.tiles`/`state.buildings` while
+    // `state.survivors` was borrowed mutably): each chopped tile loses one
+    // unit of wood, and each delivered log reduces the Furnace's remaining
+    // `build_left` by exactly one — completing (lighting) it the moment
+    // `FURNACE_LOGS_NEEDED` round trips have landed.
+    for (tx, ty) in chopped_tiles {
+        let idx = tile_index(tx, ty);
+        if state.tiles[idx].terrain == Terrain::Forest && state.tiles[idx].deposit > 0 {
+            state.tiles[idx].deposit -= 1;
+            if state.tiles[idx].deposit == 0 {
+                state.tiles[idx].terrain = Terrain::Snow;
+            }
+        }
+    }
+    // A manually-chopped log (`PlayerCommand::ChopTile`, not part of a
+    // Furnace-building errand) has nowhere assigned to carry it to — credit
+    // the stockpile the instant it's chopped instead.
+    if manual_wood_gained > 0 {
+        state.stock.wood += manual_wood_gained as f32;
+    }
+    if logs_delivered > 0 {
+        if let Some(fi) = state.buildings.iter().position(|b| b.kind == BuildingKind::Furnace) {
+            state.buildings[fi].build_left =
+                (state.buildings[fi].build_left - logs_delivered as f32).max(0.0);
+            if state.buildings[fi].build_left <= 0.0 {
+                let id = state.buildings[fi].id;
+                for s in state.survivors.iter_mut() {
+                    if s.assigned_building == Some(id) {
+                        // Furnace.max_workers() == 0 once built — nobody
+                        // stays crewing a lit furnace, same as the generic
+                        // construction-complete arm above frees an
+                        // over-capacity crew. Also drop any leftover
+                        // chop-errand state so a survivor mid-trip when the
+                        // LAST log lands doesn't keep walking toward a tree
+                        // (or home) forever with nothing tracking them.
+                        s.assigned_building = None;
+                        s.chop_target = None;
+                        s.carrying_wood = false;
+                    }
+                }
+                state.buildings[fi].workers = 0;
+                state.furnace_lit = true;
+                state.furnace_level = 1;
+                push_event(state, "The furnace is lit! Others will come seeking its warmth.".to_string());
             }
         }
     }
@@ -464,7 +607,13 @@ pub fn tick(state: &mut GameState) {
     }
 
     // --- Morning arrivals ---
-    if state.tick % TICKS_PER_DAY == ARRIVAL_TICK && state.day() >= 2 && rng.chance(0.55) {
+    // Nobody comes seeking a furnace that isn't lit yet — the leader has to
+    // finish building it first (see the Construction section above).
+    if state.tick % TICKS_PER_DAY == ARRIVAL_TICK
+        && state.day() >= 2
+        && state.furnace_lit
+        && rng.chance(0.55)
+    {
         let pop = state.survivors.len() as i32;
         let space = state.housing_capacity() as i32 + 2 - pop;
         let n = (1 + rng.below(3) as i32).min(space).min(MAX_POPULATION - pop);
@@ -537,6 +686,49 @@ pub fn tick(state: &mut GameState) {
     if !state.tunnel.unlocked && state.all_missions_done() {
         state.tunnel.unlocked = true;
         push_event(state, "All missions complete - the Tunnel can now be excavated!");
+    }
+
+    // --- Tunnel migrants ---
+    // Once the Tunnel is unlocked it starts letting travelers through — this
+    // is independent of `InvestTunnel`'s excavation-stage megaproject above;
+    // the tunnel doesn't need to be fully dug to admit people, just breached.
+    // Unlike the caravan offer this needs no leader decision: it resolves
+    // automatically the moment the colony has room, checked every tick (not
+    // just on the day it spawned) so building a tent while travelers wait
+    // lets them in immediately — see `render`'s waiting figures at the
+    // tunnel mouth for as long as `pending_migrant` is set.
+    if state.tunnel.unlocked
+        && state.pending_migrant.is_none()
+        && state.tick % TICKS_PER_DAY == ARRIVAL_TICK
+        && state.day() >= EVENT_GRACE_DAY
+        && erng.chance(TUNNEL_MIGRANT_CHANCE)
+    {
+        let count = 1 + erng.below(2);
+        state.pending_migrant = Some(TunnelMigrant {
+            count,
+            expires: state.tick + TUNNEL_MIGRANT_WAIT_TICKS,
+        });
+        let plural = if count == 1 { "" } else { "s" };
+        push_event(
+            state,
+            format!("{} traveler{} emerged from the Tunnel, waiting to be let in.", count, plural),
+        );
+    }
+    if let Some(m) = state.pending_migrant {
+        let pop = state.survivors.len() as i32;
+        let space = state.housing_capacity() as i32 + 2 - pop;
+        if m.count as i32 <= space && m.count as i32 <= MAX_POPULATION - pop {
+            for _ in 0..m.count {
+                let s = new_survivor(&mut rng, &mut state.next_id);
+                state.survivors.push(s);
+            }
+            state.pending_migrant = None;
+            let plural = if m.count == 1 { "" } else { "s" };
+            push_event(state, format!("{} traveler{} joined the colony.", m.count, plural));
+        } else if state.tick >= m.expires {
+            state.pending_migrant = None;
+            push_event(state, "With nowhere to stay, the travelers turned back through the Tunnel.");
+        }
     }
 
     // --- Defeat ---

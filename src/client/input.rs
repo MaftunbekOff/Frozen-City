@@ -4,7 +4,9 @@ use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseSc
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
-use frozen_city::game::types::{BuildingKind, GamePhase, GameState, PlayerCommand};
+use frozen_city::game::types::{
+    BuildingKind, CONSTRUCTION_CREW_MAX, GamePhase, GameState, PlayerCommand, Terrain,
+};
 use frozen_city::net::protocol::ClientMsg;
 
 use super::chat::ChatState;
@@ -23,22 +25,33 @@ pub const SURVIVOR_PICK_RADIUS: f32 = 0.6;
 /// any is within `SURVIVOR_PICK_RADIUS` — the "raycast" for survivor
 /// selection is really just a closest-point pick against each survivor's
 /// authoritative tile position, which is all a flat-ground scene needs.
-pub fn pick_survivor(state: &GameState, world: Vec3) -> Option<u32> {
+/// Returns the distance alongside the id so callers can weigh it against a
+/// competing building hit (see `resolve_world_click`).
+pub fn pick_survivor(state: &GameState, world: Vec3) -> Option<(u32, f32)> {
     state
         .survivors
         .iter()
         .map(|s| (s.id, super::tilef_to_world((s.x, s.y)).distance(world)))
         .filter(|(_, d)| *d <= SURVIVOR_PICK_RADIUS)
         .min_by(|a, b| a.1.total_cmp(&b.1))
-        .map(|(id, _)| id)
 }
 
 /// Shared click-resolution logic for desktop (`build_input`) and touch
-/// (`touch::touch_control`): a click/tap on a survivor selects them (only
-/// your own settlers in the central world, mirroring `can_issue`); with a
-/// survivor already selected, a click on empty ground (no survivor, no
-/// building) issues `MoveSurvivor` there and queues the confirmation ping;
-/// otherwise it falls back to ordinary building selection/deselection.
+/// (`touch::touch_control`). Left-click always either selects or commands —
+/// only right-click/Escape ever clears a selection (`build_input`'s
+/// `MouseButton::Right` handling), so once a survivor is selected, every
+/// further left-click is read as an order for them until you back out:
+/// empty ground → `MoveSurvivor`; a choppable forest tile → `ChopTile`
+/// (walk there, chop it); a building with room for a worker (still under
+/// construction — including the Furnace — or finished with space in
+/// `max_workers()`) → `AssignSurvivor` there. Each queues the confirmation
+/// ping (world-click commands only; assigning to a building doesn't need
+/// one, the building's own worker count already shows it landed). With no
+/// survivor selected, or the click landing on a building that can't take a
+/// worker at all (e.g. a finished Tent), a click on a building always
+/// selects it — even if a survivor happens to be standing on or near it —
+/// and a click on empty ground falls to survivor picking (only your own
+/// settlers in the central world, mirroring `can_issue`).
 pub fn resolve_world_click(
     state: &GameState,
     me: Option<u64>,
@@ -59,24 +72,65 @@ pub fn resolve_world_click(
             && state.survivors.iter().find(|s| s.id == id).is_some_and(|s| s.owner == my_account)
     };
 
-    if let Some(id) = pick_survivor(state, world).filter(|&id| commandable(id)) {
-        survivor_sel.0 = if survivor_sel.0 == Some(id) { None } else { Some(id) };
+    let tile = world_to_tile(world);
+    let building = tile.and_then(|(tx, ty)| state.building_at(tx, ty));
+    let near_survivor = pick_survivor(state, world).filter(|&(id, _)| commandable(id));
+
+    // A building on the clicked tile normally wins over a nearby survivor —
+    // buildings (especially the 2x2 Furnace) draw a crowd of survivors that
+    // would otherwise "steal" clicks meant for the building itself. But if a
+    // survivor sits closer to the actual click point than the building's own
+    // center, the click reads as aimed at them instead — otherwise the
+    // Furnace's 2x2 footprint would leave anyone standing right next to it
+    // permanently unclickable.
+    let building_wins = match (building, near_survivor) {
+        (Some(b), Some((_, survivor_dist))) => survivor_dist >= building_center_world(b).distance(world),
+        (Some(_), None) => true,
+        (None, _) => false,
+    };
+
+    if !building_wins {
+        if let Some((id, _)) = near_survivor {
+            survivor_sel.0 = if survivor_sel.0 == Some(id) { None } else { Some(id) };
+            return;
+        }
+    }
+
+    // A survivor is selected and the click landed on open ground (no
+    // building): a choppable forest tile issues `ChopTile` (walk there,
+    // chop it — see `PlayerCommand::ChopTile`'s doc), anything else issues
+    // the plain walk order — "aholi tanlangan holatda bo'sh yerga bosish"
+    // from the brief. A click on a BUILDING instead falls through to the
+    // assign-to-work block right below (or, failing that, ordinary building
+    // selection — closing the survivor card exactly like the explicit X
+    // button would, "boshqa joyga bosish ... yopadi").
+    if let (Some(id), Some((tx, ty)), None) = (survivor_sel.0, tile, building) {
+        let choppable = state.tile(tx, ty).is_some_and(|t| t.terrain == Terrain::Forest && t.deposit > 0);
+        let cmd = if choppable {
+            PlayerCommand::ChopTile { survivor: id, x: tx, y: ty }
+        } else {
+            PlayerCommand::MoveSurvivor { survivor: id, x: tx, y: ty }
+        };
+        net.send(ClientMsg::Cmd(cmd));
+        move_queue.0.push((tx, ty));
         return;
     }
 
-    let tile = world_to_tile(world);
-    let building = tile.and_then(|(tx, ty)| state.building_at(tx, ty));
-
-    // A survivor is selected and the click landed on open ground (no
-    // building): issue the walk order there — "aholi tanlangan holatda
-    // bo'sh yerga bosish" from the brief. A click on a BUILDING instead
-    // falls through to ordinary building selection below, closing the
-    // survivor card exactly like the explicit X button would ("boshqa
-    // joyga bosish ... yopadi").
-    if let (Some(id), Some((tx, ty)), None) = (survivor_sel.0, tile, building) {
-        net.send(ClientMsg::Cmd(PlayerCommand::MoveSurvivor { survivor: id, x: tx, y: ty }));
-        move_queue.0.push((tx, ty));
-        return;
+    // A survivor is selected and the click landed on a building that can
+    // actually take a worker (still under construction — including the
+    // Furnace — or finished with room in `max_workers()`): command them to
+    // work there, the same "select, then click the target" pattern as
+    // chopping a tree, generalized to buildings. Left-click always commands
+    // while a survivor is selected; only right-click (or Escape) clears the
+    // selection — see `build_input`'s `MouseButton::Right` handling. A
+    // building with no worker capacity at all (e.g. a finished Tent) falls
+    // through to ordinary building selection below instead, same as before.
+    if let (Some(id), Some(b)) = (survivor_sel.0, building) {
+        let capacity = if b.under_construction() { CONSTRUCTION_CREW_MAX } else { b.kind.max_workers() };
+        if capacity > 0 {
+            net.send(ClientMsg::Cmd(PlayerCommand::AssignSurvivor { survivor: id, building: Some(b.id) }));
+            return;
+        }
     }
 
     survivor_sel.0 = None;

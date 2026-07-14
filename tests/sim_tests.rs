@@ -50,9 +50,12 @@ fn mapgen_has_resources_and_clear_center() {
             }
         }
     }
-    assert_eq!(state.buildings.len(), 1);
+    assert_eq!(state.buildings.len(), 2, "furnace + tunnel");
     assert_eq!(state.buildings[0].kind, BuildingKind::Furnace);
-    assert_eq!(state.survivors.len(), 8);
+    assert!(state.buildings[0].under_construction());
+    // The city starts with just its leader — everyone else arrives once
+    // the furnace is lit (see `tests/furnace_bootstrap_tests.rs`).
+    assert_eq!(state.survivors.len(), 1);
 }
 
 #[test]
@@ -68,7 +71,12 @@ fn simulation_is_deterministic() {
 
 #[test]
 fn long_run_invariants_hold() {
-    let mut state = sim::new_game(2024, 30);
+    // Bootstrapped (furnace already lit): this test is about invariants
+    // holding over a long run, not the opening bootstrap — with nobody
+    // ever assigned to build it, a fresh `new_game` furnace would just
+    // stay cold and the lone leader would freeze out almost immediately,
+    // cutting the run far short of its intended length.
+    let mut state = sim::new_game_bootstrapped(2024, 30);
     for _ in 0..10_000 {
         sim::tick(&mut state);
         assert!(state.stock.wood >= -0.001, "wood went negative");
@@ -95,13 +103,13 @@ fn placing_a_tent_costs_wood_and_blocks_the_spot() {
     let wood_before = state.stock.wood;
 
     sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
-    assert_eq!(state.buildings.len(), 2);
+    assert_eq!(state.buildings.len(), 3, "furnace + tunnel + tent");
     assert!((state.stock.wood - (wood_before - 15.0)).abs() < 0.001);
 
     // Same spot again: occupied, silently rejected, no wood spent.
     let wood_after = state.stock.wood;
     sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
-    assert_eq!(state.buildings.len(), 2);
+    assert_eq!(state.buildings.len(), 3);
     assert_eq!(state.stock.wood, wood_after);
 }
 
@@ -111,7 +119,7 @@ fn cannot_build_without_wood_or_on_bad_terrain() {
     let (x, y) = find_spot(&state, BuildingKind::Tent);
     state.stock.wood = 3.0;
     sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
-    assert_eq!(state.buildings.len(), 1, "no wood -> no tent");
+    assert_eq!(state.buildings.len(), 2, "no wood -> no tent (furnace + tunnel only)");
 
     state.stock.wood = 100.0;
     // A coal mine demands a coal deposit tile.
@@ -123,7 +131,10 @@ fn cannot_build_without_wood_or_on_bad_terrain() {
 
 #[test]
 fn worker_assignment_is_clamped() {
-    let mut state = sim::new_game(5, 12);
+    // Bootstrapped: anonymous `AdjustWorkers` is capped by idle population
+    // too, and this test wants to see the crew-cap (3) clamp specifically,
+    // which needs at least 3 idle survivors to even reach.
+    let mut state = sim::new_game_bootstrapped(5, 12);
     state.stock.wood = 200.0;
     let (x, y) = find_spot(&state, BuildingKind::Sawmill);
     sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
@@ -183,16 +194,16 @@ fn demolish_refunds_and_furnace_is_protected() {
     let id = state.buildings.last().unwrap().id;
     let wood = state.stock.wood;
     sim::apply_command(&mut state, 1, &PlayerCommand::Demolish { building: id });
-    assert_eq!(state.buildings.len(), 1);
+    assert_eq!(state.buildings.len(), 2, "back to furnace + tunnel");
     assert!((state.stock.wood - (wood + 6.0)).abs() < 0.001, "40% of 15");
 
     sim::apply_command(&mut state, 1, &PlayerCommand::Demolish { building: 0 });
-    assert_eq!(state.buildings.len(), 1, "the furnace cannot be demolished");
+    assert_eq!(state.buildings.len(), 2, "the furnace cannot be demolished");
 }
 
 #[test]
 fn furnace_goes_out_without_fuel() {
-    let mut state = sim::new_game(5, 12);
+    let mut state = sim::new_game_bootstrapped(5, 12);
     state.stock.coal = 0.0;
     state.stock.wood = 0.0;
     assert!(state.furnace_lit);
@@ -203,7 +214,10 @@ fn furnace_goes_out_without_fuel() {
 
 #[test]
 fn city_survives_to_victory_on_short_run() {
-    let mut state = sim::new_game(31337, 1);
+    // Bootstrapped: no commands are issued here to assign a builder, so a
+    // fresh `new_game` furnace would never light and the city could never
+    // reach victory — this test is about the win condition, not the intro.
+    let mut state = sim::new_game_bootstrapped(31337, 1);
     for _ in 0..(TICKS_PER_DAY * 2) {
         sim::tick(&mut state);
         if state.phase == GamePhase::Won {
@@ -238,7 +252,7 @@ fn commands_after_game_end_are_ignored() {
     state.phase = GamePhase::Lost;
     let (x, y) = find_spot(&state, BuildingKind::Tent);
     sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
-    assert_eq!(state.buildings.len(), 1);
+    assert_eq!(state.buildings.len(), 2, "furnace + tunnel only, the game already ended");
 }
 
 #[test]

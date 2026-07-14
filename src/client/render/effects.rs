@@ -127,12 +127,17 @@ pub fn animate_effects(
         }
     }
 
-    // Fire glow + light pulse.
+    // Fire glow + light pulse. Both scaled well down from their original
+    // values: they were tuned for the furnace's old, much larger physical
+    // size (before several rounds of shrinking it down to a proportionate
+    // campfire/Pech) and never rescaled alongside it — left at the old
+    // brightness, bloom around the now-small structure was blowing it out
+    // to a shapeless glow, hiding the model inside its own light.
     for glow in &furnaces {
         if let Some(mut m) = materials.get_mut(&glow.fire_mat) {
             m.emissive = if state.furnace_lit {
                 let k = (1.0 + 0.18 * pulse) * (0.7 + 0.3 * state.furnace_level as f32);
-                LinearRgba::rgb(6.0 * k, 2.2 * k, 0.5 * k)
+                LinearRgba::rgb(1.3 * k, 0.5 * k, 0.11 * k)
             } else {
                 LinearRgba::rgb(0.08, 0.05, 0.04)
             };
@@ -140,11 +145,11 @@ pub fn animate_effects(
     }
     for mut light in &mut lights {
         light.intensity = if state.furnace_lit {
-            (900_000.0 + 750_000.0 * state.furnace_level as f32) * (1.0 + 0.12 * pulse)
+            (150_000.0 + 120_000.0 * state.furnace_level as f32) * (1.0 + 0.12 * pulse)
         } else {
             0.0
         };
-        light.range = 6.0 + state.heat_radius() * 1.2;
+        light.range = 3.5 + state.heat_radius() * 0.6;
     }
 
     // Selection ring.

@@ -8,7 +8,11 @@ const NAMES: [&str; 24] = [
     "Viktor", "Wanda", "Yuri", "Zoya",
 ];
 
-const START_SURVIVORS: usize = 8;
+/// The city starts with just its leader — everyone else arrives once the
+/// furnace is actually lit (`tick.rs`'s morning-arrivals check gates on
+/// `furnace_lit`), echoing the "one survivor chops wood and lights the
+/// first fire" opening.
+const START_SURVIVORS: usize = 1;
 const START_WOOD: f32 = 60.0;
 const START_COAL: f32 = 40.0;
 const START_FOOD: f32 = 25.0;
@@ -52,6 +56,12 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
     for _ in 0..START_SURVIVORS {
         survivors.push(new_survivor(&mut rng, &mut next_id));
     }
+    // The lone starting survivor opens the game as leader — whatever their
+    // rolled profession, they're the one who'll build and light the furnace,
+    // which only reads as coherent if `survivor_contribution`'s
+    // leader-is-universal bypass already applies to them from tick 0. They
+    // stay leader until `SetLeader` names someone else.
+    let starting_leader = survivors.first().map(|s| s.id);
 
     let furnace = Building {
         id: 0,
@@ -62,25 +72,55 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
         progress: 0.0,
         owner: None,
         owner_account: None,
-        // Boshlang'ich pech tayyor holda tug'iladi (qurilishsiz).
+        // Boshlang'ich pech qurilishsiz emas — yetakchi uni tiklashi kerak
+        // (`AssignSurvivor` orqali, xuddi boshqa qurilish maydonchalari
+        // kabi), lekin usta-kun emas — `build_left` bu yerda "qolgan
+        // o'tinlar soni" (`FURNACE_LOGS_NEEDED`): har biri haqiqiy
+        // chopib-ko'tarib-kelish sayohati (`tick.rs`ning pech-qurilish
+        // blokiga qarang). Tugagach `tick.rs` `furnace_lit`/
+        // `furnace_level`ni o'rnatadi va `SetFurnaceLevel` ochiladi
+        // (`command.rs`).
+        level: 1,
+        build_left: FURNACE_LOGS_NEEDED as f32,
+    };
+
+    // The Tunnel to the Global World — present (sealed-looking) from the
+    // very start, long before it's unlocked; `level`/`build_left` are inert
+    // for it (its real excavation state is `GameState.tunnel`, below). Takes
+    // the next id off the shared counter, same as any other placed building
+    // (unlike the furnace's reserved `id: 0` — this runs after the starting
+    // survivor(s) already claimed id 1).
+    let tunnel_building = Building {
+        id: next_id,
+        kind: BuildingKind::Tunnel,
+        x: TUNNEL_X,
+        y: TUNNEL_Y,
+        workers: 0,
+        progress: 0.0,
+        owner: None,
+        owner_account: None,
         level: 1,
         build_left: 0.0,
     };
+    next_id += 1;
 
     let mut state = GameState {
         // Start mid-morning of day 1.
         tick: ARRIVAL_TICK,
         win_days,
         tiles,
-        buildings: vec![furnace],
+        buildings: vec![furnace, tunnel_building],
         survivors,
         stock: Stockpile {
             wood: START_WOOD,
             coal: START_COAL,
             food: START_FOOD,
         },
-        furnace_level: 1,
-        furnace_lit: true,
+        // Unset until the leader finishes building the furnace (see the
+        // `Building` above) — `tick.rs`'s construction-complete arm sets
+        // both once `build_left` reaches 0.
+        furnace_level: 0,
+        furnace_lit: false,
         cold_snap: false,
         players: Vec::new(),
         phase: GamePhase::Running,
@@ -109,14 +149,15 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
         next_id,
         rng: rng.0,
         central_ledger: Vec::new(),
-        leader: None,
+        leader: starting_leader,
         mourning_until: 0,
         morale: MORALE_START,
+        pending_migrant: None,
     };
     push_event(
         &mut state,
         format!(
-            "The last furnace is lit. Survive until day {}.",
+            "One survivor remains. Build the furnace to call the others home — survive until day {}.",
             win_days
         ),
     );
@@ -133,6 +174,7 @@ pub fn new_game_central(seed: u64) -> GameState {
     let mut state = new_game(seed, DEFAULT_WIN_DAYS);
     state.central = true;
     state.survivors.clear();
+    state.leader = None;
     state.missions.clear();
     state.events.clear();
     state.total_events = 0;
@@ -140,6 +182,33 @@ pub fn new_game_central(seed: u64) -> GameState {
         &mut state,
         "The Global World. Settlers arrive through the Tunnel.",
     );
+    state
+}
+
+/// Population `new_game_bootstrapped` tops up to — the old `START_SURVIVORS`
+/// count, kept only for that helper so unrelated tests don't have to care
+/// about the furnace-bootstrap opening.
+const BOOTSTRAPPED_SURVIVORS: usize = 8;
+
+/// Test/tooling convenience: `new_game` fast-forwarded past the "one leader
+/// builds the furnace" opening — furnace lit at level 1 and
+/// [`BOOTSTRAPPED_SURVIVORS`] present, matching what most mechanic tests
+/// actually want to exercise (production, healing, XP, assignment, ...)
+/// without re-testing the bootstrap sequence itself (see
+/// `tests/furnace_bootstrap_tests.rs` for that).
+pub fn new_game_bootstrapped(seed: u64, win_days: u32) -> GameState {
+    let mut state = new_game(seed, win_days);
+    if let Some(f) = state.buildings.iter_mut().find(|b| b.kind == BuildingKind::Furnace) {
+        f.build_left = 0.0;
+    }
+    state.furnace_lit = true;
+    state.furnace_level = 1;
+    let mut rng = Rng(state.rng);
+    while state.survivors.len() < BOOTSTRAPPED_SURVIVORS {
+        let s = new_survivor(&mut rng, &mut state.next_id);
+        state.survivors.push(s);
+    }
+    state.rng = rng.0;
     state
 }
 
@@ -207,10 +276,14 @@ pub(crate) fn new_survivor(rng: &mut Rng, next_id: &mut u32) -> Survivor {
         profession: Profession::ALL[rng.below(Profession::ALL.len() as u32) as usize],
         xp: 0.0,
         trained_kind: None,
+        chop_target: None,
+        carrying_wood: false,
     }
 }
 
-/// Remove one unit of wood from the nearest forest tile within `r` of (cx, cy).
+/// Like `find_forest_tile` but consumes: removes one unit of wood from the
+/// nearest forest tile within `r` of (cx, cy) — the Sawmill's instant,
+/// no-survivor-position abstraction.
 pub(crate) fn take_forest_unit(tiles: &mut [Tile], cx: u8, cy: u8, r: i32) -> bool {
     let mut best: Option<(i32, usize)> = None;
     for dy in -r..=r {
@@ -238,4 +311,29 @@ pub(crate) fn take_forest_unit(tiles: &mut [Tile], cx: u8, cy: u8, r: i32) -> bo
     } else {
         false
     }
+}
+
+/// Nearest forest tile with wood left within `r` of (cx, cy), without
+/// consuming it — for a survivor to walk toward before chopping it on
+/// arrival (the Furnace's chop-and-carry construction cycle, `tick.rs`).
+/// Same nearest-tile search as `take_forest_unit`, just read-only.
+pub(crate) fn find_forest_tile(tiles: &[Tile], cx: u8, cy: u8, r: i32) -> Option<(u8, u8)> {
+    let mut best: Option<(i32, (u8, u8))> = None;
+    for dy in -r..=r {
+        for dx in -r..=r {
+            let (x, y) = (cx as i32 + dx, cy as i32 + dy);
+            if !in_bounds(x, y) {
+                continue;
+            }
+            let (ux, uy) = (x as u8, y as u8);
+            let t = &tiles[tile_index(ux, uy)];
+            if t.terrain == Terrain::Forest && t.deposit > 0 {
+                let d = dx.abs().max(dy.abs());
+                if best.is_none_or(|(bd, _)| d < bd) {
+                    best = Some((d, (ux, uy)));
+                }
+            }
+        }
+    }
+    best.map(|(_, pos)| pos)
 }

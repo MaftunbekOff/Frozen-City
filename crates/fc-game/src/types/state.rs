@@ -90,6 +90,10 @@ pub struct GameState {
     /// `morale_multiplier` into the same production math as every other
     /// colony-wide multiplier.
     pub morale: f32,
+    /// Traveler(s) currently waiting at the Tunnel to join the colony, if
+    /// any (V0.9). See `events::TunnelMigrant` and `tick.rs`'s tunnel-migrant
+    /// block for the spawn/absorb/expire lifecycle.
+    pub pending_migrant: Option<TunnelMigrant>,
 }
 
 impl GameState {
@@ -118,12 +122,28 @@ impl GameState {
         base + diurnal + snap + blizzard
     }
 
-    /// Heat radius in tiles around the furnace center; 0 when unlit.
+    /// Heat radius in tiles around the furnace center; 0 when unlit. Scaled
+    /// to match the furnace's own (small, `render/buildings.rs`) physical
+    /// footprint. V0.9: a rough "gulxan" (`Building.level` 1-6) still grows
+    /// its reach a little each level it climbs — same "keeps morphing, not
+    /// just one jump" shape the model itself follows — even though its
+    /// burn-intensity dial stays locked at 1 the whole time (see
+    /// `SetFurnaceLevel`'s `too_young` gate). Only once it's upgraded into
+    /// an established "Pech" (level 7+) does the full player-controlled
+    /// 2-14 tile range unlock.
     pub fn heat_radius(&self) -> f32 {
-        if self.furnace_lit && self.furnace_level > 0 {
-            4.0 + 6.0 * self.furnace_level as f32
+        if !(self.furnace_lit && self.furnace_level > 0) {
+            return 0.0;
+        }
+        let struct_level = self
+            .buildings
+            .iter()
+            .find(|b| b.kind == BuildingKind::Furnace)
+            .map_or(1, |b| b.level);
+        if struct_level >= 7 {
+            2.0 + 4.0 * self.furnace_level as f32
         } else {
-            0.0
+            1.5 + 0.3 * struct_level.saturating_sub(1) as f32
         }
     }
 
@@ -212,8 +232,10 @@ impl GameState {
 
     /// Colony-wide production multiplier from leadership: a bonus while the
     /// leader lives, a penalty while the city mourns a dead one, identity
-    /// otherwise. Mutually exclusive by construction (`mourning_until` is
-    /// only ever set at the moment `leader` is cleared).
+    /// otherwise. Mutually exclusive by construction: `mourning_until` is
+    /// only ever set at the moment `leader` is cleared, and `SetLeader`
+    /// clears `mourning_until` back to 0 the moment a new leader is
+    /// appointed — so a living leader and active mourning never coexist.
     pub fn leader_multiplier(&self) -> f32 {
         if self.leader_alive() {
             LEADER_PRODUCTION_BONUS
@@ -354,7 +376,8 @@ impl GameState {
                 }
                 // Mirrors `AssignSurvivor` exactly: walking a settler is just
                 // as much "commanding your own settler" as staffing them is.
-                PlayerCommand::MoveSurvivor { survivor, .. } => {
+                PlayerCommand::MoveSurvivor { survivor, .. }
+                | PlayerCommand::ChopTile { survivor, .. } => {
                     account.is_some()
                         && self
                             .survivors
@@ -393,6 +416,7 @@ impl GameState {
                 | PlayerCommand::AdjustWorkers { .. }
                 | PlayerCommand::AssignSurvivor { .. }
                 | PlayerCommand::MoveSurvivor { .. }
+                | PlayerCommand::ChopTile { .. }
                 | PlayerCommand::InvestTunnel
                 | PlayerCommand::Research { .. }
                 | PlayerCommand::RespondEvent { .. } => true,

@@ -86,6 +86,12 @@ pub fn kick_player(state: &mut GameState, target: u64) {
 /// survivors; the caller (`world_manager`) hands them to the central world's
 /// `inject_migrants`.
 pub fn extract_migrants(state: &mut GameState, max: usize) -> Vec<Survivor> {
+    // Never extract the whole population — a personal world always keeps at
+    // least one survivor behind, the same invariant `sim::tick`'s empty-
+    // -survivors defeat check assumes everywhere else. This matters most
+    // right after a fresh (post-graduation) reset, where the sole starting
+    // leader is idle and would otherwise be exactly what gets picked first.
+    let max = max.min(state.survivors.len().saturating_sub(1));
     let mut picked: Vec<u32> = state
         .survivors
         .iter()
@@ -112,6 +118,13 @@ pub fn extract_migrants(state: &mut GameState, max: usize) -> Vec<Survivor> {
             if let Some(b) = state.buildings.iter_mut().find(|b| b.id == b_id) {
                 b.workers = b.workers.saturating_sub(1);
             }
+        }
+        // Unlike the death path, nobody's mourned — they left for the
+        // Global World alive and well — but the seat still needs to be
+        // vacated so `leader`/`leader_alive` never dangle on a removed id.
+        if state.leader == Some(id) {
+            state.leader = None;
+            push_event(state, "The leader left through the Tunnel; the city has no leader.");
         }
         let mut s = state.survivors.remove(idx);
         s.assigned_building = None;

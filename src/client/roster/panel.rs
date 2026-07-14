@@ -303,9 +303,13 @@ pub(crate) fn update_assign_here(
     let target = selection.0.and_then(|id| state.find_building(id));
     let survivor = survivor_sel.0.and_then(|id| state.survivors.iter().find(|s| s.id == id));
 
+    // Matches `selection.rs`'s `has_workers`/`input.rs`'s capacity check: a
+    // construction site (Furnace/Tent included, both max_workers()==0 once
+    // finished) takes a named crew up to CONSTRUCTION_CREW_MAX too, not just
+    // kinds with a nonzero finished-state worker cap.
     let show = matches!(
         (target, survivor),
-        (Some(b), Some(_)) if b.kind.max_workers() > 0
+        (Some(b), Some(_)) if b.under_construction() || b.kind.max_workers() > 0
     );
     let d = if show { Display::Flex } else { Display::None };
     for mut node in &mut btns {

@@ -134,6 +134,10 @@ fn morale_drifts_toward_baseline_and_never_overshoots() {
 #[test]
 fn a_healthy_ticking_world_drifts_toward_baseline_too() {
     let mut state = sim::new_game(SEED, 12);
+    // `new_game` auto-appoints the sole starting survivor as leader, whose
+    // daily morale bonus would otherwise fight the downward drift this test
+    // is isolating.
+    state.leader = None;
     state.stock.food = 100_000.0;
     state.stock.coal = 100_000.0;
     state.morale = 100.0;

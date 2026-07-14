@@ -22,8 +22,10 @@
 
 use std::time::{Duration, Instant};
 
+use frozen_city::game::sim;
 use frozen_city::game::types::{GameState, GuestPermission, PlayerCommand};
 use frozen_city::net::client::{self, ClientConn};
+use frozen_city::net::persist;
 use frozen_city::net::protocol::{ClientMsg, ServerMsg};
 use frozen_city::net::server::{self, ServerConfig};
 
@@ -72,14 +74,31 @@ fn drain_states_for(conn: &ClientConn, dur: Duration) -> Option<GameState> {
     last
 }
 
+/// This suite is about the survivor-control wire commands themselves (move,
+/// lead, guest-gating) — not about the "one leader lights the furnace" opening
+/// (`SetLeader`'s guest-no-op check in particular wants a second survivor to
+/// appoint, so the assertion is unambiguous — see the `other_candidate` pick
+/// below). Pre-seed a save file with `sim::new_game_bootstrapped`'s starting
+/// state (furnace already lit, full population) and point a `persistent`
+/// server at it, exactly like `central_world_e2e.rs` does for the same
+/// reason, rather than making the wire test itself drive the furnace build
+/// and wait on the real-time (150s/day) natural-arrival roll.
 fn start_server(seed: u64) -> server::ServerHandle {
+    let win_days = 12;
+    let save_path = std::env::temp_dir()
+        .join(format!("fc-survivor-control-e2e-{}-{}.bin", std::process::id(), seed))
+        .to_str()
+        .unwrap()
+        .to_string();
+    persist::save_at(&sim::new_game_bootstrapped(seed, win_days), &save_path).expect("seed save");
+
     server::start(ServerConfig {
         port: Some(0), // ephemeral port
         seed,
-        win_days: 12,
-        persistent: false,
+        win_days,
+        persistent: true,
         verbose: false,
-        save_path: None,
+        save_path: Some(save_path),
         idle_shutdown: None,
         central: false,
         owner_account: None,

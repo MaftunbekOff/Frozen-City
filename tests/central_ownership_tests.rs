@@ -36,6 +36,8 @@ fn settler(id: u32) -> Survivor {
         profession: Profession::from_id_hash(id),
         xp: 0.0,
         trained_kind: None,
+        chop_target: None,
+        carrying_wood: false,
     }
 }
 
@@ -319,8 +321,10 @@ fn v2_mirror_migrates_to_v3_with_none_owner_account_and_empty_ledger() {
     };
 
     let migrated: GameState = v2.into();
-    // The starting Furnace (id 0, owner None) plus the sawmill pushed above.
-    assert_eq!(migrated.buildings.len(), 2);
+    // The starting Furnace (id 0, owner None) and Tunnel fixture (from
+    // `new_game`, unmodified by `new_game_central`) plus the sawmill pushed
+    // above.
+    assert_eq!(migrated.buildings.len(), 3);
     let sawmill = migrated.buildings.iter().find(|b| b.id == 42).expect("sawmill survives the hop");
     assert_eq!(sawmill.owner, Some(10));
     assert!(

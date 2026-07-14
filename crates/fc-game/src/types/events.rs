@@ -38,6 +38,19 @@ pub struct CaravanOffer {
     pub expires: u64,
 }
 
+/// Traveler(s) standing at the Tunnel mouth, waiting to join the colony.
+/// Sits in `GameState.pending_migrant` until the colony has room (housing +
+/// population cap, checked every tick — see `tick.rs`) or `expires` passes,
+/// whichever comes first. Unlike `CaravanOffer` this needs no leader
+/// decision: it resolves automatically the moment conditions allow, or the
+/// travelers give up and head back through the Tunnel.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TunnelMigrant {
+    pub count: u32,
+    /// Tick after which the travelers give up and leave.
+    pub expires: u64,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct GameEvent {
     pub day: u32,

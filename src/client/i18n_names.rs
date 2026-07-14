@@ -38,6 +38,9 @@ pub fn building_name(k: BuildingKind, l: Lang) -> &'static str {
         (BuildingKind::Warehouse, Lang::Uz) => "Ombor",
         (BuildingKind::Warehouse, Lang::En) => "Warehouse",
         (BuildingKind::Warehouse, Lang::Ru) => "Склад",
+        (BuildingKind::Tunnel, Lang::Uz) => "Tunnel",
+        (BuildingKind::Tunnel, Lang::En) => "Tunnel",
+        (BuildingKind::Tunnel, Lang::Ru) => "Туннель",
     }
 }
 
@@ -70,6 +73,9 @@ pub fn building_desc(k: BuildingKind, l: Lang) -> &'static str {
         (BuildingKind::Warehouse, Lang::Uz) => "Ishchili bo'lsa: qurilishga yog'och kamroq sarflanadi.",
         (BuildingKind::Warehouse, Lang::En) => "Staffed: new construction wastes less wood.",
         (BuildingKind::Warehouse, Lang::Ru) => "С персоналом: стройка тратит меньше дерева.",
+        (BuildingKind::Tunnel, Lang::Uz) => "Global Olamga yo'l. Barcha vazifalar bajarilgach ochiladi.",
+        (BuildingKind::Tunnel, Lang::En) => "The way to the Global World. Opens once every mission is complete.",
+        (BuildingKind::Tunnel, Lang::Ru) => "Путь в Глобальный мир. Откроется, когда все задания выполнены.",
     }
 }
 

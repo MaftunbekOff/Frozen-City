@@ -199,8 +199,12 @@ fn upgrade_requires_wood() {
 
 #[test]
 fn higher_level_produces_more() {
-    let mut control = sim::new_game(SEED, 12);
-    let mut experiment = sim::new_game(SEED, 12);
+    // Ikkala qurilma ham 2 ta ishchini binoga tayinlashi kerak, ammo yangi
+    // o'yin faqat 1 ta yetakchi bilan boshlanadi (o'choq hali qurilmoqda) —
+    // bootstrapped yordamchisi eski 8-hayotdosh/o'choq yoqilgan holatni
+    // tiklaydi, shunda ikkinchi bo'sh hayotdosh brigadaga qo'shilishi mumkin.
+    let mut control = sim::new_game_bootstrapped(SEED, 12);
+    let mut experiment = sim::new_game_bootstrapped(SEED, 12);
     for s in [&mut control, &mut experiment] {
         s.stock.wood = 500.0;
         let (x, y) = find_spot(s, BuildingKind::HunterHut);
@@ -263,4 +267,71 @@ fn placement_without_wood_is_refused() {
     sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
     assert_eq!(state.buildings.len(), buildings_before, "no wood, no site");
     assert_eq!(state.stock.wood, 5.0, "wood must never go negative");
+}
+
+/// V0.9: the Furnace is `upgradeable` (a real 1-10 level chain, like any
+/// other building) despite never being `buildable` (never placeable, never
+/// demolishable). Its burn-intensity setting (`state.furnace_level`, 0-3) is
+/// a fully independent axis from its structural `level` — locked at
+/// whatever ignition set it to (1) while it's still a rough "gulxan"
+/// (levels 1-6), only becoming player-controllable once it grows into an
+/// established "Pech" (level 7+, matching `render/buildings.rs`'s two-tier
+/// model) — and, once unlocked, must keep surviving further upgrades
+/// untouched.
+#[test]
+fn furnace_is_upgradeable_but_never_placeable_or_demolishable() {
+    let mut state = sim::new_game_bootstrapped(SEED, 12);
+    state.stock.wood = 100_000.0;
+    let id = state.buildings.iter().find(|b| b.kind == BuildingKind::Furnace).unwrap().id;
+    assert_eq!(state.find_building(id).unwrap().level, 1);
+    assert!(!state.find_building(id).unwrap().under_construction());
+
+    // Never placeable, never demolishable — upgradeable doesn't mean buildable.
+    assert!(state.can_place(BuildingKind::Furnace, 5, 5).is_err());
+    let wood_before = state.stock.wood;
+    sim::apply_command(&mut state, 1, &PlayerCommand::Demolish { building: id });
+    assert!(state.find_building(id).is_some(), "the furnace must survive a Demolish attempt");
+    assert_eq!(state.stock.wood, wood_before);
+
+    // A rough "gulxan" (levels 1-6) has no damper — the burn intensity
+    // ignition set (1) can't be touched yet.
+    sim::apply_command(&mut state, 1, &PlayerCommand::SetFurnaceLevel { level: 3 });
+    assert_eq!(state.furnace_level, 1, "burn intensity is locked before the furnace is an established Pech");
+
+    // Upgrade from L1 to L6 — still a "gulxan" the whole way, so the lock
+    // holds at every intermediate level too.
+    for target in 2..=6 {
+        sim::apply_command(&mut state, 1, &PlayerCommand::UpgradeBuilding { building: id });
+        assert_eq!(state.find_building(id).unwrap().level, target);
+        assert!(state.find_building(id).unwrap().under_construction(), "an upgrade is a construction site again");
+        sim::apply_command(&mut state, 1, &PlayerCommand::SetFurnaceLevel { level: 2 });
+        assert_eq!(state.furnace_level, 1, "burn intensity stays locked through L2-L6");
+        sim::finish_all_construction(&mut state);
+    }
+    assert_eq!(state.find_building(id).unwrap().level, 6);
+    assert!(state.furnace_lit, "burn intensity/lit status must survive the whole climb");
+
+    // One more upgrade reaches L7 — an established "Pech" — where the lock
+    // lifts immediately: `too_young` reads `Building.level`, which is
+    // already 7 the instant this command applies, even before the upgrade's
+    // own construction (`build_left`) finishes.
+    sim::apply_command(&mut state, 1, &PlayerCommand::UpgradeBuilding { building: id });
+    assert_eq!(state.find_building(id).unwrap().level, 7);
+    sim::apply_command(&mut state, 1, &PlayerCommand::SetFurnaceLevel { level: 3 });
+    assert_eq!(state.furnace_level, 3, "burn intensity unlocks the moment structural level 7 is reached");
+    sim::finish_all_construction(&mut state);
+    assert_eq!(state.find_building(id).unwrap().level, 7);
+
+    // ...and must survive a further upgrade (L7 -> L8) untouched — it's a
+    // separate axis from the structural `level` that upgrade advances.
+    sim::apply_command(&mut state, 1, &PlayerCommand::UpgradeBuilding { building: id });
+    assert_eq!(state.find_building(id).unwrap().level, 8);
+    assert_eq!(state.furnace_level, 3, "burn intensity must not reset when a later upgrade starts");
+    sim::apply_command(&mut state, 1, &PlayerCommand::SetFurnaceLevel { level: 1 });
+    assert_eq!(state.furnace_level, 1, "burn intensity stays adjustable during a later upgrade too");
+
+    sim::finish_all_construction(&mut state);
+    assert_eq!(state.find_building(id).unwrap().level, 8, "upgrade completed");
+    assert_eq!(state.furnace_level, 1, "burn intensity must not reset when an upgrade completes either");
+    assert!(state.furnace_lit);
 }

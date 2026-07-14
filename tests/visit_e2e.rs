@@ -231,11 +231,15 @@ fn invite_and_visit_flow() {
 
     // Host (account 1) and Guestly (account 2) both have graduated personal
     // worlds on disk, reusing the graduated-save crafting trick from
-    // `central_world_e2e.rs`.
-    let mut host_world = sim::new_game(111, 12);
+    // `central_world_e2e.rs`. Bootstrapped (furnace already lit, 8
+    // survivors) rather than a bare `new_game`: `EnterCentral` below migrates
+    // up to `CENTRAL_MIGRANTS_PER_ACCOUNT` (5) idle survivors out through the
+    // Tunnel, which would otherwise fully drain a 1-survivor, furnace-unlit
+    // fresh world and leave the personal world with nobody to act as host.
+    let mut host_world = sim::new_game_bootstrapped(111, 12);
     host_world.graduated = true;
     persist::save_at(&host_world, worlds_dir.join("1.bin").to_str().unwrap()).unwrap();
-    let mut guestly_world = sim::new_game(222, 12);
+    let mut guestly_world = sim::new_game_bootstrapped(222, 12);
     guestly_world.graduated = true;
     persist::save_at(&guestly_world, worlds_dir.join("2.bin").to_str().unwrap()).unwrap();
     // Newbie (account 3) never graduated — no save crafted, a fresh

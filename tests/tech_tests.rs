@@ -85,8 +85,8 @@ fn research_is_a_noop_without_resources() {
 
 #[test]
 fn efficient_furnace_burns_less_fuel() {
-    let mut control = sim::new_game(SEED, 12);
-    let mut experiment = sim::new_game(SEED, 12);
+    let mut control = sim::new_game_bootstrapped(SEED, 12);
+    let mut experiment = sim::new_game_bootstrapped(SEED, 12);
     experiment.techs.push(Tech::EfficientFurnace);
 
     control.stock.coal = 1000.0;
@@ -110,8 +110,8 @@ fn better_tools_boosts_production() {
     // A HunterHut's food output has no terrain dependency (unlike a Sawmill's
     // nearby forest), so staffing it identically in both worlds isolates the
     // Tools multiplier cleanly.
-    let mut control = sim::new_game(SEED, 12);
-    let mut experiment = sim::new_game(SEED, 12);
+    let mut control = sim::new_game_bootstrapped(SEED, 12);
+    let mut experiment = sim::new_game_bootstrapped(SEED, 12);
     experiment.techs.push(Tech::Tools);
 
     control.stock.wood = 500.0;
@@ -170,8 +170,8 @@ fn rationing_reduces_food_consumption() {
 
 #[test]
 fn medicine_boosts_hospital_healing() {
-    let mut control = sim::new_game(SEED, 12);
-    let mut experiment = sim::new_game(SEED, 12);
+    let mut control = sim::new_game_bootstrapped(SEED, 12);
+    let mut experiment = sim::new_game_bootstrapped(SEED, 12);
     experiment.techs.push(Tech::Medicine);
 
     control.survivors[0].hp = 40.0;

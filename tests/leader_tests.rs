@@ -52,6 +52,9 @@ fn leader_alive_boosts_production() {
     for state in [&mut control, &mut experiment] {
         state.stock.wood = 500.0;
     }
+    // `new_game` now auto-appoints the sole starting survivor as leader —
+    // clear it on the control so the comparison isolates the leader bonus.
+    control.leader = None;
     let (x, y) = find_sawmill_spot_near_forest(&control);
     sim::apply_command(&mut control, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
     let control_id = control.buildings.last().unwrap().id;
@@ -101,10 +104,15 @@ fn leader_death_starts_mourning_and_pushes_an_event() {
 
 #[test]
 fn mourning_penalizes_production() {
-    let mut control = sim::new_game(SEED, 12);
-    let mut experiment = sim::new_game(SEED, 12);
+    let mut control = sim::new_game_bootstrapped(SEED, 12);
+    let mut experiment = sim::new_game_bootstrapped(SEED, 12);
     for state in [&mut control, &mut experiment] {
         state.stock.wood = 500.0;
+        // Both worlds start with a living (auto-appointed) leader, whose
+        // production bonus would otherwise take priority over — and so
+        // mask — the mourning penalty (`leader_multiplier` treats the two
+        // as mutually exclusive). Clear it so mourning is actually reached.
+        state.leader = None;
     }
     let (x, y) = find_sawmill_spot_near_forest(&control);
     sim::apply_command(&mut control, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
@@ -136,6 +144,9 @@ fn mourning_penalizes_production() {
 #[test]
 fn respond_event_is_a_noop_without_a_living_leader() {
     let mut state = sim::new_game(SEED, 12);
+    // `new_game` auto-appoints the sole starting survivor as leader; this
+    // test wants the genuinely-leaderless case.
+    state.leader = None;
     state.stock.food = 100.0;
     let pop_before = state.survivors.len();
     state.pending_event = Some(CaravanOffer { count: 3, food_cost: 12, expires: state.tick + 100 });
@@ -165,6 +176,10 @@ fn respond_event_works_again_once_a_leader_is_set() {
 #[test]
 fn leaderless_caravan_auto_resolves_to_reject_at_the_deadline() {
     let mut state = sim::new_game(SEED, 12);
+    // `new_game` auto-appoints the sole starting survivor as leader; this
+    // test wants the genuinely-leaderless case.
+    state.leader = None;
+    let pop_before = state.survivors.len();
     state.pending_event = Some(CaravanOffer { count: 3, food_cost: 12, expires: state.tick + 3 });
 
     // Repeatedly "voting" accept must not do anything without a leader...
@@ -180,7 +195,7 @@ fn leaderless_caravan_auto_resolves_to_reject_at_the_deadline() {
     assert!(state.pending_event.is_none(), "an unresolved caravan should still auto-expire");
     assert_eq!(
         state.survivors.len(),
-        8,
+        pop_before,
         "auto-resolution is a reject: no survivors should have been added"
     );
 }

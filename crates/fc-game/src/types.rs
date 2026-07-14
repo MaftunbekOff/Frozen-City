@@ -75,6 +75,17 @@ pub const CONSTRUCTION_CREW_MAX: u8 = 3;
 /// 1-daraja binoni tiklash uchun kerak usta-kunlar, bazaviy yog'och narxining
 /// har birligiga (Chodir 15y ≈ 0.3 usta-kun; Issiqxona 35y ≈ 0.7).
 pub const BUILD_WORKDAYS_PER_WOOD: f32 = 0.02;
+/// How many logs the leader (or any survivor assigned to it) must chop and
+/// carry to the site to finish the boshlang'ich Furnace — each one is a
+/// real walk-there-chop-walk-back trip (`Survivor::chop_target`/
+/// `carrying_wood`, `tick.rs`'s furnace-construction block), not an
+/// abstract worker-days tick-down like every other building's construction.
+pub const FURNACE_LOGS_NEEDED: u32 = 6;
+/// Chebyshev radius (tiles) a furnace-building survivor searches for the
+/// nearest choppable forest tile — generous because mapgen deliberately
+/// keeps the area right around the furnace clear (forest starts ~6-8 tiles
+/// out), so a small radius could come up empty on a sparsely-forested map.
+pub const FURNACE_CHOP_RADIUS: i32 = 25;
 /// 1-darajadan yuqori har bir daraja uchun ishlab-chiqarish/effekt bonusi
 /// (+12%/daraja, L10 ≈ +108%).
 pub const LEVEL_PRODUCTION_BONUS: f32 = 0.12;
@@ -166,6 +177,17 @@ pub const TUNNEL_STAGES: u8 = 3;
 pub const TUNNEL_INVESTS_PER_STAGE: u32 = 5;
 pub const TUNNEL_INVEST_WOOD: f32 = 15.0;
 pub const TUNNEL_INVEST_COAL: f32 = 12.0;
+/// Map position of the always-present `BuildingKind::Tunnel` fixture, a few
+/// tiles from the furnace (mirroring `FURNACE_X`/`FURNACE_Y`) so mapgen never
+/// needs to search for a spot for it.
+pub const TUNNEL_X: u8 = FURNACE_X + 4;
+pub const TUNNEL_Y: u8 = FURNACE_Y;
+
+// --- V0.9: Tunnel migrants (see `events::TunnelMigrant`) ---
+/// Per-day chance a traveler group emerges from an unlocked Tunnel.
+pub const TUNNEL_MIGRANT_CHANCE: f32 = 0.35;
+/// How long travelers wait at the Tunnel for room before giving up.
+pub const TUNNEL_MIGRANT_WAIT_TICKS: u64 = TICKS_PER_DAY;
 
 // --- V0.3: technology-tree effects (see `progression::Tech`) ---
 /// Flat extra warmth for every survivor once Insulation is researched.

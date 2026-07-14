@@ -392,6 +392,17 @@ pub fn construction_line(pct: u32, crew: u8, cap: u8, l: Lang) -> String {
     }
 }
 
+/// The Furnace's construction status while unbuilt — a literal log count
+/// (`FURNACE_LOGS_NEEDED`) instead of `construction_line`'s abstract percent,
+/// since progress here really is "how many logs got carried here."
+pub fn furnace_construction_line(delivered: u32, needed: u32, crew: u8, cap: u8, l: Lang) -> String {
+    match l {
+        Lang::Uz => format!("O'tin: {delivered}/{needed}   ustalar {crew}/{cap}"),
+        Lang::En => format!("Logs: {delivered}/{needed}   builders {crew}/{cap}"),
+        Lang::Ru => format!("Дрова: {delivered}/{needed}   строители {crew}/{cap}"),
+    }
+}
+
 /// V0.8: Yangilash tugmasi — keyingi daraja va yog'och narxi.
 pub fn upgrade_btn(next_level: u8, cost: u32, l: Lang) -> String {
     match l {
@@ -411,17 +422,48 @@ pub fn upgrade_btn_max(l: Lang) -> &'static str {
     }
 }
 
-/// Furnace selection-panel info block.
-pub fn sel_info_furnace(level: u8, per_day: f32, wood_penalty: f32, heat_radius: f32, l: Lang) -> String {
+/// Furnace selection-panel info block while it's still an unbuilt
+/// construction site (the leader hasn't lit it yet) — `sel_info_furnace`'s
+/// "Level 0, heat radius 0" framing would otherwise read as an operating
+/// furnace turned down to nothing, instead of one that doesn't exist yet.
+pub fn sel_info_furnace_building(l: Lang) -> String {
+    match l {
+        Lang::Uz => "Hali qurilmagan — hech kimni isitmaydi.\nBirovni tanlab pechni bosing (yoki\nro'yxatda \"shu yerga biriktirish\"ni\nbosing) — u o'tin chopib qurishni\nboshlaydi.".to_string(),
+        Lang::En => "Not built yet — warms no one.\nSelect someone and click the furnace\n(or use \"assign here\" in the roster) —\nthey'll start chopping wood to build it.".to_string(),
+        Lang::Ru => "Ещё не построена — никого не греет.\nВыберите кого-нибудь и нажмите на\nпечь (или \"назначить сюда\" в списке) —\nони начнут рубить дрова для стройки.".to_string(),
+    }
+}
+
+/// Furnace selection-panel info block. `controllable` is `b.level >= 7` (an
+/// established "Pech", not just a rough "gulxan" campfire — see
+/// `render/buildings.rs`'s two-tier model) — below that the burn-level
+/// buttons are hidden entirely, so the last line explains why instead of
+/// pointing at controls that aren't there.
+pub fn sel_info_furnace(
+    level: u8,
+    per_day: f32,
+    wood_penalty: f32,
+    heat_radius: f32,
+    controllable: bool,
+    l: Lang,
+) -> String {
+    let last_line = match (controllable, l) {
+        (true, Lang::Uz) => "Darajani pastdagi tugmalar bilan tanlang.",
+        (true, Lang::En) => "Set the level with the buttons below.",
+        (true, Lang::Ru) => "Выберите уровень кнопками ниже.",
+        (false, Lang::Uz) => "Hali gulxan holatida — yonish darajasini sozlash uchun uni 7-darajagacha yangilang.",
+        (false, Lang::En) => "Still just a campfire — upgrade it to level 7 to control the burn setting.",
+        (false, Lang::Ru) => "Пока просто костёр — улучшите до уровня 7, чтобы управлять горением.",
+    };
     match l {
         Lang::Uz => format!(
-            "Daraja {level} — {per_day:.0} ko'mir/kun yondiradi\n(ko'mir tugasa yog'och x{wood_penalty})\nIssiqlik radiusi {heat_radius:.0} katak\nDarajani pastdagi tugmalar bilan tanlang.",
+            "Daraja {level} — {per_day:.0} ko'mir/kun yondiradi\n(ko'mir tugasa yog'och x{wood_penalty})\nIssiqlik radiusi {heat_radius:.0} katak\n{last_line}",
         ),
         Lang::En => format!(
-            "Level {level} — burns {per_day:.0} coal/day\n(wood x{wood_penalty} when coal runs out)\nHeat radius {heat_radius:.0} tiles\nSet the level with the buttons below.",
+            "Level {level} — burns {per_day:.0} coal/day\n(wood x{wood_penalty} when coal runs out)\nHeat radius {heat_radius:.0} tiles\n{last_line}",
         ),
         Lang::Ru => format!(
-            "Уровень {level} — сжигает {per_day:.0} угля/день\n(дерево x{wood_penalty}, когда уголь кончится)\nРадиус тепла {heat_radius:.0} клеток\nВыберите уровень кнопками ниже.",
+            "Уровень {level} — сжигает {per_day:.0} угля/день\n(дерево x{wood_penalty}, когда уголь кончится)\nРадиус тепла {heat_radius:.0} клеток\n{last_line}",
         ),
     }
 }
@@ -437,6 +479,29 @@ pub fn sel_info_tent(housing: usize, pop: usize, l: Lang) -> String {
         Lang::Ru => format!(
             "Вмещает 4 человек.\nЖильё города: {housing} на {pop} человек.\nПалатки в радиусе тепла\nсогревают людей ночью.",
         ),
+    }
+}
+
+/// Tunnel selection-panel info block. `pending` is the traveler count
+/// currently waiting at the mouth, if any (`GameState.pending_migrant`).
+pub fn sel_info_tunnel(unlocked: bool, stage: u8, stages: u8, pending: Option<u32>, l: Lang) -> String {
+    if !unlocked {
+        return match l {
+            Lang::Uz => "Hali yopiq. Uni ochish uchun\nbarcha vazifalarni bajaring.".to_string(),
+            Lang::En => "Still sealed. Complete every\nmission to break it open.".to_string(),
+            Lang::Ru => "Пока запечатан. Выполните все\nзадания, чтобы его открыть.".to_string(),
+        };
+    }
+    let base = match l {
+        Lang::Uz => format!("Qazilgan: {stage}/{stages} bosqich.\nVaqti-vaqti bilan yo'lovchilar chiqib turadi."),
+        Lang::En => format!("Excavated: stage {stage}/{stages}.\nTravelers emerge from it from time to time."),
+        Lang::Ru => format!("Раскопано: этап {stage}/{stages}.\nВремя от времени оттуда выходят путники."),
+    };
+    match (pending, l) {
+        (Some(n), Lang::Uz) => format!("{base}\n{n} kishi kirishni kutmoqda —\njoy bo'lsa qabul qilinadi, bo'lmasa qaytib ketadi."),
+        (Some(n), Lang::En) => format!("{base}\n{n} waiting to come in — they'll join\nif there's room, or turn back if not."),
+        (Some(n), Lang::Ru) => format!("{base}\n{n} ждут у входа — войдут, если\nесть место, иначе повернут назад."),
+        (None, _) => base,
     }
 }
 

@@ -1,12 +1,11 @@
 use bevy::anti_alias::fxaa::Fxaa;
 use bevy::camera::Hdr;
-use bevy::gltf::GltfAssetLabel;
 use bevy::light::{CascadeShadowConfigBuilder, DirectionalLightShadowMap};
 use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 
-use frozen_city::game::types::BuildingKind;
+use frozen_city::game::types::{BuildingKind, Profession};
 
 use super::*;
 use crate::client::*;
@@ -15,7 +14,7 @@ use crate::client::*;
 
 /// Fixed `BuildingKind` order backing `GameAssets::building_mats` — index
 /// `i` corresponds to `ALL_KINDS[i]`.
-const ALL_KINDS: [BuildingKind; 9] = [
+const ALL_KINDS: [BuildingKind; 10] = [
     BuildingKind::Furnace,
     BuildingKind::Tent,
     BuildingKind::Sawmill,
@@ -25,6 +24,7 @@ const ALL_KINDS: [BuildingKind; 9] = [
     BuildingKind::Hospital,
     BuildingKind::Kitchen,
     BuildingKind::Warehouse,
+    BuildingKind::Tunnel,
 ];
 
 #[derive(Resource)]
@@ -33,6 +33,9 @@ pub struct GameAssets {
     pub cylinder: Handle<Mesh>,
     pub cone: Handle<Mesh>,
     pub capsule: Handle<Mesh>,
+    /// Survivor heads — a plain unit sphere, scaled down like every other
+    /// shared primitive.
+    pub sphere: Handle<Mesh>,
     pub tent: Handle<Mesh>,
     pub ring: Handle<Mesh>,
     /// Shared vertex-color material for the merged terrain meshes.
@@ -53,11 +56,32 @@ pub struct GameAssets {
     /// avatars read as people, not markers; shared so avatars of the same
     /// color batch into one draw call, same trick as `survivor_mats`.
     pub avatar_mats: [Handle<StandardMaterial>; 8],
+    /// One winter-coat material per trade (`Profession::ALL` order, see
+    /// [`crate::client::profession_coat_color`]) — shared so survivors of the
+    /// same trade batch into one draw call, same trick as `avatar_mats`.
+    pub survivor_coat_mats: [Handle<StandardMaterial>; 6],
+    /// One headwear material per trade — hood/hardhat/toque, deliberately
+    /// distinct from the coat color so a trade reads from its silhouette.
+    pub survivor_head_mats: [Handle<StandardMaterial>; 6],
+    /// Coat override for whoever currently holds `GameState.leader` — a
+    /// royal color no trade uses, so leading reads as visually distinct
+    /// (crown + this) rather than looking stuck in their day job.
+    pub leader_coat_mat: Handle<StandardMaterial>,
+    /// The appointed leader's crown — spawned as a child directly inside
+    /// `spawn_survivor_body` (not a separately tracked/reparented entity),
+    /// so it lives and dies with the rest of that survivor's body instead
+    /// of risking a stale handle across a leadership hand-off.
+    pub leader_crown_mat: Handle<StandardMaterial>,
+    /// Shared skin tone for every survivor's head — the headwear above it is
+    /// what carries the per-trade distinction.
+    pub survivor_skin_mat: Handle<StandardMaterial>,
     /// One body material per `BuildingKind` (see `ALL_KINDS`), shared so
     /// every building of the same kind batches into one draw call.
-    pub building_mats: [Handle<StandardMaterial>; 9],
+    pub building_mats: [Handle<StandardMaterial>; 10],
     /// Furnace base/chimney stone — identical for every furnace.
     pub furnace_stone_mat: Handle<StandardMaterial>,
+    /// The Tunnel's dark mouth/opening, once unlocked.
+    pub tunnel_mouth_mat: Handle<StandardMaterial>,
     pub sawmill_roof_mat: Handle<StandardMaterial>,
     pub sawmill_blade_mat: Handle<StandardMaterial>,
     pub hunter_roof_mat: Handle<StandardMaterial>,
@@ -76,37 +100,6 @@ pub struct GameAssets {
     pub gear_cap_mat: Handle<StandardMaterial>,
 }
 
-/// Bitta kasbning aholi modeli: glTF sahnasi + animatsiya grafi va undagi
-/// uch klip-tugun. Barcha modellar bitta rigda (Quaternius pack) — klip
-/// indekslari [`ANIM_IDLE`]/[`ANIM_WALK`]/[`ANIM_CARRY`] hammasida bir xil.
-pub struct SurvivorVariant {
-    /// glTF sahnasi — Bevy 0.19 da `WorldAsset` (eski nomi `Scene`).
-    pub scene: Handle<WorldAsset>,
-    pub graph: Handle<AnimationGraph>,
-    pub idle: AnimationNodeIndex,
-    pub walk: AnimationNodeIndex,
-    /// `Walk_Carry` — biriktirilgan (ishlayotgan) aholi yurganda yuk
-    /// ko'tarib boradi; bo'sh aholi oddiy yuradi.
-    pub carry: AnimationNodeIndex,
-}
-
-/// Aholi 3D modellari (V0.8): kasb boshiga bitta variant, indeks
-/// `Profession::ALL` tartibida (embed ro'yxati `client::SURVIVOR_MODELS`
-/// bilan bir xil tartib). Har aholi o'z SceneRoot nusxasini oladi;
-/// `setup_survivor_animations` yangi AnimationPlayer'larga mos grafni
-/// ulaydi, `drive_survivor_animations` idle/yurish o'tishlarini boshqaradi.
-#[derive(Resource)]
-pub struct SurvivorModels {
-    pub variants: [SurvivorVariant; 6],
-}
-
-/// Quaternius GLB'laridagi animatsiya indekslari (barcha 6 faylda tartib
-/// tasdiqlangan-bir xil: Defeat, Idle, PickUp, Punch, RecieveHit,
-/// Shoot_OneHanded, SitDown, StandUp, Victory, Walk, Walk_Carry).
-const ANIM_IDLE: usize = 1;
-const ANIM_WALK: usize = 9;
-const ANIM_CARRY: usize = 10;
-
 /// Shared body material handle for a building kind — keeps same-kind
 /// buildings batched into a single draw call instead of each getting its
 /// own `StandardMaterial`.
@@ -123,30 +116,9 @@ pub(crate) fn building_mat(assets: &GameAssets, kind: BuildingKind) -> Handle<St
 pub fn setup_camera_and_assets(
     mut commands: Commands,
     quality: Res<Quality>,
-    asset_server: Res<AssetServer>,
-    mut graphs: ResMut<Assets<AnimationGraph>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // Aholi modellari: har kasb varianti uchun singdirilgan GLB'dan sahna
-    // + idle/yurish/yuk-tashish klipli graf — graflar bir marta quriladi,
-    // shu kasbdagi barcha aholi bo'ylab ulashiladi.
-    let variants = crate::client::SURVIVOR_MODELS.map(|(path, _)| {
-        let clip = |i: usize| {
-            asset_server.load(GltfAssetLabel::Animation(i).from_asset(format!("embedded://{path}")))
-        };
-        let (graph, nodes) =
-            AnimationGraph::from_clips([clip(ANIM_IDLE), clip(ANIM_WALK), clip(ANIM_CARRY)]);
-        SurvivorVariant {
-            scene: asset_server
-                .load(GltfAssetLabel::Scene(0).from_asset(format!("embedded://{path}"))),
-            graph: graphs.add(graph),
-            idle: nodes[0],
-            walk: nodes[1],
-            carry: nodes[2],
-        }
-    });
-    commands.insert_resource(SurvivorModels { variants });
     let camera = commands
         .spawn((
             Camera3d::default(),
@@ -212,6 +184,7 @@ pub fn setup_camera_and_assets(
             height: 1.0,
         }),
         capsule: meshes.add(Capsule3d::new(0.11, 0.22)),
+        sphere: meshes.add(Sphere::new(0.5)),
         tent: meshes.add(tent_mesh()),
         ring: meshes.add(Annulus::new(0.93, 1.0)),
         terrain_mat: materials.add(StandardMaterial {
@@ -259,6 +232,37 @@ pub fn setup_camera_and_assets(
                 ..default()
             })
         }),
+        survivor_coat_mats: Profession::ALL.map(|p| {
+            materials.add(StandardMaterial {
+                base_color: profession_coat_color(p),
+                perceptual_roughness: 0.92,
+                ..default()
+            })
+        }),
+        survivor_head_mats: Profession::ALL.map(|p| {
+            materials.add(StandardMaterial {
+                base_color: profession_head_color(p),
+                perceptual_roughness: 0.85,
+                ..default()
+            })
+        }),
+        survivor_skin_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.80, 0.62, 0.48),
+            perceptual_roughness: 0.8,
+            ..default()
+        }),
+        leader_coat_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.38, 0.20, 0.50),
+            perceptual_roughness: 0.75,
+            ..default()
+        }),
+        leader_crown_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.82, 0.20),
+            emissive: LinearRgba::rgb(0.35, 0.28, 0.03),
+            metallic: 0.4,
+            perceptual_roughness: 0.3,
+            ..default()
+        }),
         building_mats: std::array::from_fn(|i| {
             materials.add(StandardMaterial {
                 base_color: kind_color(ALL_KINDS[i]),
@@ -269,6 +273,11 @@ pub fn setup_camera_and_assets(
         furnace_stone_mat: materials.add(StandardMaterial {
             base_color: Color::srgb(0.34, 0.30, 0.29),
             perceptual_roughness: 0.95,
+            ..default()
+        }),
+        tunnel_mouth_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.04, 0.035, 0.05),
+            perceptual_roughness: 1.0,
             ..default()
         }),
         sawmill_roof_mat: materials.add(StandardMaterial {

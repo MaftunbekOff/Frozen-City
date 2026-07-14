@@ -82,6 +82,8 @@ fn population_mission_completes() {
             profession: Profession::from_id_hash(next_id),
             xp: 0.0,
             trained_kind: None,
+            chop_target: None,
+            carrying_wood: false,
         });
         next_id += 1;
     }

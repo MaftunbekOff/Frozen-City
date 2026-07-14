@@ -4,8 +4,12 @@
 //!
 //! Style mirrors `building_tests.rs`/`roles_tests.rs`: build a scenario with
 //! `sim::new_game` + `sim::apply_command`, then assert on the resulting
-//! `GameState`. `new_game` starts with 8 survivors (ids 1..=8, furnace id 0),
-//! so `state.survivors[0].id` etc. are stable to reference directly.
+//! `GameState`. `new_game` starts with a single survivor (the leader, id 1,
+//! furnace id 0 still under construction) — `sim::new_game_bootstrapped`
+//! instead starts with 8 (ids 1..=8) and a already-lit furnace, for tests
+//! that need more than one idle survivor or don't care about the opening
+//! bootstrap. Either way `state.survivors[0].id` etc. are stable to
+//! reference directly.
 
 use frozen_city::game::sim;
 use frozen_city::game::types::*;
@@ -95,7 +99,9 @@ fn assign_survivor_none_clears_and_frees_slot() {
 
 #[test]
 fn assign_survivor_rejects_full_building() {
-    let mut state = sim::new_game(SEED, 12);
+    // Bootstrapped: needs a second survivor, and a fresh `new_game` starts
+    // with only the leader.
+    let mut state = sim::new_game_bootstrapped(SEED, 12);
     let kitchen = place(&mut state, BuildingKind::Kitchen); // max_workers() == 1
     let first = state.survivors[0].id;
     let second = state.survivors[1].id;
@@ -123,10 +129,14 @@ fn assign_survivor_is_noop_for_dead_or_unknown_survivor_id() {
 
 #[test]
 fn assign_survivor_is_noop_for_unknown_or_zero_capacity_building() {
-    let mut state = sim::new_game(SEED, 12);
+    // Bootstrapped: a *finished* Furnace has zero worker capacity (nobody
+    // needs to staff it once lit — see `BuildingKind::max_workers`). A
+    // freshly-`new_game`d Furnace is still under construction and DOES
+    // accept a builder — that's covered in `tests/furnace_bootstrap_tests.rs`.
+    let mut state = sim::new_game_bootstrapped(SEED, 12);
     let survivor = state.survivors[0].id;
 
-    // Furnace (id 0) accepts no workers.
+    // Furnace (id 0) accepts no workers once built.
     sim::apply_command(&mut state, 1, &PlayerCommand::AssignSurvivor { survivor, building: Some(0) });
     assert_eq!(
         state.survivors.iter().find(|s| s.id == survivor).unwrap().assigned_building,
@@ -164,7 +174,10 @@ fn adjust_workers_cannot_evict_a_named_assignment() {
 
 #[test]
 fn death_of_a_named_worker_frees_exactly_their_own_buildings_slot() {
-    let mut state = sim::new_game(SEED, 12);
+    // Bootstrapped: needs a second idle survivor for the anonymous
+    // `AdjustWorkers` call below (anonymous workers are capped by
+    // `idle_workers()`, and the lone leader is already named elsewhere).
+    let mut state = sim::new_game_bootstrapped(SEED, 12);
     let named_building = place(&mut state, BuildingKind::Sawmill);
     let anon_building = place(&mut state, BuildingKind::CoalMine);
 
@@ -214,7 +227,9 @@ fn demolishing_a_building_clears_assigned_survivors_pointer() {
 
 #[test]
 fn total_workers_and_idle_workers_stay_consistent_with_named_assignment() {
-    let mut state = sim::new_game(SEED, 12);
+    // Bootstrapped: needs idle survivors for the anonymous `AdjustWorkers`
+    // call below (see the same note in the previous test).
+    let mut state = sim::new_game_bootstrapped(SEED, 12);
     let sawmill = place(&mut state, BuildingKind::Sawmill);
     let coal_mine = place(&mut state, BuildingKind::CoalMine);
     let pop = state.survivors.len() as u32;

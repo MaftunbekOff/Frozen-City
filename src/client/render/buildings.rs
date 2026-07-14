@@ -28,8 +28,25 @@ pub fn sync_buildings(
         // o'zgargan zahoti eski entity buziladi va yangi shakl quriladi
         // (SpawnGrow bitish/yangilashda kichik "o'sish" animatsiyasini beradi).
         let uc = b.under_construction();
+        // Only the Furnace's shape depends on `furnace_level` (its
+        // log-teepee grows a tier with it) — comparing it for every other
+        // kind would be harmless (always 0 == 0) but gating on `is_furnace`
+        // makes that intent explicit.
+        let is_furnace = b.kind == BuildingKind::Furnace;
+        let furnace_level = if is_furnace { state.furnace_level } else { 0 };
+        let is_tunnel = b.kind == BuildingKind::Tunnel;
+        let tunnel_stage = if is_tunnel {
+            if state.tunnel.unlocked { state.tunnel.stage + 1 } else { 0 }
+        } else {
+            0
+        };
         let fresh = match viz.0.get(&b.id) {
-            Some(v) => v.level != b.level || v.under_construction != uc,
+            Some(v) => {
+                v.level != b.level
+                    || v.under_construction != uc
+                    || (is_furnace && v.furnace_level != furnace_level)
+                    || (is_tunnel && v.tunnel_stage != tunnel_stage)
+            }
             None => true,
         };
         if !fresh {
@@ -38,13 +55,23 @@ pub fn sync_buildings(
         if let Some(v) = viz.0.remove(&b.id) {
             commands.entity(v.entity).despawn();
         }
-        let e = spawn_building(&mut commands, &assets, &mut materials, b, *quality == Quality::Low);
+        let e = spawn_building(
+            &mut commands,
+            &assets,
+            &mut materials,
+            b,
+            *quality == Quality::Low,
+            furnace_level,
+            tunnel_stage,
+        );
         viz.0.insert(
             b.id,
             BuildingVizEntry {
                 entity: e,
                 level: b.level,
                 under_construction: uc,
+                furnace_level,
+                tunnel_stage,
             },
         );
     }
@@ -82,6 +109,8 @@ fn spawn_building(
     materials: &mut Assets<StandardMaterial>,
     b: &frozen_city::game::types::Building,
     low: bool,
+    furnace_level: u8,
+    tunnel_stage: u8,
 ) -> Entity {
     let center = building_center_world(b);
     // `body` (the shared per-kind material) is looked up inside each
@@ -111,10 +140,17 @@ fn spawn_building(
     // bilan to'qnashmaydi.
     let size = 1.0 + 0.02 * b.level.saturating_sub(1) as f32;
     let mut roof_y = 0.6;
+    // A V0.9 Furnace level-upgrade (`b.level` 1-10, `BuildingKind::upgradeable`)
+    // re-sets `build_left` too, same field the generic scaffold below keys
+    // off — but by then it's already lit at least once (`furnace_level > 0`,
+    // passed in from `sync_buildings`), so it keeps showing its own
+    // campfire/Pech model (sized to the new level) instead of reverting to
+    // the bare-scaffold "not built yet" look every other kind gets.
+    let show_scaffold = b.under_construction() && !(b.kind == BuildingKind::Furnace && furnace_level > 0);
     commands.entity(root).with_children(|top| {
         top.spawn((Transform::from_scale(Vec3::splat(size)), Visibility::Inherited))
             .with_children(|p| {
-        if b.under_construction() {
+        if show_scaffold {
             // Qurilish maydonchasi: yog'och poydevor + 4 burchak ustun +
             // ustki to'sinlar — bino bitmaguncha o'z shakli ko'rinmaydi
             // (Frostpunk'dagi karkas bosqichi uslubida).
@@ -142,49 +178,140 @@ fn spawn_building(
         } else {
         match b.kind {
             BuildingKind::Furnace => {
-                let stone = assets.furnace_stone_mat.clone();
-                // Base, glowing core, chimney.
+                // Two structural tiers keyed on `b.level` (V0.9, the
+                // Furnace's own 1-10 upgrade path — see
+                // `BuildingKind::upgradeable`), distinct from
+                // `furnace_level` (0-3, the player's burn-intensity setting,
+                // which still only sizes the fire/smoke/light below): L1-6
+                // is a rough "gulxan" log-teepee that grows gradually; L7-10
+                // rebuilds it into an actual stone "Pech" — a solid
+                // masonry body + chimney — echoing that only a well-
+                // established furnace deserves the name. Both tiers morph
+                // continuously with level, not just a single jump at 7.
+                let apex_y;
+                if b.level <= 6 {
+                    let t = b.level.saturating_sub(1) as f32; // 0..=5
+                    let base_r = 0.13 + 0.03 * t;
+                    apex_y = 0.32 + 0.07 * t;
+                    let log_thick = 0.04 + 0.006 * t;
+                    let log_count = 5 + t as u32 / 2;
+                    let band_count = ((t as u32).saturating_sub(1) / 2).min(2); // 0,0,0,1,1,2
+
+                    p.spawn((
+                        Mesh3d(assets.cylinder.clone()),
+                        MeshMaterial3d(assets.furnace_stone_mat.clone()),
+                        Transform::from_xyz(0.0, 0.02 + 0.004 * t, 0.0)
+                            .with_scale(Vec3::new(0.16 + 0.035 * t, 0.03 + 0.004 * t, 0.16 + 0.035 * t)),
+                    ));
+                    let log_mat = assets.sawmill_roof_mat.clone();
+                    for i in 0..log_count {
+                        let theta = i as f32 * std::f32::consts::TAU / log_count as f32;
+                        let base = Vec3::new(theta.cos() * base_r, 0.05, theta.sin() * base_r);
+                        let apex = Vec3::new(0.0, apex_y, 0.0);
+                        let dir = apex - base;
+                        p.spawn((
+                            Mesh3d(assets.cylinder.clone()),
+                            MeshMaterial3d(log_mat.clone()),
+                            Transform::from_translation((base + apex) / 2.0)
+                                .with_rotation(Quat::from_rotation_arc(Vec3::Y, dir.normalize()))
+                                .with_scale(Vec3::new(log_thick, dir.length(), log_thick)),
+                        ));
+                    }
+                    for band in 0..band_count {
+                        let frac = 0.3 + 0.3 * band as f32;
+                        let band_r = base_r * (1.0 - frac) * 1.05;
+                        p.spawn((
+                            Mesh3d(assets.ring.clone()),
+                            MeshMaterial3d(log_mat.clone()),
+                            Transform::from_xyz(0.0, apex_y * frac, 0.0)
+                                .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))
+                                .with_scale(Vec3::splat(band_r)),
+                        ));
+                    }
+                } else {
+                    let u = (b.level - 7) as f32; // 0..=3
+                    let body_r = 0.34 + 0.05 * u;
+                    let body_h = 0.55 + 0.10 * u;
+                    let chimney_h = 0.35 + 0.08 * u;
+                    apex_y = body_h + chimney_h;
+                    let band_count = 1 + u as u32; // 1..=4 reinforcement bands
+
+                    let stone = assets.furnace_stone_mat.clone();
+                    p.spawn((
+                        Mesh3d(assets.cylinder.clone()),
+                        MeshMaterial3d(stone.clone()),
+                        Transform::from_xyz(0.0, body_h * 0.5, 0.0)
+                            .with_scale(Vec3::new(body_r, body_h, body_r)),
+                    ));
+                    p.spawn((
+                        Mesh3d(assets.cylinder.clone()),
+                        MeshMaterial3d(stone.clone()),
+                        Transform::from_xyz(0.0, body_h + chimney_h * 0.5, 0.0)
+                            .with_scale(Vec3::new(body_r * 0.4, chimney_h, body_r * 0.4)),
+                    ));
+                    // The mouth: a dark arched opening low on the body, with
+                    // the fire glowing through it.
+                    p.spawn((
+                        Mesh3d(assets.cube.clone()),
+                        MeshMaterial3d(assets.tunnel_mouth_mat.clone()),
+                        Transform::from_xyz(0.0, body_h * 0.32, body_r * 0.85)
+                            .with_scale(Vec3::new(body_r * 0.7, body_h * 0.5, 0.10)),
+                    ));
+                    // Metal reinforcement bands, more of them at higher
+                    // level — an established Pech, not a rough campfire.
+                    let band_mat = assets.sawmill_blade_mat.clone();
+                    for band in 0..band_count {
+                        let y = body_h * (0.25 + 0.6 * band as f32 / band_count.max(1) as f32);
+                        p.spawn((
+                            Mesh3d(assets.ring.clone()),
+                            MeshMaterial3d(band_mat.clone()),
+                            Transform::from_xyz(0.0, y, 0.0)
+                                .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))
+                                .with_scale(Vec3::splat(body_r * 1.02)),
+                        ));
+                    }
+                }
+                // Fire core, sized by the player's burn-intensity setting
+                // (0-3) — independent of the structural tier above.
+                let lvl = furnace_level as f32;
                 p.spawn((
-                    Mesh3d(assets.cylinder.clone()),
-                    MeshMaterial3d(stone.clone()),
-                    Transform::from_xyz(0.0, 0.3, 0.0).with_scale(Vec3::new(1.9, 0.6, 1.9)),
-                ));
-                p.spawn((
-                    Mesh3d(assets.cylinder.clone()),
+                    Mesh3d(assets.cone.clone()),
                     MeshMaterial3d(fire_mat.clone().expect("furnace fire material")),
-                    Transform::from_xyz(0.0, 0.68, 0.0).with_scale(Vec3::new(1.35, 0.25, 1.35)),
-                ));
-                p.spawn((
-                    Mesh3d(assets.cylinder.clone()),
-                    MeshMaterial3d(stone),
-                    Transform::from_xyz(0.0, 1.35, 0.0).with_scale(Vec3::new(0.85, 1.3, 0.85)),
+                    Transform::from_xyz(0.0, 0.10, 0.0)
+                        .with_scale(Vec3::splat(0.13 + 0.03 * lvl)),
                 ));
                 // Per-fragment point lighting is costly on mobile WebGL2, so
                 // phones skip it — the emissive fire still reads as a glow.
+                // These starting values are overwritten every frame by
+                // `animate_effects`; kept in sync with it just so the very
+                // first rendered frame (before that system first runs)
+                // doesn't flash brighter than the steady-state look.
                 if !low {
                     p.spawn((
                         PointLight {
                             color: Color::srgb(1.0, 0.62, 0.25),
-                            intensity: 2_400_000.0,
-                            range: 26.0,
+                            intensity: 150_000.0,
+                            range: 8.0,
                             ..default()
                         },
-                        Transform::from_xyz(0.0, 2.6, 0.0),
+                        Transform::from_xyz(0.0, apex_y + 0.4, 0.0),
                         FurnaceLight,
                     ));
                 }
-                // Chimney smoke: looping puffs, hidden when the fire is out.
+                // Smoke: looping puffs rising from the structure's peak
+                // (teepee apex or Pech chimney), hidden when the fire is out.
                 for i in 0..10u32 {
                     p.spawn((
                         Mesh3d(assets.cube.clone()),
                         MeshMaterial3d(assets.smoke_mat.clone()),
-                        Transform::from_xyz(0.0, 2.2, 0.0).with_scale(Vec3::splat(0.1)),
+                        Transform::from_xyz(0.0, apex_y + 0.2, 0.0).with_scale(Vec3::splat(0.1)),
                         Visibility::Hidden,
                         Smoke {
                             phase: i as f32 / 10.0,
                         },
                     ));
                 }
+                roof_y = apex_y + 0.3;
             }
             BuildingKind::Tent => {
                 let body = building_mat(assets, b.kind);
@@ -326,10 +453,59 @@ fn spawn_building(
                 }
                 roof_y = 0.48;
             }
+            BuildingKind::Tunnel => {
+                if tunnel_stage == 0 {
+                    // Sealed: an unremarkable snow-dusted rock mound —
+                    // nothing yet hints at what's underneath.
+                    let stone = assets.furnace_stone_mat.clone();
+                    p.spawn((
+                        Mesh3d(assets.sphere.clone()),
+                        MeshMaterial3d(stone.clone()),
+                        Transform::from_xyz(0.0, 0.16, 0.0).with_scale(Vec3::new(0.95, 0.34, 0.80)),
+                    ));
+                    for (dx, dz, s) in [(-0.30, 0.18, 0.22), (0.32, -0.12, 0.18), (0.05, -0.30, 0.16)] {
+                        p.spawn((
+                            Mesh3d(assets.sphere.clone()),
+                            MeshMaterial3d(stone.clone()),
+                            Transform::from_xyz(dx, s * 0.4, dz).with_scale(Vec3::splat(s)),
+                        ));
+                    }
+                    roof_y = 0.4;
+                } else {
+                    // Unlocked: a stone archway framing a dark mouth,
+                    // widening a little each excavation stage (`tunnel_stage`
+                    // is 1..=4, i.e. `TunnelState.stage` 0..=3 shifted by one
+                    // so 0 stays reserved for "not yet unlocked").
+                    let stage = (tunnel_stage - 1) as f32;
+                    let half_w = 0.30 + 0.06 * stage;
+                    let h = 0.62 + 0.10 * stage;
+                    let stone = assets.furnace_stone_mat.clone();
+                    for dx in [-1.0f32, 1.0] {
+                        p.spawn((
+                            Mesh3d(assets.cube.clone()),
+                            MeshMaterial3d(stone.clone()),
+                            Transform::from_xyz(dx * (half_w + 0.08), h * 0.5, 0.0)
+                                .with_scale(Vec3::new(0.16, h, 0.18)),
+                        ));
+                    }
+                    p.spawn((
+                        Mesh3d(assets.cube.clone()),
+                        MeshMaterial3d(stone),
+                        Transform::from_xyz(0.0, h + 0.08, 0.0)
+                            .with_scale(Vec3::new(2.0 * half_w + 0.32, 0.16, 0.20)),
+                    ));
+                    p.spawn((
+                        Mesh3d(assets.cube.clone()),
+                        MeshMaterial3d(assets.tunnel_mouth_mat.clone()),
+                        Transform::from_xyz(0.0, h * 0.5, 0.02).with_scale(Vec3::new(half_w * 2.0, h, 0.05)),
+                    ));
+                    roof_y = h + 0.18;
+                }
+            }
         }
 
         // A small window that glows warm at night (shared animated material).
-        if b.kind != BuildingKind::Furnace {
+        if b.kind != BuildingKind::Furnace && b.kind != BuildingKind::Tunnel {
             p.spawn((
                 Mesh3d(assets.cube.clone()),
                 MeshMaterial3d(assets.window_mat.clone()),

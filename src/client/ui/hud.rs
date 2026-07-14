@@ -139,19 +139,22 @@ pub fn spawn_hud(
             p.spawn((theme::text("", events_font, Color::srgba(0.85, 0.90, 1.0, 0.9)), HudField::Events));
         });
 
-    // --- Selection panel --- anchored bottom-LEFT so it never collides with
-    // the bottom-right Build/Manage panel (`spawn_build_panel`). Frostpunk
-    // bino-paneli uslubi: markazlashgan mis sarlavha + mis chiziq, ma'lumot,
-    // "ISHCHI KUCHI" bo'limi (− / katta hisob / + va Hech kim / Maksimum
-    // tez-tugmalari, bo'sh-ishchi hisobi), oxirida to'liq-en buzish tugmasi.
-    let sel_bottom = if ff.compact() { 12.0 } else { 44.0 };
+    // --- Selection panel --- floats next to whichever building is selected
+    // (`sync_selection_panel_position` re-projects its world position to
+    // screen space every frame) instead of a fixed screen corner; `left`/
+    // `top` below are just a harmless first-frame default before that system
+    // places it, and get overwritten immediately once a building is picked.
+    // Frostpunk bino-paneli uslubi: markazlashgan mis sarlavha + mis chiziq,
+    // ma'lumot, "ISHCHI KUCHI" bo'limi (− / katta hisob / + va Hech kim /
+    // Maksimum tez-tugmalari, bo'sh-ishchi hisobi), oxirida to'liq-en buzish
+    // tugmasi.
     commands
         .spawn((
             Node {
                 display: Display::None,
                 position_type: PositionType::Absolute,
                 left: Val::Px(12.0),
-                bottom: Val::Px(sel_bottom),
+                top: Val::Px(12.0),
                 width: Val::Px(300.0),
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(SP_SM),

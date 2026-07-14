@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use bevy::prelude::*;
 
 use frozen_city::game::types::{
-    Building, BuildingKind, GameState, Terrain, Tile, MAP_H, MAP_W,
+    Building, BuildingKind, GameState, Profession, Terrain, Tile, MAP_H, MAP_W,
 };
 use frozen_city::net::client::ClientConn;
 use frozen_city::net::protocol::ClientMsg;
@@ -404,6 +404,36 @@ pub fn kind_color(k: BuildingKind) -> Color {
         BuildingKind::Hospital => Color::srgb(0.86, 0.88, 0.92),
         BuildingKind::Kitchen => Color::srgb(0.78, 0.52, 0.30),
         BuildingKind::Warehouse => Color::srgb(0.58, 0.46, 0.32),
+        BuildingKind::Tunnel => Color::srgb(0.40, 0.38, 0.40),
+    }
+}
+
+/// Winter-coat color per trade — an insulated, muted survival palette (not
+/// the bright/branded tones `kind_color` uses for buildings) that still
+/// echoes the matching workplace's material where it makes sense (e.g.
+/// `Miner` reads as coal-dust gray next to `CoalMine`'s slate).
+pub fn profession_coat_color(p: Profession) -> Color {
+    match p {
+        Profession::Lumberjack => Color::srgb(0.56, 0.20, 0.17), // flannel red
+        Profession::Miner => Color::srgb(0.30, 0.31, 0.35),      // coal-dust charcoal
+        Profession::Hunter => Color::srgb(0.30, 0.42, 0.28),     // hunter green
+        Profession::Farmer => Color::srgb(0.62, 0.46, 0.22),     // harvest mustard
+        Profession::Medic => Color::srgb(0.88, 0.90, 0.94),      // clinical white
+        Profession::Cook => Color::srgb(0.87, 0.80, 0.66),       // apron cream
+    }
+}
+
+/// Headwear color per trade (hood/hardhat/toque) — deliberately distinct
+/// from [`profession_coat_color`] so a survivor's trade reads from the
+/// silhouette alone, not just the coat tint.
+pub fn profession_head_color(p: Profession) -> Color {
+    match p {
+        Profession::Lumberjack => Color::srgb(0.30, 0.22, 0.15), // fur-trim brown
+        Profession::Miner => Color::srgb(0.95, 0.75, 0.15),      // safety-yellow hardhat
+        Profession::Hunter => Color::srgb(0.55, 0.46, 0.32),     // tan fur hood
+        Profession::Farmer => Color::srgb(0.70, 0.58, 0.30),     // straw hood
+        Profession::Medic => Color::srgb(0.82, 0.84, 0.90),      // pale hood
+        Profession::Cook => Color::srgb(0.93, 0.90, 0.84),       // white toque
     }
 }
 
@@ -443,54 +473,10 @@ pub fn player_color(idx: u8) -> Color {
     Color::srgb(r, g, b)
 }
 
-/// Aholi 3D modellari — kasbiga mos bittadan (Quaternius "Ultimate Animated
-/// Character Pack", CC0 — qarang `assets/models/survivors/LICENSE-Quaternius.txt`).
-/// Font kabi binary ichiga singdirilgan: native va wasm'da bir xil, tashqi
-/// fayl/HTTP talab qilmaydi. Tartib `Profession::ALL` bilan bir xil —
-/// `render::assets` shu indeks bo'yicha variant tanlaydi.
-pub(crate) const SURVIVOR_MODELS: [(&str, &[u8]); 6] = [
-    (
-        "models/survivors/Viking_Male.glb", // Lumberjack
-        include_bytes!("../../assets/models/survivors/Viking_Male.glb"),
-    ),
-    (
-        "models/survivors/Worker_Male.glb", // Miner
-        include_bytes!("../../assets/models/survivors/Worker_Male.glb"),
-    ),
-    (
-        "models/survivors/Cowboy_Male.glb", // Hunter
-        include_bytes!("../../assets/models/survivors/Cowboy_Male.glb"),
-    ),
-    (
-        "models/survivors/Cowboy_Female.glb", // Farmer
-        include_bytes!("../../assets/models/survivors/Cowboy_Female.glb"),
-    ),
-    (
-        "models/survivors/Doctor_Female_Young.glb", // Medic
-        include_bytes!("../../assets/models/survivors/Doctor_Female_Young.glb"),
-    ),
-    (
-        "models/survivors/Chef_Male.glb", // Cook
-        include_bytes!("../../assets/models/survivors/Chef_Male.glb"),
-    ),
-];
-
 pub struct ClientPlugin;
 
 impl Plugin for ClientPlugin {
     fn build(&self, app: &mut App) {
-        // Singdirilgan GLB'larni `embedded://` asset manbasiga ro'yxatlaydi —
-        // `render::setup_camera_and_assets` shu yo'llardan yuklaydi.
-        let registry = app
-            .world()
-            .resource::<bevy::asset::io::embedded::EmbeddedAssetRegistry>();
-        for (path, bytes) in SURVIVOR_MODELS {
-            registry.insert_asset(
-                std::path::PathBuf::from(path),
-                std::path::Path::new(path),
-                bytes,
-            );
-        }
         app.init_state::<Screen>()
             .init_resource::<input::CamRig>()
             .init_resource::<touch::TouchCtl>()
@@ -512,6 +498,7 @@ impl Plugin for ClientPlugin {
             .init_resource::<render::TerrainViz>()
             .init_resource::<render::BuildingViz>()
             .init_resource::<render::SurvivorViz>()
+            .init_resource::<render::MigrantViz>()
             .init_resource::<render::CursorViz>()
             .init_resource::<render::AvatarViz>()
             .init_resource::<render::PingViz>()
@@ -566,6 +553,7 @@ impl Plugin for ClientPlugin {
                     render::sync_terrain,
                     render::sync_buildings,
                     render::sync_survivors,
+                    render::sync_migrants,
                 )
                     .chain()
                     .run_if(in_state(Screen::Game)),
@@ -578,10 +566,8 @@ impl Plugin for ClientPlugin {
                     render::animate_effects,
                     render::animate_smoke,
                     render::animate_survivors,
-                    render::setup_survivor_animations,
-                    render::drive_survivor_animations,
+                    render::animate_survivor_legs,
                     render::animate_survivor_selection,
-                    render::sync_leader_crown,
                     render::spawn_move_ping,
                     render::animate_move_pings,
                     render::animate_spawn,
@@ -623,6 +609,7 @@ impl Plugin for ClientPlugin {
                     ui::build_panel_toggle,
                     ui::build_panel_visibility,
                     ui::selection_panel_update,
+                    ui::sync_selection_panel_position,
                     ui::selection_panel_buttons,
                     ui::game_over_ui,
                     ui::world_switch_button,

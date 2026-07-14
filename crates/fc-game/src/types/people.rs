@@ -105,6 +105,24 @@ pub struct Survivor {
     /// on a kind CHANGE, not on a plain unassign, so a temporarily idled
     /// survivor doesn't lose progress).
     pub trained_kind: Option<BuildingKind>,
+    /// The forest tile this survivor is walking to (or standing at, about to
+    /// chop) — either a Furnace-building errand (auto-picked while
+    /// `assigned_building` points at a still-under-construction Furnace,
+    /// each chopped log carried home toward `FURNACE_LOGS_NEEDED`) or a
+    /// one-shot manual chop (`PlayerCommand::ChopTile`, which clears
+    /// `assigned_building` first — chopping credits the stockpile directly
+    /// since there's nowhere assigned to carry it). See `tick.rs`'s
+    /// chop/carry block. Overrides the assigned-building walk goal but
+    /// never `move_target`, which a player-issued walk always cancels this
+    /// (and `carrying_wood`) via.
+    pub chop_target: Option<(u8, u8)>,
+    /// Set on arrival at `chop_target` (which is cleared at that point) once
+    /// a Furnace-errand tile's been chopped — a manual chop never sets this,
+    /// it credits the stockpile immediately instead. Cleared again on
+    /// arrival back at the Furnace, when it counts as one delivered log
+    /// toward `FURNACE_LOGS_NEEDED`. While true, the survivor's walk goal is
+    /// their assigned building (the Furnace) instead of a tree.
+    pub carrying_wood: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

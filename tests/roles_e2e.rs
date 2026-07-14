@@ -99,7 +99,7 @@ fn guest_can_place_under_default_build_permission() {
             .iter()
             .any(|b| b.kind == BuildingKind::Tent && b.owner == Some(carol_id))
     });
-    assert_eq!(seen.buildings.len(), 2, "furnace + the guest's tent");
+    assert_eq!(seen.buildings.len(), 3, "furnace + tunnel + the guest's tent");
 
     handle.stop();
 }

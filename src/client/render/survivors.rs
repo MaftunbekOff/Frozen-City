@@ -1,9 +1,7 @@
-use std::time::Duration;
-
 use bevy::prelude::*;
 
 use frozen_city::game::rng::Rng;
-use frozen_city::game::types::{xp_level, Profession};
+use frozen_city::game::types::{xp_level, Profession, TUNNEL_X, TUNNEL_Y};
 
 use super::*;
 use crate::client::*;
@@ -23,10 +21,10 @@ pub fn sync_survivors(
     mut commands: Commands,
     view: Res<GameView>,
     assets: Res<GameAssets>,
-    models: Res<SurvivorModels>,
     mut viz: ResMut<SurvivorViz>,
     mut dots: Query<(&SurvivorDot, &mut Wander, &mut SurvivorRig)>,
-    mut gear: Query<(&SurvivorGear, &mut Visibility)>,
+    mut gear: Query<(&SurvivorGear, &mut Visibility), Without<SurvivorCarry>>,
+    mut carry: Query<(&SurvivorCarry, &mut Visibility), Without<SurvivorGear>>,
     mut seen: Local<u64>,
 ) {
     let Some(state) = view.ready() else { return };
@@ -36,71 +34,71 @@ pub fn sync_survivors(
     *seen = view.version;
 
     for s in &state.survivors {
-        if viz.0.contains_key(&s.id) {
-            continue;
+        let is_leader = state.leader == Some(s.id);
+        if let Some(entry) = viz.0.get(&s.id) {
+            if entry.is_leader == is_leader {
+                continue;
+            }
+            // Leadership just changed hands (or this survivor just lost/
+            // gained the seat) — the trade-vs-leader look swaps whole
+            // meshes, so rebuild rather than try to patch materials in place.
+            commands.entity(entry.entity).despawn();
+            viz.0.remove(&s.id);
         }
         let pos = survivor_sim_world(s);
-        // Kasbiga mos 3D odam modeli (Quaternius, skelet + idle/yurish/yuk
-        // animatsiyalari): har aholi o'z SceneRoot nusxasini oladi,
-        // animatsiyani `setup_survivor_animations`/`drive_survivor_animations`
-        // boshqaradi. Root'ning o'zida mesh yo'q — u pozitsiya/burilish
-        // tashuvchisi.
         let variant = Profession::ALL
             .iter()
             .position(|&p| p == s.profession)
             .unwrap_or(0);
+        // Root sits at ground level (feet), unlike the old single-capsule
+        // dot which stored its own center height — every body part below
+        // is positioned as an absolute height from the ground instead.
         let e = commands
             .spawn((
-                Transform::from_translation(pos + Vec3::Y * 0.24),
+                Transform::from_translation(pos),
                 Visibility::Inherited,
                 SurvivorDot { id: s.id },
                 SurvivorRig {
-                    variant,
                     carrying: s.assigned_building.is_some(),
                 },
                 Wander {
                     sim_pos: pos,
                     shuffle_target: pos,
                     speed: 0.9 + (s.id % 7) as f32 * 0.1,
+                    moving: false,
                 },
                 DespawnOnExit(Screen::Game),
             ))
             .with_children(|p| {
-                // Model ~2 birlik bo'yli, tagligi oyoqda — o'yin
-                // masshtabiga ~0.5 birlikka keltiramiz; root y=0.24 da
-                // turgani uchun sahna -0.24 ga tushiriladi (oyoq yerda).
-                // (`WorldAssetRoot` — Bevy 0.19 dagi eski `SceneRoot`.)
-                p.spawn((
-                    WorldAssetRoot(models.variants[variant].scene.clone()),
-                    Transform::from_xyz(0.0, -0.24, 0.0).with_scale(Vec3::splat(0.26)),
-                ));
+                spawn_survivor_body(p, &assets, s.profession, variant, s.id, is_leader);
+
                 // XP-daraja anjomlari (yashirin tug'iladi; pastdagi gear-sikl
-                // haqiqiy darajaga qarab ochadi): L1 peshona tasmasi,
-                // L2 charm qalpoq, L3 oltin ko'krak nishoni.
+                // haqiqiy darajaga qarab ochadi): L1 peshona tasmasi, L2
+                // qalpoq halqasi, L3 oltin ko'krak nishoni.
                 p.spawn((
                     Mesh3d(assets.cylinder.clone()),
                     MeshMaterial3d(assets.gear_band_mat.clone()),
-                    Transform::from_xyz(0.0, 0.27, 0.0).with_scale(Vec3::new(0.17, 0.035, 0.17)),
+                    Transform::from_xyz(0.0, 0.50, 0.0).with_scale(Vec3::new(0.13, 0.03, 0.13)),
                     Visibility::Hidden,
                     SurvivorGear { id: s.id, level: 1 },
                 ));
                 p.spawn((
-                    Mesh3d(assets.cone.clone()),
+                    Mesh3d(assets.cylinder.clone()),
                     MeshMaterial3d(assets.gear_cap_mat.clone()),
-                    Transform::from_xyz(0.0, 0.34, 0.0).with_scale(Vec3::new(0.20, 0.12, 0.20)),
+                    Transform::from_xyz(0.0, 0.565, 0.0).with_scale(Vec3::new(0.20, 0.05, 0.20)),
                     Visibility::Hidden,
                     SurvivorGear { id: s.id, level: 2 },
                 ));
                 p.spawn((
                     Mesh3d(assets.cube.clone()),
                     MeshMaterial3d(assets.tier_flag_mats[2].clone()),
-                    Transform::from_xyz(0.0, 0.12, 0.09).with_scale(Vec3::new(0.07, 0.07, 0.03)),
+                    Transform::from_xyz(-0.09, 0.34, 0.10).with_scale(Vec3::new(0.07, 0.07, 0.03)),
                     Visibility::Hidden,
                     SurvivorGear { id: s.id, level: 3 },
                 ));
             })
             .id();
-        viz.0.insert(s.id, e);
+        viz.0.insert(s.id, SurvivorVizEntry { entity: e, is_leader });
     }
 
     // XP-daraja anjomlarining ko'rinishi — daraja oshgan sari qo'shilib
@@ -122,6 +120,26 @@ pub fn sync_survivors(
         }
     }
 
+    // Carried-resource prop — visible only while assigned to a building
+    // (mirrors the XP-gear loop above, computed straight from sim state so
+    // it never races the `rig.carrying` refresh below).
+    for (c, mut vis) in &mut carry {
+        let carrying = state
+            .survivors
+            .iter()
+            .find(|s| s.id == c.id)
+            .map(|s| s.assigned_building.is_some())
+            .unwrap_or(false);
+        let want = if carrying {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if *vis != want {
+            *vis = want;
+        }
+    }
+
     let gone: Vec<u32> = viz
         .0
         .keys()
@@ -129,8 +147,8 @@ pub fn sync_survivors(
         .copied()
         .collect();
     for id in gone {
-        if let Some(e) = viz.0.remove(&id) {
-            commands.entity(e).despawn();
+        if let Some(entry) = viz.0.remove(&id) {
+            commands.entity(entry.entity).despawn();
         }
     }
 
@@ -149,79 +167,312 @@ pub fn sync_survivors(
     }
 }
 
-/// Sahna nusxasi ichida tug'ilgan har yangi `AnimationPlayer`ga o'z
-/// kasb-variantining grafini ulab, idle klipdan boshlaydi (o'yinda sahna
-/// instansiyalaydigan yagona model turi — aholi, shuning uchun global
-/// `Added` filtri yetarli). Variantni ota zanjiridagi `SurvivorRig`dan
-/// o'qiydi — player sahna skeleti ichida, root esa bir necha pog'ona tepada.
-pub fn setup_survivor_animations(
+/// Traveler figures standing at the Tunnel mouth while `pending_migrant` is
+/// set — cosmetic only (see `MigrantViz`'s doc comment), rebuilt whenever the
+/// pending batch's identity changes and cleared once it resolves (absorbed
+/// into the colony or turned back), both handled in `tick.rs`.
+pub fn sync_migrants(
     mut commands: Commands,
-    models: Res<SurvivorModels>,
-    rigs: Query<&SurvivorRig>,
-    parents: Query<&ChildOf>,
-    mut players: Query<(Entity, &mut AnimationPlayer), Added<AnimationPlayer>>,
+    view: Res<GameView>,
+    assets: Res<GameAssets>,
+    mut viz: ResMut<MigrantViz>,
+    mut seen: Local<u64>,
 ) {
-    for (e, mut player) in &mut players {
-        let mut cur = e;
-        let mut variant = None;
-        for _ in 0..8 {
-            let Ok(co) = parents.get(cur) else { break };
-            cur = co.parent();
-            if let Ok(rig) = rigs.get(cur) {
-                variant = Some(rig.variant);
-                break;
-            }
-        }
-        let Some(v) = variant else { continue };
-        let v = &models.variants[v];
-        let mut transitions = AnimationTransitions::new();
-        transitions.play(&mut player, v.idle, Duration::ZERO).repeat();
-        commands
-            .entity(e)
-            .insert((AnimationGraphHandle(v.graph.clone()), transitions));
+    let Some(state) = view.ready() else { return };
+    if *seen == view.version {
+        return;
+    }
+    *seen = view.version;
+
+    let key = state.pending_migrant.map(|m| (m.count, m.expires));
+    if key == viz.key {
+        return;
+    }
+    viz.key = key;
+    for e in viz.entities.drain(..) {
+        commands.entity(e).despawn();
+    }
+    let Some(m) = state.pending_migrant else { return };
+    // A little in front of the tunnel mouth (TUNNEL is a 2x2 footprint), so
+    // they read as "just stepped out" rather than standing inside it.
+    let base = tilef_to_world((TUNNEL_X as f32 + 1.0, TUNNEL_Y as f32 + 2.3));
+    for i in 0..m.count {
+        let offset = (i as f32 - (m.count as f32 - 1.0) / 2.0) * 0.5;
+        let pos = base + Vec3::new(offset, 0.0, 0.0);
+        let variant = (i as usize + m.expires as usize) % Profession::ALL.len();
+        let profession = Profession::ALL[variant];
+        let e = commands
+            .spawn((
+                Transform::from_translation(pos),
+                Visibility::Inherited,
+                DespawnOnExit(Screen::Game),
+            ))
+            .with_children(|p| {
+                spawn_survivor_body(p, &assets, profession, variant, 0, false);
+            })
+            .id();
+        viz.entities.push(e);
     }
 }
 
-/// Holatga mos klipni tanlaydi va silliq krossfeyd bilan almashtiradi:
-/// sim-maqsad sari ketayotganda yurish (biriktirilgan aholi yuk ko'tarib —
-/// `Walk_Carry`), joyida turganda idle. AnimationPlayer sahna skeleti
-/// ichida — ota zanjiridan `SurvivorDot` root'ini topamiz (zanjir qisqa,
-/// aholi soni ≤ 60 — arzon).
-pub fn drive_survivor_animations(
-    roots: Query<(&Transform, &Wander, &SurvivorRig), With<SurvivorDot>>,
-    parents: Query<&ChildOf>,
-    models: Res<SurvivorModels>,
-    mut players: Query<(Entity, &mut AnimationPlayer, &mut AnimationTransitions)>,
+/// Builds one procedural, low-poly winter survivor as children of the
+/// just-spawned `SurvivorDot` root: two swinging legs, two static arms, a
+/// torso + head in the trade's coat color, and profession-specific
+/// headwear + tool (`Profession::ALL` order, matching `variant`). Everyone
+/// is bundled up against the cold — the headwear shape (hood/hardhat/toque)
+/// is what makes a trade readable from its silhouette, colors reinforce it.
+/// Tool materials deliberately reuse a workplace building's own material
+/// (e.g. the lumberjack's axe blade is `sawmill_blade_mat`) so a survivor
+/// visually echoes the building they work.
+///
+/// While `is_leader` (`GameState.leader == Some(id)`), the trade look is
+/// swapped for a distinct one — royal coat, bare head under a crown, a
+/// ceremonial staff instead of their trade's tool — echoing
+/// `survivor_contribution`'s sim-side rule that the leader is a generalist
+/// for as long as they hold the seat, not stuck looking like whatever they
+/// did before. The crown is spawned right here as a plain child (not a
+/// separately tracked/reparented entity — `sync_survivors` already fully
+/// despawns/respawns a survivor's whole body on a leadership change, so
+/// there's nothing to gain from keeping the crown a separate entity, and
+/// doing so previously caused a panic: reparenting a `Local`-cached crown
+/// handle onto a new leader after the old leader's body — and the crown as
+/// its child — had already been despawned this same frame).
+fn spawn_survivor_body(
+    p: &mut ChildSpawnerCommands,
+    assets: &GameAssets,
+    profession: Profession,
+    variant: usize,
+    id: u32,
+    is_leader: bool,
 ) {
-    for (e, mut player, mut transitions) in &mut players {
-        let mut cur = e;
-        let mut found = None;
-        for _ in 0..8 {
-            let Ok(co) = parents.get(cur) else { break };
-            cur = co.parent();
-            if let Ok(r) = roots.get(cur) {
-                found = Some(r);
-                break;
-            }
+    let coat = if is_leader {
+        assets.leader_coat_mat.clone()
+    } else {
+        assets.survivor_coat_mats[variant].clone()
+    };
+    let head_mat = assets.survivor_head_mats[variant].clone();
+
+    // Legs — direct children of the root so `animate_survivor_legs` can walk
+    // one `ChildOf` hop up to read the root's `Wander::moving`.
+    p.spawn((
+        Mesh3d(assets.capsule.clone()),
+        MeshMaterial3d(coat.clone()),
+        Transform::from_xyz(-0.055, 0.13, 0.0).with_scale(Vec3::new(0.42, 0.60, 0.42)),
+        SurvivorLeg { phase: 0.0 },
+    ));
+    p.spawn((
+        Mesh3d(assets.capsule.clone()),
+        MeshMaterial3d(coat.clone()),
+        Transform::from_xyz(0.055, 0.13, 0.0).with_scale(Vec3::new(0.42, 0.60, 0.42)),
+        SurvivorLeg {
+            phase: std::f32::consts::PI,
+        },
+    ));
+    // Arms — static, just for silhouette fill; the legs carry the gait.
+    for dx in [-0.145f32, 0.145] {
+        p.spawn((
+            Mesh3d(assets.capsule.clone()),
+            MeshMaterial3d(coat.clone()),
+            Transform::from_xyz(dx, 0.32, 0.0).with_scale(Vec3::new(0.28, 0.52, 0.28)),
+        ));
+    }
+    // Torso.
+    p.spawn((
+        Mesh3d(assets.capsule.clone()),
+        MeshMaterial3d(coat),
+        Transform::from_xyz(0.0, 0.34, 0.0).with_scale(Vec3::splat(0.62)),
+    ));
+    // Head.
+    p.spawn((
+        Mesh3d(assets.sphere.clone()),
+        MeshMaterial3d(assets.survivor_skin_mat.clone()),
+        Transform::from_xyz(0.0, 0.52, 0.0).with_scale(Vec3::splat(0.19)),
+    ));
+
+    if is_leader {
+        // Bare head (the crown sits directly on it) and a ceremonial staff
+        // — wood handle reused from the same material every trade's tool
+        // handle uses, gold orb reusing the XP-tier gold so it reads as
+        // "distinguished" without a new material.
+        p.spawn((
+            Mesh3d(assets.cylinder.clone()),
+            MeshMaterial3d(assets.sawmill_roof_mat.clone()),
+            Transform::from_xyz(0.16, 0.30, 0.0).with_scale(Vec3::new(0.035, 0.50, 0.035)),
+        ));
+        p.spawn((
+            Mesh3d(assets.sphere.clone()),
+            MeshMaterial3d(assets.tier_flag_mats[2].clone()),
+            Transform::from_xyz(0.16, 0.56, 0.0).with_scale(Vec3::splat(0.07)),
+        ));
+        // Crown — tip-up (the mesh's default orientation) so it reads as
+        // sitting on the survivor's bare head.
+        p.spawn((
+            Mesh3d(assets.cone.clone()),
+            MeshMaterial3d(assets.leader_crown_mat.clone()),
+            Transform::from_xyz(0.0, 0.72, 0.0).with_scale(Vec3::new(0.15, 0.15, 0.15)),
+            LeaderCrown,
+        ));
+    } else {
+    match profession {
+        Profession::Lumberjack => {
+            p.spawn((
+                Mesh3d(assets.cone.clone()),
+                MeshMaterial3d(head_mat),
+                Transform::from_xyz(0.0, 0.60, 0.0).with_scale(Vec3::new(0.22, 0.15, 0.22)),
+            ));
+            // Axe slung on the back: wood handle + the sawmill's own blade.
+            p.spawn((
+                Mesh3d(assets.cylinder.clone()),
+                MeshMaterial3d(assets.sawmill_roof_mat.clone()),
+                Transform::from_xyz(0.0, 0.36, -0.10)
+                    .with_rotation(Quat::from_rotation_x(0.55))
+                    .with_scale(Vec3::new(0.05, 0.34, 0.05)),
+            ));
+            p.spawn((
+                Mesh3d(assets.cube.clone()),
+                MeshMaterial3d(assets.sawmill_blade_mat.clone()),
+                Transform::from_xyz(0.0, 0.50, -0.16)
+                    .with_rotation(Quat::from_rotation_x(0.55))
+                    .with_scale(Vec3::new(0.14, 0.12, 0.03)),
+            ));
         }
-        let Some((tr, w, rig)) = found else { continue };
-        let pos = Vec3::new(tr.translation.x, 0.0, tr.translation.z);
-        let moving = pos.distance(w.sim_pos) > 0.34;
-        let v = &models.variants[rig.variant];
-        let want = if moving {
-            if rig.carrying {
-                v.carry
-            } else {
-                v.walk
-            }
+        Profession::Miner => {
+            // Safety hardhat — a flat cylinder instead of a hood.
+            p.spawn((
+                Mesh3d(assets.cylinder.clone()),
+                MeshMaterial3d(head_mat),
+                Transform::from_xyz(0.0, 0.60, 0.0).with_scale(Vec3::new(0.21, 0.10, 0.21)),
+            ));
+            // Pickaxe: wood handle + dark iron head.
+            p.spawn((
+                Mesh3d(assets.cylinder.clone()),
+                MeshMaterial3d(assets.sawmill_roof_mat.clone()),
+                Transform::from_xyz(0.0, 0.36, -0.10)
+                    .with_rotation(Quat::from_rotation_x(0.55))
+                    .with_scale(Vec3::new(0.045, 0.34, 0.045)),
+            ));
+            p.spawn((
+                Mesh3d(assets.cube.clone()),
+                MeshMaterial3d(assets.furnace_stone_mat.clone()),
+                Transform::from_xyz(0.0, 0.50, -0.16)
+                    .with_rotation(Quat::from_rotation_x(0.55))
+                    .with_scale(Vec3::new(0.18, 0.05, 0.05)),
+            ));
+        }
+        Profession::Hunter => {
+            p.spawn((
+                Mesh3d(assets.cone.clone()),
+                MeshMaterial3d(head_mat),
+                Transform::from_xyz(0.0, 0.60, 0.0).with_scale(Vec3::new(0.22, 0.15, 0.22)),
+            ));
+            // Rifle slung diagonally across the back.
+            p.spawn((
+                Mesh3d(assets.cylinder.clone()),
+                MeshMaterial3d(assets.sawmill_roof_mat.clone()),
+                Transform::from_xyz(0.0, 0.40, -0.10)
+                    .with_rotation(Quat::from_rotation_x(0.6))
+                    .with_scale(Vec3::new(0.04, 0.46, 0.04)),
+            ));
+        }
+        Profession::Farmer => {
+            p.spawn((
+                Mesh3d(assets.cone.clone()),
+                MeshMaterial3d(head_mat),
+                Transform::from_xyz(0.0, 0.60, 0.0).with_scale(Vec3::new(0.22, 0.15, 0.22)),
+            ));
+            // Wicker basket on the back with a greenhouse-green sprig.
+            p.spawn((
+                Mesh3d(assets.cylinder.clone()),
+                MeshMaterial3d(assets.warehouse_plank_mat.clone()),
+                Transform::from_xyz(0.0, 0.34, -0.14).with_scale(Vec3::new(0.16, 0.14, 0.16)),
+            ));
+            p.spawn((
+                Mesh3d(assets.cube.clone()),
+                MeshMaterial3d(assets.greenhouse_glass_mat.clone()),
+                Transform::from_xyz(0.0, 0.43, -0.14).with_scale(Vec3::new(0.08, 0.06, 0.08)),
+            ));
+        }
+        Profession::Medic => {
+            p.spawn((
+                Mesh3d(assets.cone.clone()),
+                MeshMaterial3d(head_mat),
+                Transform::from_xyz(0.0, 0.60, 0.0).with_scale(Vec3::new(0.22, 0.15, 0.22)),
+            ));
+            // Red-cross chest badge — reuses the Hospital building's material.
+            let cross = assets.hospital_cross_mat.clone();
+            p.spawn((
+                Mesh3d(assets.cube.clone()),
+                MeshMaterial3d(cross.clone()),
+                Transform::from_xyz(0.0, 0.36, 0.10).with_scale(Vec3::new(0.11, 0.03, 0.02)),
+            ));
+            p.spawn((
+                Mesh3d(assets.cube.clone()),
+                MeshMaterial3d(cross),
+                Transform::from_xyz(0.0, 0.36, 0.10).with_scale(Vec3::new(0.03, 0.11, 0.02)),
+            ));
+        }
+        Profession::Cook => {
+            // White toque — a tall, narrow cylinder.
+            p.spawn((
+                Mesh3d(assets.cylinder.clone()),
+                MeshMaterial3d(head_mat),
+                Transform::from_xyz(0.0, 0.63, 0.0).with_scale(Vec3::new(0.16, 0.22, 0.16)),
+            ));
+            // Ladle at the hip: handle + bowl.
+            p.spawn((
+                Mesh3d(assets.cylinder.clone()),
+                MeshMaterial3d(assets.sawmill_roof_mat.clone()),
+                Transform::from_xyz(0.13, 0.28, 0.0)
+                    .with_rotation(Quat::from_rotation_z(0.3))
+                    .with_scale(Vec3::new(0.035, 0.22, 0.035)),
+            ));
+            p.spawn((
+                Mesh3d(assets.sphere.clone()),
+                MeshMaterial3d(assets.sawmill_blade_mat.clone()),
+                Transform::from_xyz(0.16, 0.19, 0.0).with_scale(Vec3::splat(0.06)),
+            ));
+        }
+    }
+    }
+
+    // Carried-resource prop (a hauled plank/log) — hidden until `sync_survivors`
+    // shows it while the survivor is assigned to a building.
+    p.spawn((
+        Mesh3d(assets.cube.clone()),
+        MeshMaterial3d(assets.warehouse_plank_mat.clone()),
+        Transform::from_xyz(0.0, 0.40, 0.12).with_scale(Vec3::new(0.10, 0.06, 0.06)),
+        Visibility::Hidden,
+        SurvivorCarry { id },
+    ));
+}
+
+/// Swings each `SurvivorLeg` into a walk cycle while its root survivor is
+/// actively walking (`Wander::moving`), settling back to neutral otherwise —
+/// the one bit of procedural "gait" standing in for the skeletal animation a
+/// glTF rig would have carried. Legs are direct children of the
+/// `SurvivorDot` root, so a single `ChildOf` hop finds `Wander`.
+pub fn animate_survivor_legs(
+    time: Res<Time>,
+    parents: Query<&ChildOf>,
+    walkers: Query<&Wander, With<SurvivorDot>>,
+    mut legs: Query<(Entity, &mut Transform, &SurvivorLeg)>,
+) {
+    const SWING_SPEED: f32 = 9.0;
+    const MAX_SWING: f32 = 0.55;
+    let t = time.elapsed_secs();
+    let blend = 1.0 - (-10.0 * time.delta_secs()).exp();
+    for (e, mut tr, leg) in &mut legs {
+        let moving = parents
+            .get(e)
+            .and_then(|co| walkers.get(co.parent()))
+            .map(|w| w.moving)
+            .unwrap_or(false);
+        let target = if moving {
+            Quat::from_rotation_x((t * SWING_SPEED + leg.phase).sin() * MAX_SWING)
         } else {
-            v.idle
+            Quat::IDENTITY
         };
-        if transitions.get_main_animation() != Some(want) {
-            transitions
-                .play(&mut player, want, Duration::from_millis(220))
-                .repeat();
-        }
+        tr.rotation = tr.rotation.slerp(target, blend);
     }
 }
 
@@ -242,6 +493,7 @@ pub fn animate_survivors(
         // Caught up to the sim goal (within the shuffle radius): idle-shuffle
         // around it instead of chasing a now-static point exactly.
         if pos.distance(w.sim_pos) < SHUFFLE_RADIUS + 0.05 {
+            w.moving = false;
             let to = w.shuffle_target - pos;
             let dist = to.length();
             if dist < 0.08 {
@@ -262,20 +514,26 @@ pub fn animate_survivors(
             // doesn't fight the real movement once arrived, and lerp there —
             // same exponential smoothing `sync_player_cursors`/`sync_avatars`
             // use for remote cursors/avatars.
+            w.moving = true;
             w.shuffle_target = w.sim_pos;
             let np = pos.lerp(w.sim_pos, blend);
             t.translation.x = np.x;
             t.translation.z = np.z;
-            // Model yurish yo'nalishiga yuzlanadi (glTF modellari +Z ga
-            // qaraydi) — silliq burilish, keskin sakramaydi.
+            // Model yurish yo'nalishiga yuzlanadi — silliq burilish, keskin
+            // sakramaydi.
             let dir = w.sim_pos - pos;
             if dir.length() > 0.05 {
                 let yaw = dir.x.atan2(dir.z);
                 t.rotation = t.rotation.slerp(Quat::from_rotation_y(yaw), blend);
             }
         }
-        // Qadam ritmi endi yurish klipining o'zida — sun'iy bob kerak emas.
-        t.translation.y = 0.24;
+        // A tiny walking bob on the root — the legs carry most of the
+        // motion now, this just keeps the body from looking perfectly rigid.
+        t.translation.y = if w.moving {
+            (time.elapsed_secs() * 9.0 + t.translation.x * 3.0).sin().abs() * 0.025
+        } else {
+            0.0
+        };
     }
 }
 
@@ -302,67 +560,6 @@ pub fn animate_survivor_selection(
     tr.translation.z = dot_tr.translation.z;
     let pulse = 1.0 + 0.08 * (time.elapsed_secs() * 5.0).sin();
     tr.scale = Vec3::splat(0.55 * pulse);
-}
-
-/// Keep one crown mesh as a child of whichever `SurvivorDot` entity is the
-/// current `GameState.leader`, (re)parenting it when leadership changes
-/// (appointment, succession, or death — `leader` cleared with no replacement
-/// just hides it). A single shared crown entity, not one per survivor, since
-/// there is at most one leader at a time.
-pub fn sync_leader_crown(
-    mut commands: Commands,
-    view: Res<GameView>,
-    assets: Res<GameAssets>,
-    viz: Res<SurvivorViz>,
-    mut crown: Local<Option<Entity>>,
-    mut crown_mat: Local<Option<Handle<StandardMaterial>>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut seen_leader: Local<Option<u32>>,
-) {
-    let Some(state) = view.state.as_ref() else { return };
-    if *seen_leader == state.leader {
-        return;
-    }
-    *seen_leader = state.leader;
-
-    let mat = crown_mat
-        .get_or_insert_with(|| {
-            materials.add(StandardMaterial {
-                base_color: Color::srgb(1.0, 0.82, 0.20),
-                emissive: LinearRgba::rgb(0.35, 0.28, 0.03),
-                metallic: 0.4,
-                perceptual_roughness: 0.3,
-                ..default()
-            })
-        })
-        .clone();
-
-    match (state.leader.and_then(|id| viz.0.get(&id)), *crown) {
-        (Some(&parent), Some(existing)) => {
-            commands.entity(existing).insert(ChildOf(parent));
-        }
-        (Some(&parent), None) => {
-            let e = commands
-                .spawn((
-                    Mesh3d(assets.cone.clone()),
-                    MeshMaterial3d(mat),
-                    // Tip-up (the mesh's default orientation) so it reads as
-                    // a crown sitting on the survivor's head, unlike the
-                    // downward-pointing cones used for cursor/ping markers.
-                    // (V0.8: bosh 0.30 da — toj undan yuqorida turadi.)
-                    Transform::from_xyz(0.0, 0.46, 0.0).with_scale(Vec3::new(0.16, 0.16, 0.16)),
-                    LeaderCrown,
-                    ChildOf(parent),
-                ))
-                .id();
-            *crown = Some(e);
-        }
-        (None, Some(existing)) => {
-            commands.entity(existing).despawn();
-            *crown = None;
-        }
-        (None, None) => {}
-    }
 }
 
 /// Spawn a brief expanding ring at a `MoveSurvivor` destination — visual

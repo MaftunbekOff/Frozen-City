@@ -45,9 +45,23 @@ pub fn xp_level(xp: f32) -> u8 {
 }
 
 /// Short "Profession Lx" tag used by both the roster rows and the detail
-/// card, e.g. "Miner L2".
+/// card, e.g. "Miner L2". `xp`/`trained_kind` accrue at whatever building the
+/// survivor is CURRENTLY assigned to, independent of their fixed (spawn-
+/// random) `profession` — most of the time the two line up, but a survivor
+/// leveled up at a building other than their own trade's (e.g. a Lumberjack
+/// who's been working a Coal Mine) would otherwise show a level next to a
+/// trade name that never earned it (and never gets `PROFESSION_MATCH_BONUS`
+/// there — see `sim::command::survivor_contribution`). Name the kind the
+/// level actually came from whenever it isn't the profession's own.
 pub fn profession_level_tag(s: &Survivor, l: Lang) -> String {
-    format!("{} L{}", i18n_names::profession_name(s.profession, l), xp_level(s.xp))
+    let name = i18n_names::profession_name(s.profession, l);
+    let lvl = xp_level(s.xp);
+    match s.trained_kind {
+        Some(kind) if lvl > 0 && kind != s.profession.matching_building() => {
+            format!("{name} · {} L{lvl}", i18n_names::building_name(kind, l))
+        }
+        _ => format!("{name} L{lvl}"),
+    }
 }
 
 pub fn plugin(app: &mut App) {

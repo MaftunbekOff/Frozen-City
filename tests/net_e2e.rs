@@ -81,7 +81,7 @@ fn two_clients_share_one_city() {
     let seen = wait_state(&bob, |s| {
         s.buildings.iter().any(|b| b.kind == BuildingKind::Tent)
     });
-    assert_eq!(seen.buildings.len(), 2, "furnace + tent");
+    assert_eq!(seen.buildings.len(), 3, "furnace + tunnel + tent");
 
     // Cursor presence reaches the other player.
     alice.send(ClientMsg::Cursor { x: 10.5, y: 20.5 });
