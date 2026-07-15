@@ -336,6 +336,15 @@ impl GameView {
 #[derive(Resource, Default)]
 pub struct BuildMode(pub Option<BuildingKind>);
 
+/// V0.14: the building currently being relocated, if any — set by the
+/// selection panel's "Relocate" button, cleared the moment a target tile is
+/// confirmed (or on cancel). Mutually exclusive with `BuildMode`: mirrors
+/// its ghost-preview/click-to-confirm flow in `input::build_input`, just
+/// dispatching `PlayerCommand::RelocateBuilding` instead of `Place`, and
+/// one-shot instead of staying active for repeated placements.
+#[derive(Resource, Default)]
+pub struct RelocateMode(pub Option<u32>);
+
 #[derive(Resource, Default)]
 pub struct Selection(pub Option<u32>);
 
@@ -404,6 +413,10 @@ pub fn kind_color(k: BuildingKind) -> Color {
         BuildingKind::Hospital => Color::srgb(0.86, 0.88, 0.92),
         BuildingKind::Kitchen => Color::srgb(0.78, 0.52, 0.30),
         BuildingKind::Warehouse => Color::srgb(0.58, 0.46, 0.32),
+        BuildingKind::TailorShop => Color::srgb(0.62, 0.34, 0.48), // dyed-wool plum
+        BuildingKind::Wall | BuildingKind::Gate => Color::srgb(0.50, 0.48, 0.46), // weathered stone-grey
+        BuildingKind::Well => Color::srgb(0.32, 0.52, 0.68), // clear water blue
+        BuildingKind::Farmhouse => Color::srgb(0.70, 0.30, 0.24), // barn red
         BuildingKind::Tunnel => Color::srgb(0.40, 0.38, 0.40),
     }
 }
@@ -420,6 +433,7 @@ pub fn profession_coat_color(p: Profession) -> Color {
         Profession::Farmer => Color::srgb(0.62, 0.46, 0.22),     // harvest mustard
         Profession::Medic => Color::srgb(0.88, 0.90, 0.94),      // clinical white
         Profession::Cook => Color::srgb(0.87, 0.80, 0.66),       // apron cream
+        Profession::Tailor => Color::srgb(0.55, 0.30, 0.45),     // dyed-wool plum
     }
 }
 
@@ -434,6 +448,7 @@ pub fn profession_head_color(p: Profession) -> Color {
         Profession::Farmer => Color::srgb(0.70, 0.58, 0.30),     // straw hood
         Profession::Medic => Color::srgb(0.82, 0.84, 0.90),      // pale hood
         Profession::Cook => Color::srgb(0.93, 0.90, 0.84),       // white toque
+        Profession::Tailor => Color::srgb(0.78, 0.62, 0.68),     // pale rose headscarf
     }
 }
 
@@ -473,6 +488,15 @@ pub fn player_color(idx: u8) -> Color {
     Color::srgb(r, g, b)
 }
 
+/// `OnExit(Screen::Menu)`: drops focus from the wasm-only mobile-keyboard
+/// proxy `<input>` (see `menu::mobile_input`) so it doesn't stay visually
+/// focused/keyboard-up into the next screen. A no-op on native, which has
+/// no such proxy.
+fn on_exit_menu_blur_proxy() {
+    #[cfg(target_arch = "wasm32")]
+    menu::blur_proxy();
+}
+
 pub struct ClientPlugin;
 
 impl Plugin for ClientPlugin {
@@ -491,6 +515,7 @@ impl Plugin for ClientPlugin {
             .init_resource::<menu::MenuOverlay>()
             .init_resource::<net_sync::Reconnecting>()
             .init_resource::<BuildMode>()
+            .init_resource::<RelocateMode>()
             .init_resource::<ui::BuildPanelOpen>()
             .init_resource::<Selection>()
             .init_resource::<UiHover>()
@@ -499,6 +524,8 @@ impl Plugin for ClientPlugin {
             .init_resource::<render::BuildingViz>()
             .init_resource::<render::SurvivorViz>()
             .init_resource::<render::MigrantViz>()
+            .init_resource::<render::CorpseViz>()
+            .init_resource::<render::GraveViz>()
             .init_resource::<render::CursorViz>()
             .init_resource::<render::AvatarViz>()
             .init_resource::<render::PingViz>()
@@ -515,6 +542,11 @@ impl Plugin for ClientPlugin {
             .add_systems(Startup, render::setup_camera_and_assets)
             // Menu.
             .add_systems(OnEnter(Screen::Menu), (menu::spawn_menu, menu_fx::spawn_menu_fx))
+            // Leaving the menu (successful login, or a disconnect bouncing
+            // back later and then away again) must not leave the mobile
+            // keyboard visually up over the in-game UI. A plain no-op on
+            // native (`#[cfg]` can't gate one link of a method chain).
+            .add_systems(OnExit(Screen::Menu), on_exit_menu_blur_proxy)
             .add_systems(
                 Update,
                 (
@@ -526,6 +558,8 @@ impl Plugin for ClientPlugin {
                     menu::region_buttons,
                     menu::login_field_focus,
                     menu::login_form_keyboard,
+                    #[cfg(target_arch = "wasm32")]
+                    menu::drain_mobile_input.before(menu::update_login_fields),
                     menu::account_login_button,
                     menu::register_toggle_button,
                     menu::update_login_fields,
@@ -554,6 +588,8 @@ impl Plugin for ClientPlugin {
                     render::sync_buildings,
                     render::sync_survivors,
                     render::sync_migrants,
+                    render::sync_corpses,
+                    render::sync_graves,
                 )
                     .chain()
                     .run_if(in_state(Screen::Game)),
@@ -606,6 +642,7 @@ impl Plugin for ClientPlugin {
                     ui::fps_update,
                     ui::build_buttons,
                     ui::furnace_buttons,
+                    ui::caravan_buttons,
                     ui::build_panel_toggle,
                     ui::build_panel_visibility,
                     ui::selection_panel_update,

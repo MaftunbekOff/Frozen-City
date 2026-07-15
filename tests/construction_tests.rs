@@ -95,6 +95,13 @@ fn crew_finishes_the_site_and_it_starts_working() {
     let mut experiment = sim::new_game(SEED, 12);
     control.stock.wood = 500.0;
     experiment.stock.wood = 500.0;
+    // V0.11: neither world ever builds a Well, so fund water directly — this
+    // test is about construction/production timing, not survival, and an
+    // unwatered lone survivor going critically thirsty over the ~2-day run
+    // would add an unrelated, RNG-independent death risk that has nothing to
+    // do with what's under test here.
+    control.stock.water = 1000.0;
+    experiment.stock.water = 1000.0;
 
     let (x, y) = find_spot(&experiment, BuildingKind::HunterHut);
     for s in [&mut control, &mut experiment] {

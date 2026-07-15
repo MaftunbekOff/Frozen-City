@@ -84,6 +84,8 @@ fn population_mission_completes() {
             trained_kind: None,
             chop_target: None,
             carrying_wood: false,
+            thirst: 0.0,
+            bury_target: None,
         });
         next_id += 1;
     }

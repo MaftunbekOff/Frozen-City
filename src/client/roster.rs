@@ -57,7 +57,7 @@ pub fn profession_level_tag(s: &Survivor, l: Lang) -> String {
     let name = i18n_names::profession_name(s.profession, l);
     let lvl = xp_level(s.xp);
     match s.trained_kind {
-        Some(kind) if lvl > 0 && kind != s.profession.matching_building() => {
+        Some(kind) if lvl > 0 && !s.profession.matches_building(kind) => {
             format!("{name} · {} L{lvl}", i18n_names::building_name(kind, l))
         }
         _ => format!("{name} L{lvl}"),

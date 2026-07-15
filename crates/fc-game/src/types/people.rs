@@ -16,16 +16,19 @@ pub enum Profession {
     Farmer,
     Medic,
     Cook,
+    /// V0.10: specialist at the `TailorShop` (fur -> cloth).
+    Tailor,
 }
 
 impl Profession {
-    pub const ALL: [Profession; 6] = [
+    pub const ALL: [Profession; 7] = [
         Profession::Lumberjack,
         Profession::Miner,
         Profession::Hunter,
         Profession::Farmer,
         Profession::Medic,
         Profession::Cook,
+        Profession::Tailor,
     ];
 
     pub fn name(self) -> &'static str {
@@ -36,6 +39,7 @@ impl Profession {
             Profession::Farmer => "Farmer",
             Profession::Medic => "Medic",
             Profession::Cook => "Cook",
+            Profession::Tailor => "Tailor",
         }
     }
 
@@ -48,7 +52,34 @@ impl Profession {
             Profession::Farmer => BuildingKind::Greenhouse,
             Profession::Medic => BuildingKind::Hospital,
             Profession::Cook => BuildingKind::Kitchen,
+            Profession::Tailor => BuildingKind::TailorShop,
         }
+    }
+
+    /// V0.12: true if this profession earns `PROFESSION_MATCH_BONUS` at
+    /// `kind` — almost always identical to `matching_building() == kind`,
+    /// except `Farmer` matches BOTH `Greenhouse` (crop farming) and
+    /// `Farmhouse` (livestock), the one profession with two trades instead
+    /// of one. `matching_building` still returns a single kind (used where a
+    /// UI needs ONE "primary" building to name); this is the general
+    /// bonus-eligibility check `survivor_contribution` and the roster's
+    /// off-trade-level tag should use instead.
+    pub fn matches_building(self, kind: BuildingKind) -> bool {
+        if self == Profession::Farmer && kind == BuildingKind::Farmhouse {
+            return true;
+        }
+        kind == self.matching_building()
+    }
+
+    /// V0.11: true if this profession's specialized training is required to
+    /// be even minimally useful at `kind` — a mismatched survivor here gets
+    /// `SKILLED_MISMATCH_PENALTY` instead of the normal 1.0x baseline every
+    /// other mismatch keeps. Only specific (profession, building) pairs are
+    /// gated (currently just Medic/Hospital — healing plausibly needs real
+    /// training in a way chopping wood or cooking a meal doesn't); everyone
+    /// else can informally staff any building at the ordinary rate.
+    pub fn is_skilled_at(self, kind: BuildingKind) -> bool {
+        matches!((self, kind), (Profession::Medic, BuildingKind::Hospital))
     }
 
     /// Deterministic profession from a survivor id, used for migrated saves
@@ -123,6 +154,50 @@ pub struct Survivor {
     /// toward `FURNACE_LOGS_NEEDED`. While true, the survivor's walk goal is
     /// their assigned building (the Furnace) instead of a tree.
     pub carrying_wood: bool,
+    /// 0..=120; dehydration damage above 65 — a tighter, faster-escalating
+    /// band than `hunger`'s 80 (water is calibrated to become critical
+    /// sooner, see `WATER_PER_SURVIVOR_DAY`'s doc comment), same clamp/
+    /// two-threshold shape otherwise. V0.11.
+    pub thirst: f32,
+    /// V0.11: the corpse this (living) survivor is walking to/performing the
+    /// timed bury action on (`PlayerCommand::Bury`) — mirrors `chop_target`'s
+    /// role as a walk-then-act errand. Overrides the assigned-building walk
+    /// goal but never `move_target`.
+    pub bury_target: Option<u32>,
+}
+
+/// V0.11: a dead survivor's remains, left at the death location until a
+/// player issues `PlayerCommand::Bury`, or until `CORPSE_DECAY_TICKS`
+/// passes and it fades into a `Grave` on its own. Categorically not a
+/// `Survivor` — never workable, assignable, or counted in any population
+/// figure — so it lives in its own `GameState.corpses` vec.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Corpse {
+    /// The dead survivor's former id — reused only for display (e.g. the
+    /// event log), never looked up against `Vec<Survivor>` again.
+    pub id: u32,
+    pub name: String,
+    pub x: f32,
+    pub y: f32,
+    /// Tick this survivor died — drives the decay-to-`Grave` timer.
+    pub died_tick: u64,
+    /// Set once a survivor arrives and starts performing the timed bury
+    /// action, so a second player can't send another survivor to the same
+    /// corpse. Counts down to 0 to complete the action (mirrors
+    /// `Building.build_left`'s "remaining work" shape).
+    pub bury_left: f32,
+    /// Who's currently burying this corpse, if anyone.
+    pub being_buried_by: Option<u32>,
+}
+
+/// V0.11: a faded, purely decorative trace left where a survivor was buried
+/// or where an unburied corpse finally decayed away ("vaqtinchalik iz") —
+/// itself expires after `GRAVE_FADE_TICKS`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Grave {
+    pub x: f32,
+    pub y: f32,
+    pub created_tick: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

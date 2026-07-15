@@ -159,6 +159,44 @@ pub fn furnace_buttons(
     }
 }
 
+/// V0.13: fixed amount each `CaravanBtn` quick-trade dispatches — a caravan
+/// carries one "load" at a time rather than an arbitrary player-chosen
+/// amount, keeping the UI to a small fixed button grid instead of a full
+/// amount-picker form.
+const QUICK_TRADE_AMOUNT: u32 = 20;
+
+pub fn caravan_buttons(
+    view: Res<GameView>,
+    net: Res<NetConn>,
+    clicked: Query<(&Interaction, &CaravanBtn), Changed<Interaction>>,
+    mut all: Query<(&Interaction, &mut BackgroundColor), With<CaravanBtn>>,
+) {
+    let busy = view.state.as_ref().is_some_and(|s| s.pending_caravan.is_some());
+    for (interaction, btn) in &clicked {
+        if *interaction == Interaction::Pressed && !busy {
+            net.send(ClientMsg::Cmd(PlayerCommand::DispatchTradeCaravan {
+                good: btn.good,
+                amount: QUICK_TRADE_AMOUNT,
+                selling: btn.selling,
+            }));
+        }
+    }
+    for (interaction, mut bg) in &mut all {
+        // Dimmed (and inert, via the `!busy` guard above) while a caravan is
+        // already on the road — only one trip at a time.
+        let color = if busy {
+            BTN_DIM
+        } else if *interaction == Interaction::Hovered {
+            BTN_HOVER
+        } else {
+            BTN
+        };
+        if bg.0 != color {
+            bg.0 = color;
+        }
+    }
+}
+
 /// The **Build** UI, Frostpunk-style, in two pieces:
 /// 1. A SINGLE always-visible circular corner button bottom-right (brass
 ///    medallion + hammer glyph + label). A click (or `B`) toggles the modal
@@ -312,6 +350,9 @@ fn build_menu_content(p: &mut ChildSpawnerCommands, ff: theme::FormFactor, lang:
             BuildingKind::CoalMine,
             BuildingKind::HunterHut,
             BuildingKind::Greenhouse,
+            BuildingKind::TailorShop,
+            BuildingKind::Well,
+            BuildingKind::Farmhouse,
         ],
         ff,
         lang,
@@ -320,6 +361,13 @@ fn build_menu_content(p: &mut ChildSpawnerCommands, ff: theme::FormFactor, lang:
         p,
         i18n_hud::build_cat_services(lang),
         &[BuildingKind::Hospital, BuildingKind::Kitchen, BuildingKind::Warehouse],
+        ff,
+        lang,
+    );
+    build_category(
+        p,
+        i18n_hud::build_cat_defense(lang),
+        &[BuildingKind::Wall, BuildingKind::Gate],
         ff,
         lang,
     );

@@ -1,12 +1,18 @@
 use bevy::prelude::*;
 
-use frozen_city::game::types::BuildingKind;
+use frozen_city::game::types::{BuildingKind, TradeGood};
 
 #[derive(Component, Clone, Copy, PartialEq)]
 pub enum HudField {
     Wood,
     Coal,
     Food,
+    /// V0.11: colony water stockpile — mirrors `Food`'s chip exactly, since
+    /// thirst is now as core a survival need as hunger.
+    Water,
+    /// V0.13: gold earned/spent trading through the Tunnel — see
+    /// [`CaravanBtn`].
+    Gold,
     Pop,
     Clock,
     Temp,
@@ -32,6 +38,20 @@ pub struct FurnaceLvlBtn(pub u8);
 /// furnace level is adjusted from the furnace's own click-info.
 #[derive(Component)]
 pub struct FurnaceRow;
+
+/// V0.13: one quick trade-caravan action — dispatches `QUICK_TRADE_AMOUNT` of
+/// `good`, selling if `selling` else buying. Row shown only while the Tunnel
+/// is selected and unlocked (see `selection_panel_update`).
+#[derive(Component)]
+pub struct CaravanBtn {
+    pub good: TradeGood,
+    pub selling: bool,
+}
+
+/// Row of `CaravanBtn`s inside the selection panel; shown only while the
+/// Tunnel is the selected building (see `selection_panel_update`).
+#[derive(Component)]
+pub struct CaravanRow;
 
 // --- Build modal (corner button + centered modal) ---
 
@@ -123,6 +143,11 @@ pub struct MoraleBarFill;
 
 #[derive(Component)]
 pub struct DemolishBtn;
+
+/// V0.14: enter `RelocateMode` for the selected building. Shown only for
+/// finished, buildable buildings — same condition `DemolishBtn` uses.
+#[derive(Component)]
+pub struct RelocateBtn;
 
 /// Assigns the survivor currently selected in the roster panel (`roster.rs`)
 /// to the building selected here. Only visible/enabled when both a building

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     BUILDING_MAX_LEVEL, BUILD_WORKDAYS_PER_WOOD, LEVEL_PRODUCTION_BONUS, TENT_CAPACITY,
-    TENT_CAPACITY_PER_LEVEL,
+    TENT_CAPACITY_PER_LEVEL, WELL_WATER_PER_WORKER_DAY,
 };
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -23,11 +23,43 @@ pub enum BuildingKind {
     /// `mapgen`. Its excavation state lives in `GameState.tunnel`
     /// (`TunnelState`), not on this `Building` (`level`/`build_left` are
     /// unused/inert for it — see `render/buildings.rs`).
+    ///
+    /// IMPORTANT: bincode serializes this enum positionally (by declaration
+    /// order) — every variant ADDED AFTER THIS ONE must stay appended at the
+    /// very end (never inserted before `Tunnel`), or every already-persisted
+    /// world's `Tunnel` building silently decodes as the wrong kind. `Tunnel`
+    /// itself must never move either.
     Tunnel,
+    /// V0.10: converts hunted `fur` into `cloth` (see the wildlife/hunting
+    /// system on `GameState.wildlife` and `Stockpile.fur`/`cloth`). A
+    /// fur-capped producer like `CoalMine` is deposit-capped, not a flat
+    /// staffed-effect building like `Kitchen`/`Warehouse`.
+    TailorShop,
+    /// V0.11: a purely decorative/organizational perimeter tile — this game
+    /// has no threat/combat mechanic and no movement-collision model (see
+    /// `types.rs`'s "no obstacles, no pathfinding" doc comment), so a Wall
+    /// cannot mechanically block anything; it only occupies its tile (via
+    /// the normal `can_place` check every building already gets) to mark a
+    /// boundary. Cheap by design (see `cost_wood`) since it buys no
+    /// production/housing value.
+    Wall,
+    /// V0.11: the "opening" companion to `Wall` — mechanically identical
+    /// (decorative, occupies a tile), distinguished only by name/visual so
+    /// a perimeter reads as having a marked entrance.
+    Gate,
+    /// V0.11: draws `water` (flat, uncapped producer, mirrors `Greenhouse`'s
+    /// shape) — a real survival need on par with food (see
+    /// `Survivor::thirst`), not an optional side-economy.
+    Well,
+    /// V0.12: raises cow/sheep `Livestock` for food — same deposit-capped
+    /// producer shape as `HunterHut`/`Wildlife`, just domesticated instead
+    /// of hunted (see `GameState.livestock`). `Profession::Farmer` matches
+    /// both this and `Greenhouse` (see `Profession::matches_building`).
+    Farmhouse,
 }
 
 impl BuildingKind {
-    pub const BUILDABLE: [BuildingKind; 8] = [
+    pub const BUILDABLE: [BuildingKind; 13] = [
         BuildingKind::Tent,
         BuildingKind::Sawmill,
         BuildingKind::CoalMine,
@@ -36,6 +68,11 @@ impl BuildingKind {
         BuildingKind::Hospital,
         BuildingKind::Kitchen,
         BuildingKind::Warehouse,
+        BuildingKind::TailorShop,
+        BuildingKind::Wall,
+        BuildingKind::Gate,
+        BuildingKind::Well,
+        BuildingKind::Farmhouse,
     ];
 
     pub fn name(self) -> &'static str {
@@ -49,6 +86,11 @@ impl BuildingKind {
             BuildingKind::Hospital => "Hospital",
             BuildingKind::Kitchen => "Kitchen",
             BuildingKind::Warehouse => "Warehouse",
+            BuildingKind::TailorShop => "Tailor Shop",
+            BuildingKind::Wall => "Wall",
+            BuildingKind::Gate => "Gate",
+            BuildingKind::Well => "Well",
+            BuildingKind::Farmhouse => "Farmhouse",
             BuildingKind::Tunnel => "Tunnel",
         }
     }
@@ -64,6 +106,11 @@ impl BuildingKind {
             BuildingKind::Hospital => "+",
             BuildingKind::Kitchen => "K",
             BuildingKind::Warehouse => "W",
+            BuildingKind::TailorShop => "Y",
+            BuildingKind::Wall => "L",
+            BuildingKind::Gate => "D",
+            BuildingKind::Well => "A",
+            BuildingKind::Farmhouse => "M",
             BuildingKind::Tunnel => "U",
         }
     }
@@ -85,12 +132,35 @@ impl BuildingKind {
             BuildingKind::Hospital => 35,
             BuildingKind::Kitchen => 25,
             BuildingKind::Warehouse => 30,
+            // Second stage of the hunting->fur->cloth chain: needs a working
+            // Hunter's Hut supply line to be useful at all, so it's priced
+            // above every existing producer (see V0.10 balancing notes).
+            BuildingKind::TailorShop => 45,
+            // V0.11: buys no production/housing value at all (purely
+            // decorative/organizational — see the `Wall` doc comment), so
+            // it's priced far below every other buildable kind, cheap
+            // enough to place many of in a row.
+            BuildingKind::Wall => 4,
+            BuildingKind::Gate => 5,
+            // A real early-game survival need from day one (unlike the
+            // optional Tailor Shop chain), so priced to be affordable before
+            // much wood is banked — below Sawmill/HunterHut/CoalMine since it
+            // needs no supporting infrastructure (no forest/deposit siting).
+            BuildingKind::Well => 20,
+            // Same tier as Greenhouse (its fellow Farmer building) — a
+            // second, deposit-capped food source rather than a strict
+            // upgrade to either it or HunterHut.
+            BuildingKind::Farmhouse => 35,
         }
     }
 
     pub fn max_workers(self) -> u8 {
         match self {
-            BuildingKind::Furnace | BuildingKind::Tent | BuildingKind::Tunnel => 0,
+            BuildingKind::Furnace
+            | BuildingKind::Tent
+            | BuildingKind::Tunnel
+            | BuildingKind::Wall
+            | BuildingKind::Gate => 0,
             BuildingKind::Sawmill => 2,
             BuildingKind::CoalMine => 3,
             BuildingKind::HunterHut => 2,
@@ -98,6 +168,9 @@ impl BuildingKind {
             BuildingKind::Hospital => 2,
             BuildingKind::Kitchen => 1,
             BuildingKind::Warehouse => 1,
+            BuildingKind::TailorShop => 2,
+            BuildingKind::Well => 2,
+            BuildingKind::Farmhouse => 2,
         }
     }
 
@@ -111,6 +184,15 @@ impl BuildingKind {
             // Pricier than the Hunter's Hut but higher output per worker — a
             // sustained late-game food source rather than a strict upgrade.
             BuildingKind::Greenhouse => 13.0,
+            // Nominal cloth units/worker/day before fur-capping (see the
+            // TailorShop arm in `sim::tick`, which mirrors CoalMine's
+            // deposit-capping style rather than crediting this flat).
+            BuildingKind::TailorShop => 4.0,
+            BuildingKind::Well => WELL_WATER_PER_WORKER_DAY,
+            // Nominal food units/worker/day before livestock-capping (see the
+            // Farmhouse arm in `sim::tick`, which mirrors HunterHut's
+            // deposit-capping style rather than crediting this flat).
+            BuildingKind::Farmhouse => 11.0,
             _ => 0.0,
         }
     }
@@ -152,6 +234,18 @@ impl BuildingKind {
         self.build_workdays() * next_level as f32 * 0.5
     }
 
+    /// V0.11: true for buildings where being staffed by the WRONG profession
+    /// is a `SKILLED_MISMATCH_PENALTY`, not just the ordinary 1.0x baseline
+    /// every other mismatch keeps — currently just Hospital (see
+    /// `Profession::is_skilled_at`, which answers the per-profession half of
+    /// this: whether a GIVEN profession is the one `kind` needs). Checked
+    /// independently of any specific survivor so `survivor_contribution` can
+    /// tell "this building needs a specialist" apart from "this survivor
+    /// happens to be one" — the two are different questions.
+    pub fn requires_specialist(self) -> bool {
+        matches!(self, BuildingKind::Hospital)
+    }
+
     pub fn description(self) -> &'static str {
         match self {
             BuildingKind::Furnace => "Keep it burning. Consumes coal (or wood).",
@@ -161,8 +255,13 @@ impl BuildingKind {
             BuildingKind::HunterHut => "Workers hunt for food.",
             BuildingKind::Greenhouse => "A high-output indoor farm (more food/worker).",
             BuildingKind::Hospital => "Staffed: heals survivors faster.",
-            BuildingKind::Kitchen => "Staffed: the city eats more efficiently.",
+            BuildingKind::Kitchen => "Staffed: the city eats and drinks more efficiently.",
             BuildingKind::Warehouse => "Staffed: new construction wastes less wood.",
+            BuildingKind::TailorShop => "Turns fur into cloth. Workers turn hides into warmth.",
+            BuildingKind::Wall => "Marks a boundary. Decorative.",
+            BuildingKind::Gate => "An opening in a wall line. Decorative.",
+            BuildingKind::Well => "Workers draw water. The city needs it to survive.",
+            BuildingKind::Farmhouse => "Workers raise cattle and sheep for food.",
             BuildingKind::Tunnel => "The way to the Global World. Travelers pass through once it's open.",
         }
     }

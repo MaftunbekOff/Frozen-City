@@ -6,7 +6,7 @@ use super::super::i18n::Lang;
 use super::super::i18n_hud;
 use super::super::theme::{
     self, BG_PANEL, BORDER, BTN, BTN_DANGER, FS_BODY, FS_MICRO, FS_SMALL, FS_TITLE, RES_COAL,
-    RES_FOOD, RES_WOOD, SP_MD, SP_SM, SP_XS, TEXT_MUTED, TEXT_PRIMARY,
+    RES_FOOD, RES_GOLD, RES_WATER, RES_WOOD, SP_MD, SP_SM, SP_XS, TEXT_MUTED, TEXT_PRIMARY,
 };
 use super::super::*;
 use super::*;
@@ -230,6 +230,48 @@ pub fn spawn_hud(
                     });
                 }
             });
+            // V0.13: Tunnel trade caravan quick-actions — shown only when
+            // the Tunnel is selected and unlocked (`selection_panel_update`
+            // toggles this row). Each button dispatches a fixed
+            // `QUICK_TRADE_AMOUNT` of one good; `caravan_buttons` drives them.
+            p.spawn((
+                Node {
+                    display: Display::None,
+                    width: Val::Percent(100.0),
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(SP_XS),
+                    row_gap: Val::Px(SP_XS),
+                    ..default()
+                },
+                CaravanRow,
+            ))
+            .with_children(|row| {
+                for good in frozen_city::game::types::TradeGood::ALL {
+                    for selling in [true, false] {
+                        row.spawn((
+                            Button,
+                            Node {
+                                min_width: Val::Px(84.0),
+                                height: Val::Px(32.0),
+                                padding: UiRect::horizontal(Val::Px(SP_SM)),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
+                                ..default()
+                            },
+                            BackgroundColor(BTN),
+                            CaravanBtn { good, selling },
+                        ))
+                        .with_children(|b| {
+                            b.spawn(theme::text(
+                                i18n_hud::caravan_btn_label(good, selling, lang),
+                                FS_BODY - 2.0,
+                                TEXT_PRIMARY,
+                            ));
+                        });
+                    }
+                }
+            });
             // Ishchi-kuchi bo'limi bitta konteyner (WorkerRow) — sarlavha,
             // − / hisob / + qatori, Hech kim/Maksimum tez-tugmalari va bo'sh-
             // ishchi hisobi birga ko'rinadi/yashirinadi (max_workers == 0
@@ -362,6 +404,14 @@ pub fn spawn_hud(
             .with_children(|b| {
                 b.spawn((theme::text("", FS_SMALL, TEXT_PRIMARY), SelText::Upgrade));
             });
+            // V0.14: Ko'chirish — bosilganda `RelocateMode`ga o'tadi (bir
+            // martalik, `input::build_input`ning duxligi/qoralamasi orqali
+            // maqsad plitka tasdiqlanadi); ko'rinishini `selection_panel_update`
+            // boshqaradi (faqat qurilishi mumkin, bitgan binolarda).
+            p.spawn((theme::button(Val::Percent(100.0), 30.0, BTN), RelocateBtn))
+                .with_children(|b| {
+                    b.spawn(theme::text(i18n_hud::relocate_label(lang), FS_SMALL, TEXT_PRIMARY));
+                });
             p.spawn((
                 theme::button(Val::Percent(100.0), 30.0, BTN_DANGER),
                 DemolishBtn,
@@ -457,6 +507,8 @@ fn spawn_top_bar_desktop(commands: &mut Commands, ff: theme::FormFactor, lang: L
             res_chip(p, RES_WOOD, i18n_hud::hud_wood(0, lang), HudField::Wood);
             res_chip(p, RES_COAL, i18n_hud::hud_coal(0, lang), HudField::Coal);
             res_chip(p, RES_FOOD, i18n_hud::hud_food(0, lang), HudField::Food);
+            res_chip(p, RES_WATER, i18n_hud::hud_water(0, lang), HudField::Water);
+            res_chip(p, RES_GOLD, i18n_hud::hud_gold(0, lang), HudField::Gold);
             res_chip(p, theme::ACCENT_ICE, i18n_hud::hud_pop(0, 0, lang), HudField::Pop);
             p.spawn(Node {
                 flex_grow: 1.0,
@@ -731,6 +783,8 @@ fn spawn_top_bar_mobile(commands: &mut Commands, lang: Lang) {
                 row.spawn((hud_text_mobile(i18n_hud::hud_wood(0, lang), RES_WOOD), HudField::Wood));
                 row.spawn((hud_text_mobile(i18n_hud::hud_coal(0, lang), RES_COAL), HudField::Coal));
                 row.spawn((hud_text_mobile(i18n_hud::hud_food(0, lang), RES_FOOD), HudField::Food));
+                row.spawn((hud_text_mobile(i18n_hud::hud_water(0, lang), RES_WATER), HudField::Water));
+                row.spawn((hud_text_mobile(i18n_hud::hud_gold(0, lang), RES_GOLD), HudField::Gold));
                 row.spawn(Node {
                     flex_grow: 1.0,
                     ..default()
@@ -864,6 +918,8 @@ pub(crate) struct HudCache {
     wood: Option<(i64, Lang)>,
     coal: Option<(i64, Lang)>,
     food: Option<(i64, Lang)>,
+    water: Option<(i64, Lang)>,
+    gold: Option<(i64, Lang)>,
     pop: Option<(usize, u32, Lang)>,
     clock: Option<(u32, u32, u32, Lang)>,
     temp: Option<(i32, bool, Lang)>,
@@ -902,6 +958,20 @@ pub fn hud_update(
                 if cache.food != Some((v, lang)) {
                     cache.food = Some((v, lang));
                     text.0 = i18n_hud::hud_food(v, lang);
+                }
+            }
+            HudField::Water => {
+                let v = state.stock.water as i64;
+                if cache.water != Some((v, lang)) {
+                    cache.water = Some((v, lang));
+                    text.0 = i18n_hud::hud_water(v, lang);
+                }
+            }
+            HudField::Gold => {
+                let v = state.stock.gold as i64;
+                if cache.gold != Some((v, lang)) {
+                    cache.gold = Some((v, lang));
+                    text.0 = i18n_hud::hud_gold(v, lang);
                 }
             }
             HudField::Pop => {

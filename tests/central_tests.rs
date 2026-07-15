@@ -50,6 +50,8 @@ fn central_settlers_never_hunger_or_die() {
         trained_kind: None,
         chop_target: None,
         carrying_wood: false,
+        thirst: 119.0, // would die of thirst in one bad day anywhere else
+        bury_target: None,
     }];
     sim::inject_migrants(&mut state, 42, "Aziz", migrants);
     state.stock.food = 0.0;
@@ -63,6 +65,7 @@ fn central_settlers_never_hunger_or_die() {
     let s = &state.survivors[0];
     assert_eq!(s.hp, 1.0, "hp must not drift in the hub");
     assert_eq!(s.hunger, 119.0, "hunger must not drift in the hub");
+    assert_eq!(s.thirst, 119.0, "thirst must not drift in the hub");
 }
 
 #[test]
@@ -83,6 +86,8 @@ fn inject_reids_sets_owner_and_caps_per_account() {
         trained_kind: None,
         chop_target: None,
         carrying_wood: false,
+        thirst: 10.0,
+        bury_target: None,
     };
 
     // Two batches from "different personal worlds" with clashing ids.
@@ -193,6 +198,8 @@ fn central_authority_follows_settler_ownership() {
         trained_kind: None,
         chop_target: None,
         carrying_wood: false,
+        thirst: 10.0,
+        bury_target: None,
     };
     sim::inject_migrants(&mut state, 1, "Aziz", vec![mk(1)]);
     sim::inject_migrants(&mut state, 2, "Vali", vec![mk(2)]);

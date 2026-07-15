@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{BuildingKind, Tech};
+use super::{BuildingKind, Tech, TradeGood};
 
 /// Commands a player may issue; the server validates every one of them.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -46,4 +46,19 @@ pub enum PlayerCommand {
     /// immediately on the chop — there's no assigned building to carry it
     /// back to.
     ChopTile { survivor: u32, x: u8, y: u8 },
+    /// V0.11: send a named (living) survivor to bury a corpse — unassigns
+    /// them from work exactly like `MoveSurvivor`/`ChopTile`, walks them to
+    /// the body, then performs a timed action on arrival (see
+    /// `Survivor::bury_target`, `tick.rs`'s burial block).
+    Bury { survivor: u32, corpse: u32 },
+    /// V0.13: send a caravan through the Tunnel to the Global World — either
+    /// to sell `amount` of `good` for gold, or (if `selling` is false) to
+    /// buy `amount` of it with banked gold. See `GameState.pending_caravan`.
+    DispatchTradeCaravan { good: TradeGood, amount: u32, selling: bool },
+    /// V0.14: move a finished, buildable building to a new tile — free
+    /// (no wood), but re-enters `Building::build_left`/`under_construction`
+    /// at a discounted duration (see `RELOCATE_WORKDAYS_FACTOR`), same
+    /// mechanism `UpgradeBuilding` reuses. `level` and any named worker
+    /// assignments carry over unchanged; only `x`/`y` move.
+    RelocateBuilding { building: u32, x: u8, y: u8 },
 }

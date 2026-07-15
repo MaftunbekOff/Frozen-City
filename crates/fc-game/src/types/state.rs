@@ -94,9 +94,45 @@ pub struct GameState {
     /// any (V0.9). See `events::TunnelMigrant` and `tick.rs`'s tunnel-migrant
     /// block for the spawn/absorb/expire lifecycle.
     pub pending_migrant: Option<TunnelMigrant>,
+    /// V0.10: abstract deer/rabbit populations the `HunterHut` hunts from
+    /// (see [`Wildlife`]).
+    pub wildlife: Wildlife,
+    /// V0.11: dead survivors awaiting burial (or natural decay into a
+    /// `Grave`) — see [`Corpse`], `PlayerCommand::Bury`.
+    pub corpses: Vec<Corpse>,
+    /// V0.11: faded traces left by burial or corpse decay — see [`Grave`].
+    pub graves: Vec<Grave>,
+    /// V0.12: abstract cow/sheep populations the `Farmhouse` raises from
+    /// (see [`Livestock`]).
+    pub livestock: Livestock,
+    /// V0.13: a trade caravan currently on the road through the Tunnel, if
+    /// any — see [`TradeCaravan`], `PlayerCommand::DispatchTradeCaravan`.
+    pub pending_caravan: Option<TradeCaravan>,
 }
 
 impl GameState {
+    /// One-time, idempotent, self-healing repair for a real production bug
+    /// (2026-07-14): a `BuildingKind` enum reorder briefly shipped with
+    /// `Tunnel` not last, silently mis-decoding some worlds' Tunnel building
+    /// as a different kind — which kind depends on exactly when that world's
+    /// Tunnel was (re)created relative to the buggy deploy window, so a
+    /// single wire-index fix can't correct every affected save by itself.
+    /// The Tunnel is always a fixed, singular, always-present, non-buildable
+    /// fixture at `(TUNNEL_X, TUNNEL_Y)` (see `mapgen`) — nothing else is
+    /// ever placed there, so if no building currently has
+    /// `BuildingKind::Tunnel` but one sits exactly at that position, it can
+    /// only ever be this mislabeling and is safe to relabel back. Called on
+    /// every load (`persist::load_at`); a no-op once a world's Tunnel
+    /// already decodes correctly, so safe to keep calling indefinitely.
+    pub fn repair_mislabeled_tunnel(&mut self) {
+        if self.buildings.iter().any(|b| b.kind == BuildingKind::Tunnel) {
+            return;
+        }
+        if let Some(b) = self.buildings.iter_mut().find(|b| b.x == TUNNEL_X && b.y == TUNNEL_Y) {
+            b.kind = BuildingKind::Tunnel;
+        }
+    }
+
     pub fn day(&self) -> u32 {
         (self.tick / TICKS_PER_DAY) as u32 + 1
     }
@@ -365,6 +401,14 @@ impl GameState {
                         None => b.owner == Some(pid),
                     })
                 }
+                // Relocating is as much a structural change as upgrading —
+                // same ownership rule.
+                PlayerCommand::RelocateBuilding { building, .. } => {
+                    self.find_building(*building).is_some_and(|b| match b.owner_account {
+                        Some(owner_acc) => account == Some(owner_acc),
+                        None => b.owner == Some(pid),
+                    })
+                }
                 // Only your own settlers, by account identity.
                 PlayerCommand::AssignSurvivor { survivor, .. } => {
                     account.is_some()
@@ -396,6 +440,14 @@ impl GameState {
                 | PlayerCommand::InvestTunnel
                 | PlayerCommand::Research { .. }
                 | PlayerCommand::RespondEvent { .. } => false,
+                // Central-world settlers never die (see `GameState.central`'s
+                // doc comment) — no corpse can ever exist there, so this is
+                // never meaningfully issuable in this branch.
+                PlayerCommand::Bury { .. } => false,
+                // The Tunnel trade caravan is personal-world progression
+                // (mirrors `InvestTunnel`) — there's no "Global World" to
+                // trade with from inside the Global World itself.
+                PlayerCommand::DispatchTradeCaravan { .. } => false,
             };
         }
         let Some(p) = self.player(pid) else {
@@ -417,9 +469,12 @@ impl GameState {
                 | PlayerCommand::AssignSurvivor { .. }
                 | PlayerCommand::MoveSurvivor { .. }
                 | PlayerCommand::ChopTile { .. }
+                | PlayerCommand::Bury { .. }
                 | PlayerCommand::InvestTunnel
                 | PlayerCommand::Research { .. }
-                | PlayerCommand::RespondEvent { .. } => true,
+                | PlayerCommand::RespondEvent { .. }
+                | PlayerCommand::DispatchTradeCaravan { .. }
+                | PlayerCommand::RelocateBuilding { .. } => true,
                 // Guests may only tear down their own buildings, never touch the
                 // furnace, under the Build policy.
                 PlayerCommand::Demolish { building } => self
@@ -489,6 +544,55 @@ impl GameState {
         }
         if self.stock.wood < kind.cost_wood() as f32 {
             return Err("Not enough wood");
+        }
+        Ok(())
+    }
+
+    /// V0.14: full placement validation for `PlayerCommand::RelocateBuilding`
+    /// — shared by client preview and server authority, same convention as
+    /// `can_place`. Mirrors it closely, with two differences: the building's
+    /// OWN current footprint is excluded from the occupancy check (it's
+    /// vacating that spot, not colliding with itself), and there's no wood
+    /// cost (relocating is free).
+    pub fn can_relocate(&self, building: u32, x: u8, y: u8) -> Result<(), &'static str> {
+        let Some(b) = self.find_building(building) else {
+            return Err("No such building");
+        };
+        if !b.kind.buildable() {
+            return Err("That cannot be relocated");
+        }
+        if b.under_construction() {
+            return Err("Still under construction");
+        }
+        let kind = b.kind;
+        let (w, h) = kind.size();
+        if x as usize + w as usize > MAP_W || y as usize + h as usize > MAP_H {
+            return Err("Out of bounds");
+        }
+        for dy in 0..h {
+            for dx in 0..w {
+                let (tx, ty) = (x + dx, y + dy);
+                if let Some(occupant) = self.building_at(tx, ty) {
+                    if occupant.id != building {
+                        return Err("Space is occupied");
+                    }
+                }
+                let Some(tile) = self.tile(tx, ty) else {
+                    return Err("Out of bounds");
+                };
+                match kind {
+                    BuildingKind::CoalMine => {
+                        if tile.terrain != Terrain::Coal || tile.deposit == 0 {
+                            return Err("Needs a coal deposit");
+                        }
+                    }
+                    _ => {
+                        if tile.terrain != Terrain::Snow {
+                            return Err("Ground must be clear");
+                        }
+                    }
+                }
+            }
         }
         Ok(())
     }

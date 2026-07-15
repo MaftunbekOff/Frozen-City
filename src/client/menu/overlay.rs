@@ -275,6 +275,7 @@ pub fn overlay_buttons(
     close_q: Query<&Interaction, (With<CloseOverlayBtn>, Changed<Interaction>)>,
     roots: Query<Entity, Or<(With<MenuRoot>, With<OverlayRoot>)>>,
     mut overlay: ResMut<MenuOverlay>,
+    mut form: ResMut<LoginForm>,
     settings: Res<Settings>,
     view: Res<GameView>,
     lang: Res<Lang>,
@@ -298,6 +299,13 @@ pub fn overlay_buttons(
         return;
     }
     *overlay = next;
+    // The Account modal's fields (and their entities) are about to be
+    // despawned below — clear any lingering focus so a later reopen doesn't
+    // inherit a stale focus, and (wasm) so the mobile keyboard doesn't stay
+    // visually up after the modal it was typing into is gone.
+    form.focus = None;
+    #[cfg(target_arch = "wasm32")]
+    blur_proxy();
     for e in &roots {
         commands.entity(e).despawn();
     }

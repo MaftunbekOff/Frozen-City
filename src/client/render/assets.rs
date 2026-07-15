@@ -14,7 +14,7 @@ use crate::client::*;
 
 /// Fixed `BuildingKind` order backing `GameAssets::building_mats` — index
 /// `i` corresponds to `ALL_KINDS[i]`.
-const ALL_KINDS: [BuildingKind; 10] = [
+const ALL_KINDS: [BuildingKind; 15] = [
     BuildingKind::Furnace,
     BuildingKind::Tent,
     BuildingKind::Sawmill,
@@ -24,6 +24,11 @@ const ALL_KINDS: [BuildingKind; 10] = [
     BuildingKind::Hospital,
     BuildingKind::Kitchen,
     BuildingKind::Warehouse,
+    BuildingKind::TailorShop,
+    BuildingKind::Wall,
+    BuildingKind::Gate,
+    BuildingKind::Well,
+    BuildingKind::Farmhouse,
     BuildingKind::Tunnel,
 ];
 
@@ -59,10 +64,10 @@ pub struct GameAssets {
     /// One winter-coat material per trade (`Profession::ALL` order, see
     /// [`crate::client::profession_coat_color`]) — shared so survivors of the
     /// same trade batch into one draw call, same trick as `avatar_mats`.
-    pub survivor_coat_mats: [Handle<StandardMaterial>; 6],
+    pub survivor_coat_mats: [Handle<StandardMaterial>; 7],
     /// One headwear material per trade — hood/hardhat/toque, deliberately
     /// distinct from the coat color so a trade reads from its silhouette.
-    pub survivor_head_mats: [Handle<StandardMaterial>; 6],
+    pub survivor_head_mats: [Handle<StandardMaterial>; 7],
     /// Coat override for whoever currently holds `GameState.leader` — a
     /// royal color no trade uses, so leading reads as visually distinct
     /// (crown + this) rather than looking stuck in their day job.
@@ -77,7 +82,7 @@ pub struct GameAssets {
     pub survivor_skin_mat: Handle<StandardMaterial>,
     /// One body material per `BuildingKind` (see `ALL_KINDS`), shared so
     /// every building of the same kind batches into one draw call.
-    pub building_mats: [Handle<StandardMaterial>; 10],
+    pub building_mats: [Handle<StandardMaterial>; 15],
     /// Furnace base/chimney stone — identical for every furnace.
     pub furnace_stone_mat: Handle<StandardMaterial>,
     /// The Tunnel's dark mouth/opening, once unlocked.
@@ -89,6 +94,10 @@ pub struct GameAssets {
     pub hospital_cross_mat: Handle<StandardMaterial>,
     pub kitchen_stone_mat: Handle<StandardMaterial>,
     pub warehouse_plank_mat: Handle<StandardMaterial>,
+    /// Shared "dyed wool" material for the Tailor Shop's cloth prop and the
+    /// Tailor survivor's spool prop — echoes `kind_color(TailorShop)`, same
+    /// tool-echoes-workplace convention every other trade's material follows.
+    pub tailor_cloth_mat: Handle<StandardMaterial>,
     /// Roof worker-indicator cube; identical for every building.
     pub worker_mat: Handle<StandardMaterial>,
     /// V0.8 bino daraja-bayroqlari: [bronza (L2-4), kumush (L5-7),
@@ -98,6 +107,11 @@ pub struct GameAssets {
     /// oltin `tier_flag_mats[2]`ni qayta ishlatadi.
     pub gear_band_mat: Handle<StandardMaterial>,
     pub gear_cap_mat: Handle<StandardMaterial>,
+    /// V0.11: a fallen survivor's shroud, lying flat until buried or decayed
+    /// into a `Grave` — see `render::sync_corpses_and_graves`.
+    pub corpse_mat: Handle<StandardMaterial>,
+    /// V0.11: the wooden cross marking a `Grave`.
+    pub grave_cross_mat: Handle<StandardMaterial>,
 }
 
 /// Shared body material handle for a building kind — keeps same-kind
@@ -312,6 +326,11 @@ pub fn setup_camera_and_assets(
             perceptual_roughness: 0.85,
             ..default()
         }),
+        tailor_cloth_mat: materials.add(StandardMaterial {
+            base_color: kind_color(BuildingKind::TailorShop),
+            perceptual_roughness: 0.9,
+            ..default()
+        }),
         worker_mat: materials.add(StandardMaterial {
             base_color: Color::srgb(0.95, 0.97, 1.0),
             emissive: LinearRgba::rgb(0.6, 0.65, 0.75),
@@ -340,6 +359,16 @@ pub fn setup_camera_and_assets(
         gear_cap_mat: materials.add(StandardMaterial {
             base_color: Color::srgb(0.30, 0.24, 0.18),
             perceptual_roughness: 0.9,
+            ..default()
+        }),
+        corpse_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.72, 0.72, 0.78),
+            perceptual_roughness: 0.95,
+            ..default()
+        }),
+        grave_cross_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.36, 0.26, 0.16),
+            perceptual_roughness: 0.85,
             ..default()
         }),
     };

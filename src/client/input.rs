@@ -14,6 +14,23 @@ use super::render::GhostMarker;
 use super::roster::SurvivorSelection;
 use super::*;
 
+/// The three "a modal has focus" resources every world-input system checks
+/// before acting, bundled into one `SystemParam` — keeps `build_input`'s own
+/// parameter count under Bevy's per-system limit (it was one bundle away
+/// from tripping over it once `RelocateMode` joined `BuildMode`).
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct ModalBlockers<'w> {
+    chat: Res<'w, ChatState>,
+    research: Res<'w, super::research::ResearchOpen>,
+    social: Res<'w, super::social::SocialOpen>,
+}
+
+impl ModalBlockers<'_> {
+    pub fn blocking(&self) -> bool {
+        self.chat.active || self.research.0 || self.social.0
+    }
+}
+
 /// A world-space click closer than this to a survivor's sim position selects
 /// them instead of whatever building (or empty ground) is under the cursor —
 /// "aholiga bosish ... bino tanlashdan ustunroq bo'lsin agar survivor yaqin
@@ -32,6 +49,21 @@ pub fn pick_survivor(state: &GameState, world: Vec3) -> Option<(u32, f32)> {
         .survivors
         .iter()
         .map(|s| (s.id, super::tilef_to_world((s.x, s.y)).distance(world)))
+        .filter(|(_, d)| *d <= SURVIVOR_PICK_RADIUS)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+}
+
+/// V0.11: nearest unclaimed corpse to `world`, within the same pick radius
+/// as a survivor — a corpse is roughly survivor-sized, so reusing
+/// `SURVIVOR_PICK_RADIUS` keeps the feel consistent. Already-claimed corpses
+/// (`being_buried_by.is_some()`) are excluded so a click there falls through
+/// to an ordinary walk order instead of silently no-op'ing on `Bury`.
+pub fn pick_corpse(state: &GameState, world: Vec3) -> Option<(u32, f32)> {
+    state
+        .corpses
+        .iter()
+        .filter(|c| c.being_buried_by.is_none())
+        .map(|c| (c.id, super::tilef_to_world((c.x, c.y)).distance(world)))
         .filter(|(_, d)| *d <= SURVIVOR_PICK_RADIUS)
         .min_by(|a, b| a.1.total_cmp(&b.1))
 }
@@ -82,9 +114,13 @@ pub fn resolve_world_click(
     // survivor sits closer to the actual click point than the building's own
     // center, the click reads as aimed at them instead — otherwise the
     // Furnace's 2x2 footprint would leave anyone standing right next to it
-    // permanently unclickable.
+    // permanently unclickable. Strict `>`, not `>=`: an EXACT tie (a
+    // survivor sitting precisely on a building's center tile — e.g. a
+    // Kitchen worker, or historically anyone parked there) must favor the
+    // survivor, or they become permanently unclickable rather than merely
+    // hard-to-click.
     let building_wins = match (building, near_survivor) {
-        (Some(b), Some((_, survivor_dist))) => survivor_dist >= building_center_world(b).distance(world),
+        (Some(b), Some((_, survivor_dist))) => survivor_dist > building_center_world(b).distance(world),
         (Some(_), None) => true,
         (None, _) => false,
     };
@@ -104,6 +140,17 @@ pub fn resolve_world_click(
     // assign-to-work block right below (or, failing that, ordinary building
     // selection — closing the survivor card exactly like the explicit X
     // button would, "boshqa joyga bosish ... yopadi").
+    // V0.11: a survivor is selected and the click landed near an unclaimed
+    // corpse (and not on a building) — send them to bury it, same
+    // "select, then click the target" pattern as chopping a tree, checked
+    // first since a corpse should win over the plain walk-order fallback.
+    if let (Some(id), None) = (survivor_sel.0, building) {
+        if let Some((corpse_id, _)) = pick_corpse(state, world) {
+            net.send(ClientMsg::Cmd(PlayerCommand::Bury { survivor: id, corpse: corpse_id }));
+            return;
+        }
+    }
+
     if let (Some(id), Some((tx, ty)), None) = (survivor_sel.0, tile, building) {
         let choppable = state.tile(tx, ty).is_some_and(|t| t.terrain == Terrain::Forest && t.deposit > 0);
         let cmd = if choppable {
@@ -282,6 +329,7 @@ pub fn build_input(
     view: Res<GameView>,
     net: Res<NetConn>,
     mut build: ResMut<BuildMode>,
+    mut relocate: ResMut<RelocateMode>,
     mut selection: ResMut<Selection>,
     mut survivor_sel: ResMut<SurvivorSelection>,
     mut move_queue: ResMut<MoveOrderQueue>,
@@ -289,12 +337,10 @@ pub fn build_input(
     window: Query<&Window, With<PrimaryWindow>>,
     camera: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     mut ghost: Query<(&mut Transform, &GhostMarker, &mut Visibility)>,
-    chat: Res<ChatState>,
-    research: Res<super::research::ResearchOpen>,
-    social: Res<super::social::SocialOpen>,
+    modal: ModalBlockers,
 ) {
     // While typing in chat or in the research/social modal, keys don't build/cancel.
-    if chat.active || research.0 || social.0 {
+    if modal.blocking() {
         hide_ghost(&mut ghost);
         return;
     }
@@ -316,12 +362,14 @@ pub fn build_input(
     }
     if keys.just_pressed(KeyCode::Escape) {
         build.0 = None;
+        relocate.0 = None;
         selection.0 = None;
         survivor_sel.0 = None;
     }
     if buttons.just_pressed(MouseButton::Right) {
-        if build.0.is_some() {
+        if build.0.is_some() || relocate.0.is_some() {
             build.0 = None;
+            relocate.0 = None;
         } else {
             selection.0 = None;
             survivor_sel.0 = None;
@@ -351,9 +399,12 @@ pub fn build_input(
         return;
     }
 
-    // Placement ghost.
+    // Placement ghost — also used for `RelocateMode` (the moving building's
+    // own kind stands in for what `build.0` normally supplies), just
+    // validated against `can_relocate` instead of `can_place`.
+    let relocating_kind = relocate.0.and_then(|id| state.find_building(id)).map(|b| b.kind);
     let mut ghost_tile: Option<(u8, u8)> = None;
-    if let (Some(kind), Some(world), false) = (build.0, cursor, ui_hover.0) {
+    if let (Some(kind), Some(world), false) = (build.0.or(relocating_kind), cursor, ui_hover.0) {
         if let Some((tx, ty)) = world_to_tile(world) {
             ghost_tile = Some((tx, ty));
             if let Ok((mut t, marker, mut vis)) = ghost.single_mut() {
@@ -361,15 +412,18 @@ pub fn build_input(
                 let pos = tile_center_world(tx, ty);
                 t.translation.x = pos.x;
                 t.translation.z = pos.z;
-                let color = match state.can_place(kind, tx, ty) {
-                    Ok(()) => {
-                        if kind == BuildingKind::Sawmill && state.forest_near(tx, ty, 4) == 0 {
-                            Color::srgba(0.95, 0.85, 0.30, 0.45) // valid but pointless
-                        } else {
-                            Color::srgba(0.30, 0.90, 0.40, 0.45)
-                        }
+                let valid = match relocate.0 {
+                    Some(id) => state.can_relocate(id, tx, ty).is_ok(),
+                    None => state.can_place(kind, tx, ty).is_ok(),
+                };
+                let color = if valid {
+                    if relocate.0.is_none() && kind == BuildingKind::Sawmill && state.forest_near(tx, ty, 4) == 0 {
+                        Color::srgba(0.95, 0.85, 0.30, 0.45) // valid but pointless
+                    } else {
+                        Color::srgba(0.30, 0.90, 0.40, 0.45)
                     }
-                    Err(_) => Color::srgba(0.95, 0.25, 0.25, 0.45),
+                } else {
+                    Color::srgba(0.95, 0.25, 0.25, 0.45)
                 };
                 if let Some(mut m) = materials.get_mut(&marker.mat) {
                     m.base_color = color;
@@ -385,7 +439,16 @@ pub fn build_input(
     // Clicks.
     if buttons.just_pressed(MouseButton::Left) && !ui_hover.0 && state.phase == GamePhase::Running
     {
-        if let Some(kind) = build.0 {
+        if let Some(id) = relocate.0 {
+            if let Some((tx, ty)) = ghost_tile {
+                if state.can_relocate(id, tx, ty).is_ok() {
+                    net.send(ClientMsg::Cmd(PlayerCommand::RelocateBuilding { building: id, x: tx, y: ty }));
+                    // One-shot: unlike `BuildMode`, relocating targets one
+                    // specific building, not a repeatable kind.
+                    relocate.0 = None;
+                }
+            }
+        } else if let Some(kind) = build.0 {
             if let Some((tx, ty)) = ghost_tile {
                 if state.can_place(kind, tx, ty).is_ok() {
                     net.send(ClientMsg::Cmd(PlayerCommand::Place {

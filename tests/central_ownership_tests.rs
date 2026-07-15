@@ -7,7 +7,7 @@
 
 use frozen_city::game::sim;
 use frozen_city::game::types::*;
-use frozen_city::net::legacy::{BuildingV2, GameStateV2, SurvivorV3};
+use frozen_city::net::legacy::{BuildingV2, GameStateV2, StockpileV7, SurvivorV3};
 use frozen_city::net::persist;
 
 fn find_spot(state: &GameState, kind: BuildingKind) -> (u8, u8) {
@@ -38,6 +38,8 @@ fn settler(id: u32) -> Survivor {
         trained_kind: None,
         chop_target: None,
         carrying_wood: false,
+        thirst: 10.0,
+        bury_target: None,
     }
 }
 
@@ -294,7 +296,11 @@ fn v2_mirror_migrates_to_v3_with_none_owner_account_and_empty_ledger() {
             })
             .collect(),
         survivors: modern.survivors.iter().map(SurvivorV3::from).collect(),
-        stock: modern.stock,
+        stock: StockpileV7 {
+            wood: modern.stock.wood,
+            coal: modern.stock.coal,
+            food: modern.stock.food,
+        },
         furnace_level: modern.furnace_level,
         furnace_lit: modern.furnace_lit,
         cold_snap: modern.cold_snap,
@@ -363,7 +369,11 @@ fn v2_file_on_disk_round_trips_through_persist_load_at() {
             })
             .collect(),
         survivors: modern.survivors.iter().map(SurvivorV3::from).collect(),
-        stock: modern.stock,
+        stock: StockpileV7 {
+            wood: modern.stock.wood,
+            coal: modern.stock.coal,
+            food: modern.stock.food,
+        },
         furnace_level: modern.furnace_level,
         furnace_lit: modern.furnace_lit,
         cold_snap: modern.cold_snap,

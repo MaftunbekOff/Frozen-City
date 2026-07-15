@@ -453,6 +453,104 @@ fn spawn_building(
                 }
                 roof_y = 0.48;
             }
+            BuildingKind::TailorShop => {
+                let body = building_mat(assets, b.kind);
+                p.spawn((
+                    Mesh3d(assets.cube.clone()),
+                    MeshMaterial3d(body),
+                    Transform::from_xyz(0.0, 0.24, 0.0).with_scale(Vec3::new(0.78, 0.48, 0.78)),
+                ));
+                // A hung bolt of cloth on the front face — the "tailor" tell
+                // at a glance, reusing the same material the Tailor
+                // survivor's spool prop uses.
+                p.spawn((
+                    Mesh3d(assets.cube.clone()),
+                    MeshMaterial3d(assets.tailor_cloth_mat.clone()),
+                    Transform::from_xyz(0.0, 0.30, 0.40).with_scale(Vec3::new(0.30, 0.36, 0.04)),
+                ));
+                roof_y = 0.5;
+            }
+            BuildingKind::Wall => {
+                // A single thin, wide slab spanning the tile — purely
+                // decorative (this game has no collision/threat mechanic to
+                // actually block), just a boundary marker.
+                let body = building_mat(assets, b.kind);
+                p.spawn((
+                    Mesh3d(assets.cube.clone()),
+                    MeshMaterial3d(body),
+                    Transform::from_xyz(0.0, 0.22, 0.0).with_scale(Vec3::new(0.94, 0.44, 0.14)),
+                ));
+                roof_y = 0.0; // flat-topped, no roof/worker-cube perch
+            }
+            BuildingKind::Gate => {
+                // Two posts with a lintel bar — an "opening" silhouette,
+                // distinct from Wall's solid slab, same decorative role.
+                let body = building_mat(assets, b.kind);
+                for dx in [-0.34f32, 0.34] {
+                    p.spawn((
+                        Mesh3d(assets.cube.clone()),
+                        MeshMaterial3d(body.clone()),
+                        Transform::from_xyz(dx, 0.24, 0.0).with_scale(Vec3::new(0.16, 0.48, 0.16)),
+                    ));
+                }
+                p.spawn((
+                    Mesh3d(assets.cube.clone()),
+                    MeshMaterial3d(body),
+                    Transform::from_xyz(0.0, 0.52, 0.0).with_scale(Vec3::new(0.94, 0.10, 0.16)),
+                ));
+                roof_y = 0.0;
+            }
+            BuildingKind::Well => {
+                // A low stone rim (kind_color's water-blue) around a darker
+                // water-surface disc, with two posts and a crossbeam roof —
+                // the classic well silhouette.
+                let rim = building_mat(assets, b.kind);
+                p.spawn((
+                    Mesh3d(assets.cylinder.clone()),
+                    MeshMaterial3d(rim),
+                    Transform::from_xyz(0.0, 0.14, 0.0).with_scale(Vec3::new(0.46, 0.28, 0.46)),
+                ));
+                p.spawn((
+                    Mesh3d(assets.cylinder.clone()),
+                    MeshMaterial3d(assets.tunnel_mouth_mat.clone()),
+                    Transform::from_xyz(0.0, 0.29, 0.0).with_scale(Vec3::new(0.36, 0.02, 0.36)),
+                ));
+                let posts = assets.warehouse_plank_mat.clone();
+                for dx in [-0.36f32, 0.36] {
+                    p.spawn((
+                        Mesh3d(assets.cylinder.clone()),
+                        MeshMaterial3d(posts.clone()),
+                        Transform::from_xyz(dx, 0.5, 0.0).with_scale(Vec3::new(0.05, 0.44, 0.05)),
+                    ));
+                }
+                p.spawn((
+                    Mesh3d(assets.cylinder.clone()),
+                    MeshMaterial3d(posts),
+                    Transform::from_xyz(0.0, 0.74, 0.0)
+                        .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2))
+                        .with_scale(Vec3::new(0.04, 0.82, 0.04)),
+                ));
+                roof_y = 0.74;
+            }
+            BuildingKind::Farmhouse => {
+                // A barn: body in `kind_color`'s barn-red, plank-toned
+                // gabled roof (reusing the `tent` mesh the same way
+                // Greenhouse reuses it for its glass roof) — the classic
+                // farm silhouette, distinct from Greenhouse's flatter glass
+                // canopy.
+                let body = building_mat(assets, b.kind);
+                p.spawn((
+                    Mesh3d(assets.cube.clone()),
+                    MeshMaterial3d(body),
+                    Transform::from_xyz(0.0, 0.22, 0.0).with_scale(Vec3::new(0.8, 0.44, 0.8)),
+                ));
+                p.spawn((
+                    Mesh3d(assets.tent.clone()),
+                    MeshMaterial3d(assets.warehouse_plank_mat.clone()),
+                    Transform::from_xyz(0.0, 0.44, 0.0).with_scale(Vec3::new(0.92, 0.34, 0.92)),
+                ));
+                roof_y = 0.78;
+            }
             BuildingKind::Tunnel => {
                 if tunnel_stage == 0 {
                     // Sealed: an unremarkable snow-dusted rock mound —
@@ -504,8 +602,13 @@ fn spawn_building(
             }
         }
 
-        // A small window that glows warm at night (shared animated material).
-        if b.kind != BuildingKind::Furnace && b.kind != BuildingKind::Tunnel {
+        // A small window that glows warm at night (shared animated material) —
+        // skipped for the thin, non-housing Wall/Gate slabs, same as the
+        // fixture-only Furnace/Tunnel.
+        if !matches!(
+            b.kind,
+            BuildingKind::Furnace | BuildingKind::Tunnel | BuildingKind::Wall | BuildingKind::Gate
+        ) {
             p.spawn((
                 Mesh3d(assets.cube.clone()),
                 MeshMaterial3d(assets.window_mat.clone()),

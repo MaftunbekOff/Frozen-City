@@ -135,6 +135,13 @@ pub fn tick(state: &mut GameState) {
             // via the dedicated chop-and-carry block instead) — so by the
             // time a Furnace shows up here, `level` is always a genuine V0.9
             // upgrade (>= 2), same as any other building's.
+            //
+            // V0.14: a relocated building also completes through this same
+            // generic arm (see `RelocateBuilding`) and its own start-of-move
+            // event already told the player what's happening — `level` alone
+            // can't distinguish "just relocated" from "just upgraded" here,
+            // so a relocated building already above L1 logs as "upgraded"
+            // even though its level didn't change. Cosmetic only; harmless.
             if level > 1 {
                 push_event(state, format!("{} upgraded to L{}.", kind.name(), level));
             } else {
@@ -142,6 +149,35 @@ pub fn tick(state: &mut GameState) {
             }
         }
     }
+
+    // --- V0.10: wildlife regen (deer/rabbit) ---
+    // Runs unconditionally, whether or not a HunterHut exists — same as
+    // forest/coal deposits existing on the map before any Sawmill/CoalMine
+    // is built. Logistic growth toward each cap: proportional to current
+    // population, so a population hunted near zero regenerates very slowly
+    // (graceful degradation instead of a hard floor/extinction state).
+    let deer_growth = DEER_REGEN_PER_DAY / TICKS_PER_DAY as f32
+        * state.wildlife.deer
+        * (1.0 - state.wildlife.deer / DEER_CAP).max(0.0);
+    state.wildlife.deer = (state.wildlife.deer + deer_growth).clamp(0.0, DEER_CAP);
+    let rabbit_growth = RABBIT_REGEN_PER_DAY / TICKS_PER_DAY as f32
+        * state.wildlife.rabbit
+        * (1.0 - state.wildlife.rabbit / RABBIT_CAP).max(0.0);
+    state.wildlife.rabbit = (state.wildlife.rabbit + rabbit_growth).clamp(0.0, RABBIT_CAP);
+
+    // --- V0.12: livestock regen (cow/sheep) ---
+    // Same logistic-growth shape as wildlife regen, just domesticated
+    // instead of hunted — runs unconditionally, whether or not a Farmhouse
+    // exists yet, same "the resource exists before the building that uses
+    // it" convention.
+    let cow_growth = COW_REGEN_PER_DAY / TICKS_PER_DAY as f32
+        * state.livestock.cow
+        * (1.0 - state.livestock.cow / COW_CAP).max(0.0);
+    state.livestock.cow = (state.livestock.cow + cow_growth).clamp(0.0, COW_CAP);
+    let sheep_growth = SHEEP_REGEN_PER_DAY / TICKS_PER_DAY as f32
+        * state.livestock.sheep
+        * (1.0 - state.livestock.sheep / SHEEP_CAP).max(0.0);
+    state.livestock.sheep = (state.livestock.sheep + sheep_growth).clamp(0.0, SHEEP_CAP);
 
     // --- Production ---
     // Colony-wide multipliers (tools/leader/morale) composed once per tick,
@@ -189,8 +225,73 @@ pub fn tick(state: &mut GameState) {
         let coal_before = state.stock.coal;
         let food_before = state.stock.food;
         match kind {
-            BuildingKind::HunterHut => state.stock.food += amount,
+            BuildingKind::HunterHut => {
+                state.buildings[i].progress += amount;
+                while state.buildings[i].progress >= 1.0 {
+                    // Deer preferred while available (better food+fur yield
+                    // per unit); falls back to rabbit once deer are too
+                    // scarce to support a hunt-unit — graceful degradation
+                    // instead of a hard stop the moment deer alone run low.
+                    if state.wildlife.deer >= DEER_HUNT_PER_UNIT {
+                        state.wildlife.deer -= DEER_HUNT_PER_UNIT;
+                        state.stock.food += DEER_FOOD_PER_UNIT;
+                        state.stock.fur += DEER_FUR_PER_UNIT;
+                        state.buildings[i].progress -= 1.0;
+                    } else if state.wildlife.rabbit >= RABBIT_HUNT_PER_UNIT {
+                        state.wildlife.rabbit -= RABBIT_HUNT_PER_UNIT;
+                        state.stock.food += RABBIT_FOOD_PER_UNIT;
+                        state.stock.fur += RABBIT_FUR_PER_UNIT;
+                        state.buildings[i].progress -= 1.0;
+                    } else {
+                        // Wildlife too scarce this tick — hold progress like
+                        // an empty coal deposit does; hunters keep trying
+                        // next tick as population regrows.
+                        state.buildings[i].progress = 1.0;
+                        break;
+                    }
+                }
+            }
+            BuildingKind::TailorShop => {
+                state.buildings[i].progress += amount;
+                while state.buildings[i].progress >= 1.0 {
+                    if state.stock.fur >= FUR_PER_CLOTH {
+                        state.stock.fur -= FUR_PER_CLOTH;
+                        state.stock.cloth += 1.0;
+                        state.buildings[i].progress -= 1.0;
+                    } else {
+                        state.buildings[i].progress = 1.0;
+                        break;
+                    }
+                }
+            }
             BuildingKind::Greenhouse => state.stock.food += amount,
+            // V0.11: flat and uncapped like Greenhouse — no map-tile deposit
+            // to exhaust, unlike Sawmill/CoalMine.
+            BuildingKind::Well => state.stock.water += amount,
+            BuildingKind::Farmhouse => {
+                state.buildings[i].progress += amount;
+                while state.buildings[i].progress >= 1.0 {
+                    // Cow preferred while available (better food yield per
+                    // unit); falls back to sheep once cows are too scarce to
+                    // support a farm-unit — same graceful degradation as
+                    // HunterHut's deer/rabbit fallback.
+                    if state.livestock.cow >= COW_HARVEST_PER_UNIT {
+                        state.livestock.cow -= COW_HARVEST_PER_UNIT;
+                        state.stock.food += COW_FOOD_PER_UNIT;
+                        state.buildings[i].progress -= 1.0;
+                    } else if state.livestock.sheep >= SHEEP_HARVEST_PER_UNIT {
+                        state.livestock.sheep -= SHEEP_HARVEST_PER_UNIT;
+                        state.stock.food += SHEEP_FOOD_PER_UNIT;
+                        state.buildings[i].progress -= 1.0;
+                    } else {
+                        // Livestock too scarce this tick — hold progress like
+                        // an empty coal deposit does; farmers keep trying
+                        // next tick as the herd regrows.
+                        state.buildings[i].progress = 1.0;
+                        break;
+                    }
+                }
+            }
             BuildingKind::Sawmill => {
                 state.buildings[i].progress += amount;
                 while state.buildings[i].progress >= 1.0 {
@@ -313,8 +414,41 @@ pub fn tick(state: &mut GameState) {
         1.0
     };
     let portion = FOOD_PER_SURVIVOR_DAY / TICKS_PER_DAY as f32 * kitchen_efficiency * rationing_factor;
+    // V0.11: thirst mirrors hunger's Kitchen/Rationing discount shape
+    // exactly (a kitchen serves both food and drink; the same Rationing
+    // tech now covers "eats and drinks more carefully") — reuses the same
+    // `kitchen_level_factor` computed above, just a different efficiency
+    // constant.
+    let water_rationing_factor = if state.has_tech(Tech::Rationing) {
+        TECH_RATIONING_WATER
+    } else {
+        1.0
+    };
+    let water_kitchen_efficiency = if kitchen_level_factor > 0.0 {
+        (1.0 - (1.0 - KITCHEN_WATER_EFFICIENCY) * kitchen_level_factor).max(0.1)
+    } else {
+        1.0
+    };
+    let water_portion =
+        WATER_PER_SURVIVOR_DAY / TICKS_PER_DAY as f32 * water_kitchen_efficiency * water_rationing_factor;
     let insulation_bonus = if state.has_tech(Tech::Insulation) {
         TECH_INSULATION_WARMTH
+    } else {
+        0.0
+    };
+    // V0.10: Tailor Shop warmth — active only while at least one TailorShop
+    // is staffed AND there's cloth to consume; stacks additively with
+    // Insulation (garments are a separate, renewable-but-costly warmth
+    // source, not a replacement for the one-time tech unlock). Computed once
+    // per tick, colony-wide (not per-survivor), same granularity the
+    // furnace's `need_coal` check already uses.
+    let tailoring_staffed = state.buildings.iter().any(|b| {
+        b.kind == BuildingKind::TailorShop && b.workers > 0 && !b.under_construction()
+    });
+    let cloth_upkeep_per_tick = CLOTH_UPKEEP_PER_DAY / TICKS_PER_DAY as f32;
+    let tailoring_bonus = if tailoring_staffed && state.stock.cloth >= cloth_upkeep_per_tick {
+        state.stock.cloth -= cloth_upkeep_per_tick;
+        TAILORING_WARMTH
     } else {
         0.0
     };
@@ -344,6 +478,41 @@ pub fn tick(state: &mut GameState) {
         .iter()
         .find(|b| b.kind == BuildingKind::Furnace)
         .map(|b| (b.id, b.x, b.y, b.under_construction() && state.furnace_level == 0));
+    // V0.11: corpse position snapshot for the burial errand below — same
+    // reasoning as `building_lookup`/`furnace_info` (can't borrow
+    // `state.corpses` while iterating `state.survivors` mutably).
+    let corpse_lookup: std::collections::HashMap<u32, (f32, f32)> =
+        state.corpses.iter().map(|c| (c.id, (c.x, c.y))).collect();
+    // V0.15: daily-routine snapshot (see `routine_goal`) — same
+    // borrow-splitting reason as the lookups above. Any FINISHED Kitchen
+    // qualifies for meals regardless of staffing (people still gather
+    // there); every FINISHED Tent is a candidate bunk, nearest one wins.
+    //
+    // Deliberately offset just past the tile's south edge, NOT the tile
+    // center (`bx + 0.5, by + 0.5`) that `assigned_building`'s own goal
+    // uses: a survivor sitting exactly on a building's center renders
+    // clipped inside solid models like the Tent's (a closed prism, unlike
+    // the flatter Kitchen), AND becomes permanently unclickable (the
+    // client's building-vs-survivor click tie-break always favors the
+    // building at that exact distance — see `input.rs`'s `resolve_world_click`).
+    // Standing just outside reads as "waiting at the door" and keeps both
+    // working.
+    let kitchen_pos = state
+        .buildings
+        .iter()
+        .find(|b| b.kind == BuildingKind::Kitchen && !b.under_construction())
+        .map(|b| (b.x as f32 + 0.5, b.y as f32 + 1.15));
+    let tent_positions: Vec<(f32, f32)> = state
+        .buildings
+        .iter()
+        .filter(|b| b.kind == BuildingKind::Tent && !b.under_construction())
+        .map(|b| (b.x as f32 + 0.5, b.y as f32 + 1.15))
+        .collect();
+    // Snapshotted (not passed as `&GameState`) for the same borrow-splitting
+    // reason as the lookups above — the survivors loop below holds `state`
+    // mutably the whole time.
+    let routine_time_of_day = state.time_of_day();
+    let routine_is_night = state.is_night();
     // Deferred mutations the chop/carry cycle collects instead of touching
     // `state.tiles`/`state.buildings`/`state.stock` directly from inside the
     // survivors loop (applied once the loop's mutable borrow of
@@ -351,16 +520,27 @@ pub fn tick(state: &mut GameState) {
     let mut chopped_tiles: Vec<(u8, u8)> = Vec::new();
     let mut logs_delivered: u32 = 0;
     let mut manual_wood_gained: u32 = 0;
+    // V0.11: corpse ids actively being worked on this tick (a survivor with
+    // `bury_target` set who has arrived at the body) — applied after the
+    // loop for the same borrow-splitting reason as the chop/carry deferrals.
+    let mut burying_now: Vec<u32> = Vec::new();
     for s in state.survivors.iter_mut() {
         // --- Movement: move_target (player-issued walk) takes priority,
-        // then a furnace-building chop errand (`chop_target`), then the
-        // assigned building's location; with none of the three, stand put.
+        // then a furnace-building chop errand (`chop_target`), then a
+        // burial errand (`bury_target`), then the assigned building's
+        // location; with none of the five, the V0.15 daily routine (meal/
+        // sleep) gets a say — only ever reached when truly nobody and
+        // nothing is telling this survivor where to be.
         let goal = s.move_target.map(|(x, y)| (x as f32 + 0.5, y as f32 + 0.5))
             .or_else(|| s.chop_target.map(|(x, y)| (x as f32 + 0.5, y as f32 + 0.5)))
+            .or_else(|| s.bury_target.and_then(|id| corpse_lookup.get(&id)).copied())
             .or_else(|| {
                 s.assigned_building
                     .and_then(|id| building_lookup.get(&id))
                     .map(|(_, bx, by, _)| (*bx as f32 + 0.5, *by as f32 + 0.5))
+            })
+            .or_else(|| {
+                routine_goal(routine_time_of_day, routine_is_night, s, kitchen_pos, &tent_positions)
             });
         let mut arrived_at_chop_target = false;
         let mut arrived_carrying_home = false;
@@ -376,6 +556,8 @@ pub fn tick(state: &mut GameState) {
                     arrived_at_chop_target = true;
                 } else if s.carrying_wood {
                     arrived_carrying_home = true;
+                } else if let Some(corpse_id) = s.bury_target {
+                    burying_now.push(corpse_id);
                 }
             } else {
                 s.x += dx / dist * SURVIVOR_SPEED_PER_TICK;
@@ -426,6 +608,34 @@ pub fn tick(state: &mut GameState) {
             if *workers > 0 && s.trained_kind == Some(*kind) {
                 s.xp += 1.0 / TICKS_PER_DAY as f32;
             }
+        }
+    }
+
+    // V0.11: apply this tick's burial progress — deferred for the same
+    // borrow-splitting reason as the chop/carry mutations below.
+    // `Corpse.bury_left` mirrors `Building.build_left`'s "remaining work"
+    // shape: ticks down by exactly one tick's worth per tick a survivor
+    // stands there actively working it, completing (removing the corpse,
+    // leaving a `Grave`, freeing the burying survivor) once it reaches 0.
+    if !burying_now.is_empty() {
+        let mut completed: Vec<(u32, String, f32, f32, Option<u32>)> = Vec::new();
+        for corpse_id in burying_now {
+            if let Some(c) = state.corpses.iter_mut().find(|c| c.id == corpse_id) {
+                c.bury_left -= 1.0;
+                if c.bury_left <= 0.0 {
+                    completed.push((c.id, c.name.clone(), c.x, c.y, c.being_buried_by));
+                }
+            }
+        }
+        for (corpse_id, name, x, y, buryer) in completed {
+            state.corpses.retain(|c| c.id != corpse_id);
+            state.graves.push(Grave { x, y, created_tick: tick });
+            if let Some(buryer_id) = buryer {
+                if let Some(s) = state.survivors.iter_mut().find(|s| s.id == buryer_id) {
+                    s.bury_target = None;
+                }
+            }
+            push_event(state, format!("{} was laid to rest.", name));
         }
     }
 
@@ -490,6 +700,7 @@ pub fn tick(state: &mut GameState) {
     }
 
     let mut starving_present = false;
+    let mut thirsty_present = false;
     for (i, s) in state.survivors.iter_mut().enumerate() {
         s.hunger = (s.hunger + hunger_per_tick).min(120.0);
         if s.hunger >= 25.0 && state.stock.food >= portion {
@@ -500,6 +711,20 @@ pub fn tick(state: &mut GameState) {
             starving_present = true;
         }
 
+        // V0.11: thirst mirrors hunger's exact shape (same accrual rate,
+        // same clamp, same "-0.4 per successful drink" reduction) — only
+        // the thresholds differ (20/65 vs hunger's 25/80), calibrated so
+        // thirst becomes critical sooner than hunger (see
+        // `WATER_PER_SURVIVOR_DAY`'s doc comment).
+        s.thirst = (s.thirst + hunger_per_tick).min(120.0);
+        if s.thirst >= 20.0 && state.stock.water >= water_portion {
+            state.stock.water -= water_portion;
+            s.thirst = (s.thirst - 0.4).max(0.0);
+        }
+        if s.thirst >= 65.0 {
+            thirsty_present = true;
+        }
+
         let bonus = if lit && i < warm_slots {
             12.0 + 6.0 * level as f32
         } else if i < warm_slots + shelter_slots {
@@ -508,7 +733,7 @@ pub fn tick(state: &mut GameState) {
             3.0 // huddling near the open furnace
         } else {
             0.0
-        } + insulation_bonus;
+        } + insulation_bonus + tailoring_bonus;
         let eff = temp + bonus;
         if eff < 0.0 {
             s.hp -= (-eff).min(40.0) * 0.35 / tph;
@@ -518,6 +743,9 @@ pub fn tick(state: &mut GameState) {
         if s.hunger >= 80.0 {
             s.hp -= 4.0 * ((s.hunger - 80.0) / 20.0) / tph;
         }
+        if s.thirst >= 65.0 {
+            s.hp -= 4.0 * ((s.thirst - 65.0) / 20.0) / tph;
+        }
         if care_per_tick > 0.0 {
             s.hp = (s.hp + care_per_tick).min(100.0);
         }
@@ -525,8 +753,12 @@ pub fn tick(state: &mut GameState) {
             s.hp -= DISEASE_HP_PER_DAY / TICKS_PER_DAY as f32;
         }
         if s.hp <= 0.0 {
-            // Attribute the death to the most likely cause for the event log.
-            let cause = if s.hunger >= 80.0 {
+            // Attribute the death to the most likely cause for the event
+            // log — thirst checked first since it's calibrated to become
+            // critical sooner than hunger (see the threshold comment above).
+            let cause = if s.thirst >= 65.0 {
+                "died of thirst"
+            } else if s.hunger >= 80.0 {
                 "starved"
             } else if disease {
                 "succumbed to illness"
@@ -549,6 +781,9 @@ pub fn tick(state: &mut GameState) {
         let mut delta = 0.0f32;
         if starving_present {
             delta -= per_tick(MORALE_STARVATION_PER_DAY);
+        }
+        if thirsty_present {
+            delta -= per_tick(MORALE_THIRST_PER_DAY);
         }
         if state.blizzard_active() {
             delta -= per_tick(MORALE_BLIZZARD_PER_DAY);
@@ -585,6 +820,23 @@ pub fn tick(state: &mut GameState) {
                 }
             }
         }
+        // V0.11: leave a corpse at the death location — must happen before
+        // `retain` removes them below (need their position/name). Burial is
+        // player-initiated (`PlayerCommand::Bury`); left alone, it fades
+        // into a `Grave` on its own after `CORPSE_DECAY_TICKS`.
+        for (id, name, _) in &deaths {
+            if let Some(s) = state.survivors.iter().find(|s| s.id == *id) {
+                state.corpses.push(Corpse {
+                    id: *id,
+                    name: name.clone(),
+                    x: s.x,
+                    y: s.y,
+                    died_tick: tick,
+                    bury_left: BURY_DURATION_TICKS as f32,
+                    being_buried_by: None,
+                });
+            }
+        }
         // The leader's death starts mourning instead of just clearing the
         // seat — checked before the removal below so `leader` still points
         // at a real (if about-to-die) survivor here.
@@ -606,6 +858,41 @@ pub fn tick(state: &mut GameState) {
         clamp_workers(state);
     }
 
+    // --- V0.11: corpse decay -> Grave, Grave fade ---
+    // Unburied for too long becomes the same fading trace a proper burial
+    // leaves — "vaqtinchalik iz", never a permanent obstruction. Runs every
+    // tick (not just once/day), since it's purely a `tick - died_tick`
+    // comparison.
+    if !state.corpses.is_empty() {
+        let mut decayed: Vec<Corpse> = Vec::new();
+        state.corpses.retain(|c| {
+            if tick.saturating_sub(c.died_tick) >= CORPSE_DECAY_TICKS {
+                decayed.push(c.clone());
+                false
+            } else {
+                true
+            }
+        });
+        if !decayed.is_empty() {
+            for c in &decayed {
+                state.graves.push(Grave { x: c.x, y: c.y, created_tick: tick });
+                push_event(state, format!("{}'s grave has faded into the snow.", c.name));
+            }
+            // Defensive: free anyone whose burial errand just decayed out
+            // from under them (an extremely narrow race — decay takes days,
+            // a burial takes seconds — but leaves no dangling reference
+            // either way).
+            for s in state.survivors.iter_mut() {
+                if let Some(cid) = s.bury_target {
+                    if decayed.iter().any(|c| c.id == cid) {
+                        s.bury_target = None;
+                    }
+                }
+            }
+        }
+    }
+    state.graves.retain(|g| tick.saturating_sub(g.created_tick) < GRAVE_FADE_TICKS);
+
     // --- Morning arrivals ---
     // Nobody comes seeking a furnace that isn't lit yet — the leader has to
     // finish building it first (see the Construction section above).
@@ -624,6 +911,33 @@ pub fn tick(state: &mut GameState) {
             }
             let plural = if n == 1 { "" } else { "s" };
             push_event(state, format!("{} newcomer{} arrived seeking shelter.", n, plural));
+        }
+    }
+
+    // --- V0.11: births ---
+    // The colony grows from within once it's stable, not just from outsiders
+    // arriving — gated on morale/food surplus so a struggling colony
+    // (already losing people to starvation/cold) never also gets a birth
+    // pulling it further underwater. Requires at least 2 survivors
+    // (abstracted "a pairing exists somewhere in the roster") — never fires
+    // on a lone survivor. Deliberately much rarer than arrivals/caravans — a
+    // slow background trickle on top of external growth, not a replacement
+    // for it.
+    if state.tick % TICKS_PER_DAY == BIRTH_TICK
+        && state.day() >= BIRTH_GRACE_DAY
+        && state.furnace_lit
+        && state.survivors.len() >= 2
+        && state.morale >= BIRTH_MIN_MORALE
+        && state.stock.food >= BIRTH_MIN_FOOD_STOCK
+        && rng.chance(BIRTH_CHANCE)
+    {
+        let pop = state.survivors.len() as i32;
+        let space = state.housing_capacity() as i32 + 2 - pop;
+        if space > 0 && pop < MAX_POPULATION {
+            let s = new_survivor(&mut rng, &mut state.next_id);
+            let name = s.name.clone();
+            state.survivors.push(s);
+            push_event(state, format!("A newborn, {}, has joined the city.", name));
         }
     }
 
@@ -731,6 +1045,26 @@ pub fn tick(state: &mut GameState) {
         }
     }
 
+    // --- V0.13: trade caravan return ---
+    // A fixed-duration round trip (see `CARAVAN_TRIP_TICKS`) — the goods (or
+    // gold) already left the stockpile at dispatch, so this only ever
+    // CREDITS something back, never fails or expires.
+    if let Some(c) = state.pending_caravan {
+        if state.tick >= c.return_tick {
+            state.pending_caravan = None;
+            if c.selling {
+                state.stock.gold += c.gold;
+                push_event(
+                    state,
+                    format!("The caravan returned with {} gold from selling {} {}.", c.gold as i64, c.amount, c.good.name()),
+                );
+            } else {
+                c.good.credit(&mut state.stock, c.amount as f32);
+                push_event(state, format!("The caravan returned with {} {}.", c.amount, c.good.name()));
+            }
+        }
+    }
+
     // --- Defeat ---
     if state.survivors.is_empty() {
         state.phase = GamePhase::Lost;
@@ -740,6 +1074,39 @@ pub fn tick(state: &mut GameState) {
 
     state.rng = rng.0;
     state.event_rng = erng.0;
+}
+
+/// V0.15: where an otherwise-idle survivor (nothing else in the movement
+/// priority chain claimed them — see `tick`'s `goal` computation) heads at
+/// meal/sleep time: the Kitchen during `BREAKFAST_WINDOW`/`LUNCH_WINDOW` if
+/// one's finished, their nearest finished Tent overnight (`is_night`).
+/// Purely a cosmetic walk destination — it doesn't touch the stockpile,
+/// assignment, or any persisted field; a survivor who arrives just stands
+/// there like any other idle survivor until the window passes or something
+/// else (a player command, a work assignment) claims them. Returns `None`
+/// outside those windows, or when there's nowhere fitting to go yet.
+fn routine_goal(
+    time_of_day: f32,
+    is_night: bool,
+    s: &Survivor,
+    kitchen: Option<(f32, f32)>,
+    tents: &[(f32, f32)],
+) -> Option<(f32, f32)> {
+    let mealtime = (BREAKFAST_WINDOW.0..BREAKFAST_WINDOW.1).contains(&time_of_day)
+        || (LUNCH_WINDOW.0..LUNCH_WINDOW.1).contains(&time_of_day);
+    if mealtime {
+        if let Some(pos) = kitchen {
+            return Some(pos);
+        }
+    }
+    if is_night {
+        return tents.iter().copied().min_by(|a, b| {
+            let da = (a.0 - s.x).powi(2) + (a.1 - s.y).powi(2);
+            let db = (b.0 - s.x).powi(2) + (b.1 - s.y).powi(2);
+            da.total_cmp(&db)
+        });
+    }
+    None
 }
 
 /// After deaths, make sure assigned workers never exceed the population.

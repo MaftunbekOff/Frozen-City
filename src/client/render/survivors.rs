@@ -432,6 +432,30 @@ fn spawn_survivor_body(
                 Transform::from_xyz(0.16, 0.19, 0.0).with_scale(Vec3::splat(0.06)),
             ));
         }
+        Profession::Tailor => {
+            // Soft rounded cap (sphere, not the cone/cylinder/toque every
+            // other trade uses) — reads as fabric, distinct silhouette.
+            p.spawn((
+                Mesh3d(assets.sphere.clone()),
+                MeshMaterial3d(head_mat),
+                Transform::from_xyz(0.0, 0.60, 0.0).with_scale(Vec3::new(0.20, 0.14, 0.20)),
+            ));
+            // Spool of thread at the hip: a short cylinder (spool body, the
+            // Tailor Shop's own cloth material) crossed by a thin cylinder
+            // (the needle, reusing the shared wood-tone handle material).
+            p.spawn((
+                Mesh3d(assets.cylinder.clone()),
+                MeshMaterial3d(assets.tailor_cloth_mat.clone()),
+                Transform::from_xyz(0.13, 0.26, 0.0).with_scale(Vec3::new(0.07, 0.10, 0.07)),
+            ));
+            p.spawn((
+                Mesh3d(assets.cylinder.clone()),
+                MeshMaterial3d(assets.sawmill_roof_mat.clone()),
+                Transform::from_xyz(0.13, 0.26, 0.0)
+                    .with_rotation(Quat::from_rotation_z(1.2))
+                    .with_scale(Vec3::new(0.015, 0.20, 0.015)),
+            ));
+        }
     }
     }
 

@@ -2665,6 +2665,7 @@ dependencies = [
  "rusqlite",
  "serde_json",
  "tungstenite",
+ "wasm-bindgen",
  "web-sys",
 ]
 

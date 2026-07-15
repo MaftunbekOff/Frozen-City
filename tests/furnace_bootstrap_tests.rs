@@ -217,7 +217,16 @@ fn arrivals_resume_once_the_leader_lights_the_furnace() {
     // roll a hit once. 25 days gives ~23 independent tries after the day>=2
     // gate, leaving the odds of a false failure astronomically small
     // (0.45^23) without hardcoding a lucky seed.
+    //
+    // V0.11: fund food/water every tick — this test is about arrivals
+    // resuming once the furnace lights, not survival economy, and over a
+    // 25-day window an unfunded stockpile would let thirst (or plain
+    // starvation) kill the lone survivor before any arrival ever gets a
+    // chance to roll, wiping the population to 0 instead of demonstrating
+    // the arrival mechanic.
     for _ in 0..(TICKS_PER_DAY * 25) {
+        state.stock.food = 9999.0;
+        state.stock.water = 9999.0;
         sim::tick(&mut state);
         if state.phase != GamePhase::Running || state.survivors.len() > 1 {
             break;

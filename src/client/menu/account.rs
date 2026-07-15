@@ -70,6 +70,20 @@ pub(crate) struct RegisterToggleButton;
 #[derive(Component)]
 pub(crate) struct RegisterToggleLabel;
 
+/// The field's current text and whether it should type masked (password) —
+/// wasm-only: feeds the proxy `<input>`'s initial value/`type` whenever
+/// focus moves to a field (`login_field_focus`, `handle_control_action`'s
+/// Tab arm), so both call sites agree on which field maps to which
+/// string/masking.
+#[cfg(target_arch = "wasm32")]
+fn field_value(form: &LoginForm, field: AccountField) -> (&str, bool) {
+    match field {
+        AccountField::Login => (form.login.as_str(), false),
+        AccountField::Password => (form.password.as_str(), true),
+        AccountField::Name => (form.name.as_str(), false),
+    }
+}
+
 /// Click a login/password field to give it keyboard focus.
 pub fn login_field_focus(
     q: Query<(&Interaction, &LoginFieldBox), Changed<Interaction>>,
@@ -78,6 +92,14 @@ pub fn login_field_focus(
     for (interaction, field) in &q {
         if *interaction == Interaction::Pressed {
             form.focus = Some(field.0);
+            // Real DOM focus on the invisible proxy <input> — this is what
+            // actually opens the mobile keyboard and makes paste work (a
+            // <canvas> can do neither). See `mobile_input`.
+            #[cfg(target_arch = "wasm32")]
+            {
+                let (value, masked) = field_value(&form, field.0);
+                focus_field(value, masked);
+            }
         }
     }
 }
@@ -85,6 +107,13 @@ pub fn login_field_focus(
 /// Capture keystrokes into whichever account field has focus. Tab cycles
 /// focus through the fields (Name only reachable in register mode), Escape
 /// clears it, Enter submits (same as clicking Kirish/Ro'yxatdan o'tish).
+/// On wasm, Backspace/Character are NOT handled here at all — the invisible
+/// proxy `<input>` (see `mobile_input`) owns text entry there, since while it
+/// has DOM focus these raw `KeyboardInput` events (sourced from the
+/// `<canvas>`) mostly don't fire anyway, and handling both would risk
+/// double-inserting a pasted/typed character if a browser ever did
+/// synthesize one. `drain_mobile_input` is wasm's equivalent of this
+/// function's Tab/Enter/Escape handling.
 #[allow(clippy::too_many_arguments)]
 pub fn login_form_keyboard(
     mut events: MessageReader<KeyboardInput>,
@@ -97,7 +126,7 @@ pub fn login_form_keyboard(
     mut error_text: Query<&mut Text, With<MenuErrorText>>,
     lang: Res<Lang>,
 ) {
-    let Some(focus) = form.focus else {
+    if form.focus.is_none() {
         return;
     };
     for ev in events.read() {
@@ -105,30 +134,51 @@ pub fn login_form_keyboard(
             continue;
         }
         match &ev.logical_key {
-            Key::Tab => {
-                form.focus = Some(next_field(focus, form.register));
-            }
-            Key::Enter if !ev.repeat => {
-                match submit(&form, &settings, &mut net, &mut view, &mut session, *lang) {
-                    Ok(()) => next.set(Screen::Game),
-                    Err(e) => {
-                        for mut t in &mut error_text {
-                            t.0 = e.clone();
-                        }
-                    }
-                }
-            }
-            Key::Escape if !ev.repeat => {
-                form.focus = None;
-            }
+            Key::Tab => handle_control_action(
+                ControlAction::Tab,
+                &mut form,
+                &settings,
+                &mut net,
+                &mut view,
+                &mut session,
+                &mut next,
+                &mut error_text,
+                *lang,
+            ),
+            Key::Enter if !ev.repeat => handle_control_action(
+                ControlAction::Submit,
+                &mut form,
+                &settings,
+                &mut net,
+                &mut view,
+                &mut session,
+                &mut next,
+                &mut error_text,
+                *lang,
+            ),
+            Key::Escape if !ev.repeat => handle_control_action(
+                ControlAction::Escape,
+                &mut form,
+                &settings,
+                &mut net,
+                &mut view,
+                &mut session,
+                &mut next,
+                &mut error_text,
+                *lang,
+            ),
+            #[cfg(not(target_arch = "wasm32"))]
             Key::Backspace => {
+                let focus = form.focus.expect("checked above");
                 match focus {
                     AccountField::Login => form.login.pop(),
                     AccountField::Password => form.password.pop(),
                     AccountField::Name => form.name.pop(),
                 };
             }
+            #[cfg(not(target_arch = "wasm32"))]
             Key::Character(s) => {
+                let focus = form.focus.expect("checked above");
                 let len = match focus {
                     AccountField::Login => form.login.chars().count(),
                     AccountField::Password => form.password.chars().count(),
@@ -168,6 +218,139 @@ fn next_field(current: AccountField, register: bool) -> AccountField {
     }
 }
 
+/// The three control actions Tab/Enter/Escape trigger — shared by the
+/// native raw-keyboard path above and (on wasm) the proxy `<input>`'s
+/// `keydown` listener via `drain_mobile_input`, so submit/cycle-focus/
+/// clear-focus behavior can never drift between the two input sources.
+enum ControlAction {
+    Tab,
+    Submit,
+    Escape,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle_control_action(
+    action: ControlAction,
+    form: &mut LoginForm,
+    settings: &Settings,
+    net: &mut NetConn,
+    view: &mut GameView,
+    session: &mut Session,
+    next: &mut NextState<Screen>,
+    error_text: &mut Query<&mut Text, With<MenuErrorText>>,
+    lang: Lang,
+) {
+    match action {
+        ControlAction::Tab => {
+            if let Some(focus) = form.focus {
+                form.focus = Some(next_field(focus, form.register));
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let (value, masked) = field_value(form, form.focus.unwrap());
+                    focus_field(value, masked);
+                }
+            }
+        }
+        ControlAction::Submit => match submit(form, settings, net, view, session, lang) {
+            Ok(()) => next.set(Screen::Game),
+            Err(e) => {
+                for mut t in error_text.iter_mut() {
+                    t.0 = e.clone();
+                }
+            }
+        },
+        ControlAction::Escape => {
+            form.focus = None;
+            #[cfg(target_arch = "wasm32")]
+            blur_proxy();
+        }
+    }
+}
+
+/// Wasm-only equivalent of `login_form_keyboard`'s Tab/Enter/Escape/typing
+/// handling: drains the proxy `<input>`'s events (typed/pasted text and
+/// control keydowns — see `mobile_input`) each frame and applies them.
+#[cfg(target_arch = "wasm32")]
+#[allow(clippy::too_many_arguments)]
+pub fn drain_mobile_input(
+    mut form: ResMut<LoginForm>,
+    settings: Res<Settings>,
+    mut net: ResMut<NetConn>,
+    mut view: ResMut<GameView>,
+    mut session: ResMut<Session>,
+    mut next: ResMut<NextState<Screen>>,
+    mut error_text: Query<&mut Text, With<MenuErrorText>>,
+    lang: Res<Lang>,
+) {
+    let ev = drain_events();
+    if let Some(mut text) = ev.text {
+        if let Some(focus) = form.focus {
+            if text.chars().count() > MAX_FIELD_LEN {
+                // The browser's own `maxlength` attribute already stops
+                // most overflow before it reaches us; this is a backstop
+                // (e.g. a future proxy without that attribute) — truncate
+                // and push the clamped value back so the visible/typed text
+                // in the real DOM input never silently disagrees with what
+                // Bevy kept.
+                text = text.chars().take(MAX_FIELD_LEN).collect();
+                focus_field(&text, focus == AccountField::Password);
+            }
+            match focus {
+                AccountField::Login => form.login = text,
+                AccountField::Password => form.password = text,
+                AccountField::Name => form.name = text,
+            }
+        }
+    }
+    if ev.submit {
+        handle_control_action(
+            ControlAction::Submit,
+            &mut form,
+            &settings,
+            &mut net,
+            &mut view,
+            &mut session,
+            &mut next,
+            &mut error_text,
+            *lang,
+        );
+    }
+    if ev.escape {
+        handle_control_action(
+            ControlAction::Escape,
+            &mut form,
+            &settings,
+            &mut net,
+            &mut view,
+            &mut session,
+            &mut next,
+            &mut error_text,
+            *lang,
+        );
+    }
+    if ev.tab {
+        handle_control_action(
+            ControlAction::Tab,
+            &mut form,
+            &settings,
+            &mut net,
+            &mut view,
+            &mut session,
+            &mut next,
+            &mut error_text,
+            *lang,
+        );
+    }
+    if ev.lost_focus && form.focus.is_some() {
+        // A genuinely DOM-initiated blur (the user tapped elsewhere or
+        // dismissed the on-screen keyboard) — every Rust-initiated blur
+        // already cleared `form.focus` itself before this could observe
+        // it still `Some`, so no origin-tracking is needed (see
+        // `mobile_input::blur_proxy`'s doc comment).
+        form.focus = None;
+    }
+}
+
 /// The "Kirish"/"Ro'yxatdan o'tish" button — same submit path as pressing
 /// Enter in a field.
 #[allow(clippy::too_many_arguments)]
@@ -187,7 +370,15 @@ pub fn account_login_button(
             continue;
         }
         match submit(&form, &settings, &mut net, &mut view, &mut session, *lang) {
-            Ok(()) => next.set(Screen::Game),
+            Ok(()) => {
+                // A phone tapping this button (not pressing a physical
+                // Enter) is the more common real-world submit path — make
+                // sure the keyboard doesn't stay visually up into the
+                // `Screen::Game` transition.
+                #[cfg(target_arch = "wasm32")]
+                blur_proxy();
+                next.set(Screen::Game);
+            }
             Err(e) => {
                 for mut t in &mut error_text {
                     t.0 = e.clone();

@@ -3,8 +3,8 @@
 //! grew new fields. Bincode is positional — any field added to the live types
 //! makes old bytes undecodable as them — so `persist::load_at` falls back to
 //! decoding the right mirror (by magic header) and migrating forward,
-//! V1 -> V2 -> V3 -> V4 -> V5 -> V6 -> V7 (the live format), one `From` hop at
-//! a time.
+//! V1 -> V2 -> V3 -> V4 -> V5 -> V6 -> V7 -> V8 -> V9 -> V10 -> V11 (the live
+//! format), one `From` hop at a time.
 //!
 //! These structs must never change again: they ARE their on-disk layout.
 //! Types shared unchanged across versions (Tile, Mission, ...) are reused
@@ -14,10 +14,23 @@
 use serde::{Deserialize, Serialize};
 
 use fc_game::types::{
-    Building, CaravanOffer, ChatLine, GameEvent, GamePhase, GameState, GuestPermission,
-    LedgerEntry, Mission, Ping, PlayerInfo, Profession, Role, Stockpile, Survivor, Tech, Tile,
-    TunnelState,
+    Building, CaravanOffer, ChatLine, Corpse, COW_START, DEER_START, GameEvent, GamePhase,
+    GameState, Grave, GuestPermission, LedgerEntry, Livestock, Mission, Ping, PlayerInfo,
+    Profession, RABBIT_START, Role, SHEEP_START, Stockpile, Survivor, Tech, Tile, TunnelMigrant,
+    TunnelState, Wildlife,
 };
+
+/// `Stockpile`'s shape through V7 — three f32s, no `fur`/`cloth` (added in V8
+/// for the Tailor Shop / wildlife resource system). Bincode is positional, so
+/// once the live `Stockpile` grew two fields, every legacy `GameStateVn`
+/// (n = 1..=7) that used to reuse `types::Stockpile` directly needed its own
+/// frozen mirror of the old 3-field shape instead.
+#[derive(Serialize, Deserialize, Clone, Copy)]
+pub struct StockpileV7 {
+    pub wood: f32,
+    pub coal: f32,
+    pub food: f32,
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct SurvivorV1 {
@@ -101,6 +114,81 @@ impl From<&Survivor> for SurvivorV5 {
     }
 }
 
+/// `Survivor`'s shape through V8 (unchanged since V6, i.e. every field the
+/// live `Survivor` has today except `thirst`/`bury_target`, added in V9 for
+/// the death/burial and thirst systems). Reused by `GameStateV6` and
+/// `GameStateV7` below instead of duplicating the struct — both predate this
+/// V9 change and, now that the live `Survivor` type's shape has moved on,
+/// can no longer safely reuse it directly (same reasoning as `StockpileV7`).
+#[derive(Serialize, Deserialize, Clone)]
+pub struct SurvivorV8 {
+    pub id: u32,
+    pub name: String,
+    pub hp: f32,
+    pub hunger: f32,
+    pub assigned_building: Option<u32>,
+    pub owner: Option<i64>,
+    pub x: f32,
+    pub y: f32,
+    pub move_target: Option<(u8, u8)>,
+    pub profession: Profession,
+    pub xp: f32,
+    pub trained_kind: Option<fc_game::types::BuildingKind>,
+    pub chop_target: Option<(u8, u8)>,
+    pub carrying_wood: bool,
+}
+
+/// Convenience for tests fabricating legacy bytes from a live `GameState`
+/// (which now has `thirst`/`bury_target` `SurvivorV8` predates) — drops
+/// exactly the fields V8 predates.
+impl From<&Survivor> for SurvivorV8 {
+    fn from(s: &Survivor) -> SurvivorV8 {
+        SurvivorV8 {
+            id: s.id,
+            name: s.name.clone(),
+            hp: s.hp,
+            hunger: s.hunger,
+            assigned_building: s.assigned_building,
+            owner: s.owner,
+            x: s.x,
+            y: s.y,
+            move_target: s.move_target,
+            profession: s.profession,
+            xp: s.xp,
+            trained_kind: s.trained_kind,
+            chop_target: s.chop_target,
+            carrying_wood: s.carrying_wood,
+        }
+    }
+}
+
+/// `Stockpile`'s shape through V8 — five f32s, no `water` (added in V9 for
+/// the thirst/Well system). Bincode is positional, so once the live
+/// `Stockpile` grew a field, `GameStateV8` (which predates V9) needed its
+/// own frozen mirror of the old shape instead of reusing the live type,
+/// same reasoning as `StockpileV7`.
+#[derive(Serialize, Deserialize, Clone, Copy)]
+pub struct StockpileV8 {
+    pub wood: f32,
+    pub coal: f32,
+    pub food: f32,
+    pub fur: f32,
+    pub cloth: f32,
+}
+
+/// `Stockpile`'s shape through V10 — six f32s, no `gold` (added in V11 for
+/// the Tunnel trade caravan). Reused by `GameStateV9` and `GameStateV10`
+/// instead of duplicating the struct, same reasoning as `StockpileV7`/`V8`.
+#[derive(Serialize, Deserialize, Clone, Copy)]
+pub struct StockpileV10 {
+    pub wood: f32,
+    pub coal: f32,
+    pub food: f32,
+    pub fur: f32,
+    pub cloth: f32,
+    pub water: f32,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct PlayerInfoV1 {
     pub id: u64,
@@ -166,7 +254,7 @@ pub struct GameStateV1 {
     pub tiles: Vec<Tile>,
     pub buildings: Vec<BuildingV2>,
     pub survivors: Vec<SurvivorV1>,
-    pub stock: Stockpile,
+    pub stock: StockpileV7,
     pub furnace_level: u8,
     pub furnace_lit: bool,
     pub cold_snap: bool,
@@ -205,7 +293,7 @@ pub struct GameStateV2 {
     pub tiles: Vec<Tile>,
     pub buildings: Vec<BuildingV2>,
     pub survivors: Vec<SurvivorV3>,
-    pub stock: Stockpile,
+    pub stock: StockpileV7,
     pub furnace_level: u8,
     pub furnace_lit: bool,
     pub cold_snap: bool,
@@ -364,7 +452,7 @@ pub struct GameStateV3 {
     pub tiles: Vec<Tile>,
     pub buildings: Vec<BuildingV4>,
     pub survivors: Vec<SurvivorV3>,
-    pub stock: Stockpile,
+    pub stock: StockpileV7,
     pub furnace_level: u8,
     pub furnace_lit: bool,
     pub cold_snap: bool,
@@ -405,7 +493,7 @@ pub struct GameStateV4 {
     pub tiles: Vec<Tile>,
     pub buildings: Vec<BuildingV4>,
     pub survivors: Vec<SurvivorV5>,
-    pub stock: Stockpile,
+    pub stock: StockpileV7,
     pub furnace_level: u8,
     pub furnace_lit: bool,
     pub cold_snap: bool,
@@ -519,7 +607,7 @@ pub struct GameStateV5 {
     pub tiles: Vec<Tile>,
     pub buildings: Vec<Building>,
     pub survivors: Vec<SurvivorV5>,
-    pub stock: Stockpile,
+    pub stock: StockpileV7,
     pub furnace_level: u8,
     pub furnace_lit: bool,
     pub cold_snap: bool,
@@ -609,16 +697,17 @@ impl From<GameStateV4> for GameStateV5 {
 
 /// V6 (pre-Tunnel-migrants, i.e. every field the live `GameState` has today
 /// except `pending_migrant`) shape: what `persist.rs` wrote under the
-/// `FCWORLD6` header before this change. `Building` and `Survivor` are both
-/// unchanged since V6, so they're reused from `types` directly.
+/// `FCWORLD6` header before this change. `Building` is unchanged since V6,
+/// so it's reused from `types` directly; `Survivor` is mirrored as
+/// [`SurvivorV8`] (the live `Survivor` now has `thirst`/`bury_target`).
 #[derive(Serialize, Deserialize)]
 pub struct GameStateV6 {
     pub tick: u64,
     pub win_days: u32,
     pub tiles: Vec<Tile>,
     pub buildings: Vec<Building>,
-    pub survivors: Vec<Survivor>,
-    pub stock: Stockpile,
+    pub survivors: Vec<SurvivorV8>,
+    pub stock: StockpileV7,
     pub furnace_level: u8,
     pub furnace_lit: bool,
     pub cold_snap: bool,
@@ -658,7 +747,7 @@ impl From<GameStateV5> for GameStateV6 {
             survivors: v5
                 .survivors
                 .into_iter()
-                .map(|s| Survivor {
+                .map(|s| SurvivorV8 {
                     id: s.id,
                     name: s.name,
                     hp: s.hp,
@@ -709,9 +798,54 @@ impl From<GameStateV5> for GameStateV6 {
     }
 }
 
-impl From<GameStateV6> for GameState {
-    fn from(v6: GameStateV6) -> GameState {
-        GameState {
+/// V7 (pre-wildlife/Tailor-Shop, i.e. every field the live `GameState` has
+/// today except `wildlife`) shape: what `persist.rs` wrote under the
+/// `FCWORLD7` header before this change. `Building` is unchanged since V6,
+/// so it's reused from `types` directly; `Survivor` is mirrored as
+/// [`SurvivorV8`] and `Stockpile` as [`StockpileV7`] (the live types have
+/// since grown `thirst`/`bury_target` and `fur`/`cloth`/`water`
+/// respectively).
+#[derive(Serialize, Deserialize)]
+pub struct GameStateV7 {
+    pub tick: u64,
+    pub win_days: u32,
+    pub tiles: Vec<Tile>,
+    pub buildings: Vec<Building>,
+    pub survivors: Vec<SurvivorV8>,
+    pub stock: StockpileV7,
+    pub furnace_level: u8,
+    pub furnace_lit: bool,
+    pub cold_snap: bool,
+    pub players: Vec<PlayerInfo>,
+    pub phase: GamePhase,
+    pub events: Vec<GameEvent>,
+    pub total_events: u64,
+    pub chat: Vec<ChatLine>,
+    pub total_chat: u64,
+    pub pings: Vec<Ping>,
+    pub missions: Vec<Mission>,
+    pub tunnel: TunnelState,
+    pub graduated: bool,
+    pub central: bool,
+    pub techs: Vec<Tech>,
+    pub disease_until: u64,
+    pub blizzard_until: u64,
+    pub pending_event: Option<CaravanOffer>,
+    pub event_rng: u64,
+    pub guest_perm: GuestPermission,
+    pub owner_id: Option<u64>,
+    pub next_id: u32,
+    pub rng: u64,
+    pub central_ledger: Vec<LedgerEntry>,
+    pub leader: Option<u32>,
+    pub mourning_until: u64,
+    pub morale: f32,
+    pub pending_migrant: Option<TunnelMigrant>,
+}
+
+impl From<GameStateV6> for GameStateV7 {
+    fn from(v6: GameStateV6) -> GameStateV7 {
+        GameStateV7 {
             tick: v6.tick,
             win_days: v6.win_days,
             tiles: v6.tiles,
@@ -752,44 +886,465 @@ impl From<GameStateV6> for GameState {
     }
 }
 
-/// V5 -> V7 straight through V6, needed by `persist::load_at`'s one-hop
-/// `FCWORLD5` path (a V5 file goes all the way to the live format in a
+impl From<GameStateV7> for GameStateV8 {
+    fn from(v7: GameStateV7) -> GameStateV8 {
+        GameStateV8 {
+            tick: v7.tick,
+            win_days: v7.win_days,
+            tiles: v7.tiles,
+            buildings: v7.buildings,
+            survivors: v7.survivors,
+            stock: StockpileV8 {
+                wood: v7.stock.wood,
+                coal: v7.stock.coal,
+                food: v7.stock.food,
+                // V7 predates fur/cloth and the wildlife resource system —
+                // nobody could have banked any yet.
+                fur: 0.0,
+                cloth: 0.0,
+            },
+            furnace_level: v7.furnace_level,
+            furnace_lit: v7.furnace_lit,
+            cold_snap: v7.cold_snap,
+            players: v7.players,
+            phase: v7.phase,
+            events: v7.events,
+            total_events: v7.total_events,
+            chat: v7.chat,
+            total_chat: v7.total_chat,
+            pings: v7.pings,
+            missions: v7.missions,
+            tunnel: v7.tunnel,
+            graduated: v7.graduated,
+            central: v7.central,
+            techs: v7.techs,
+            disease_until: v7.disease_until,
+            blizzard_until: v7.blizzard_until,
+            pending_event: v7.pending_event,
+            event_rng: v7.event_rng,
+            guest_perm: v7.guest_perm,
+            owner_id: v7.owner_id,
+            next_id: v7.next_id,
+            rng: v7.rng,
+            central_ledger: v7.central_ledger,
+            leader: v7.leader,
+            mourning_until: v7.mourning_until,
+            morale: v7.morale,
+            pending_migrant: v7.pending_migrant,
+            // V7 predates the wildlife resource system entirely — an old
+            // save resuming under V0.10 must NOT start with zero deer/rabbit
+            // (that would strand every existing HunterHut unable to produce
+            // until population "grows" from nothing, since logistic growth
+            // from 0 never leaves 0). Start at the same levels a brand-new
+            // world gets.
+            wildlife: Wildlife { deer: DEER_START, rabbit: RABBIT_START },
+        }
+    }
+}
+
+/// V8 (pre-death/burial/thirst, i.e. every field the live `GameState` has
+/// today except `corpses`/`graves`) shape: what `persist.rs` wrote under the
+/// `FCWORLD8` header before this change. `Building` is unchanged, so it's
+/// reused from `types` directly; `Survivor` is mirrored as [`SurvivorV8`]
+/// and `Stockpile` as [`StockpileV8`] (the live types have since grown
+/// `thirst`/`bury_target` and `water` respectively).
+#[derive(Serialize, Deserialize)]
+pub struct GameStateV8 {
+    pub tick: u64,
+    pub win_days: u32,
+    pub tiles: Vec<Tile>,
+    pub buildings: Vec<Building>,
+    pub survivors: Vec<SurvivorV8>,
+    pub stock: StockpileV8,
+    pub furnace_level: u8,
+    pub furnace_lit: bool,
+    pub cold_snap: bool,
+    pub players: Vec<PlayerInfo>,
+    pub phase: GamePhase,
+    pub events: Vec<GameEvent>,
+    pub total_events: u64,
+    pub chat: Vec<ChatLine>,
+    pub total_chat: u64,
+    pub pings: Vec<Ping>,
+    pub missions: Vec<Mission>,
+    pub tunnel: TunnelState,
+    pub graduated: bool,
+    pub central: bool,
+    pub techs: Vec<Tech>,
+    pub disease_until: u64,
+    pub blizzard_until: u64,
+    pub pending_event: Option<CaravanOffer>,
+    pub event_rng: u64,
+    pub guest_perm: GuestPermission,
+    pub owner_id: Option<u64>,
+    pub next_id: u32,
+    pub rng: u64,
+    pub central_ledger: Vec<LedgerEntry>,
+    pub leader: Option<u32>,
+    pub mourning_until: u64,
+    pub morale: f32,
+    pub pending_migrant: Option<TunnelMigrant>,
+    pub wildlife: Wildlife,
+}
+
+/// V9 (pre-livestock, i.e. every field the live `GameState` has today except
+/// `livestock`) shape: what `persist.rs` wrote under the `FCWORLD9` header
+/// before this change. Neither `Building`, `Survivor` nor `Stockpile` changed
+/// shape in this hop (only `GameState` itself grew a field), so they're all
+/// reused from `types` directly instead of needing frozen mirrors.
+#[derive(Serialize, Deserialize)]
+pub struct GameStateV9 {
+    pub tick: u64,
+    pub win_days: u32,
+    pub tiles: Vec<Tile>,
+    pub buildings: Vec<Building>,
+    pub survivors: Vec<Survivor>,
+    pub stock: StockpileV10,
+    pub furnace_level: u8,
+    pub furnace_lit: bool,
+    pub cold_snap: bool,
+    pub players: Vec<PlayerInfo>,
+    pub phase: GamePhase,
+    pub events: Vec<GameEvent>,
+    pub total_events: u64,
+    pub chat: Vec<ChatLine>,
+    pub total_chat: u64,
+    pub pings: Vec<Ping>,
+    pub missions: Vec<Mission>,
+    pub tunnel: TunnelState,
+    pub graduated: bool,
+    pub central: bool,
+    pub techs: Vec<Tech>,
+    pub disease_until: u64,
+    pub blizzard_until: u64,
+    pub pending_event: Option<CaravanOffer>,
+    pub event_rng: u64,
+    pub guest_perm: GuestPermission,
+    pub owner_id: Option<u64>,
+    pub next_id: u32,
+    pub rng: u64,
+    pub central_ledger: Vec<LedgerEntry>,
+    pub leader: Option<u32>,
+    pub mourning_until: u64,
+    pub morale: f32,
+    pub pending_migrant: Option<TunnelMigrant>,
+    pub wildlife: Wildlife,
+    pub corpses: Vec<Corpse>,
+    pub graves: Vec<Grave>,
+}
+
+impl From<GameStateV8> for GameStateV9 {
+    fn from(v8: GameStateV8) -> GameStateV9 {
+        GameStateV9 {
+            tick: v8.tick,
+            win_days: v8.win_days,
+            tiles: v8.tiles,
+            buildings: v8.buildings,
+            survivors: v8
+                .survivors
+                .into_iter()
+                .map(|s| Survivor {
+                    id: s.id,
+                    name: s.name,
+                    hp: s.hp,
+                    hunger: s.hunger,
+                    assigned_building: s.assigned_building,
+                    owner: s.owner,
+                    x: s.x,
+                    y: s.y,
+                    move_target: s.move_target,
+                    profession: s.profession,
+                    xp: s.xp,
+                    trained_kind: s.trained_kind,
+                    chop_target: s.chop_target,
+                    carrying_wood: s.carrying_wood,
+                    // V8 predates thirst — same "fresh start, no retroactive
+                    // penalty" default `xp: 0.0` already uses. Zero is the
+                    // SAFE starting state here (unlike `Wildlife`'s
+                    // population counters, which need seeding since they're
+                    // a production source, not a consumption meter).
+                    thirst: 0.0,
+                    // Nobody was mid-burial when this world predated the
+                    // concept entirely.
+                    bury_target: None,
+                })
+                .collect(),
+            stock: StockpileV10 {
+                wood: v8.stock.wood,
+                coal: v8.stock.coal,
+                food: v8.stock.food,
+                fur: v8.stock.fur,
+                cloth: v8.stock.cloth,
+                // V8 predates the thirst/Well system — nobody could have
+                // banked any yet.
+                water: 0.0,
+            },
+            furnace_level: v8.furnace_level,
+            furnace_lit: v8.furnace_lit,
+            cold_snap: v8.cold_snap,
+            players: v8.players,
+            phase: v8.phase,
+            events: v8.events,
+            total_events: v8.total_events,
+            chat: v8.chat,
+            total_chat: v8.total_chat,
+            pings: v8.pings,
+            missions: v8.missions,
+            tunnel: v8.tunnel,
+            graduated: v8.graduated,
+            central: v8.central,
+            techs: v8.techs,
+            disease_until: v8.disease_until,
+            blizzard_until: v8.blizzard_until,
+            pending_event: v8.pending_event,
+            event_rng: v8.event_rng,
+            guest_perm: v8.guest_perm,
+            owner_id: v8.owner_id,
+            next_id: v8.next_id,
+            rng: v8.rng,
+            central_ledger: v8.central_ledger,
+            leader: v8.leader,
+            mourning_until: v8.mourning_until,
+            morale: v8.morale,
+            pending_migrant: v8.pending_migrant,
+            wildlife: v8.wildlife,
+            // V8 predates death/burial entirely — nobody was mid-decay or
+            // mid-grave when this world was saved.
+            corpses: Vec::new(),
+            graves: Vec::new(),
+        }
+    }
+}
+
+/// V10 (pre-trade-caravan, i.e. every field the live `GameState` has today
+/// except `pending_caravan`) shape: what `persist.rs` wrote under the
+/// `FCWORLD10` header before this change. `Stockpile` predates `gold` too
+/// (see [`StockpileV10`]); everything else is unchanged since V9, so it's
+/// reused from `types`/`GameStateV9` directly.
+#[derive(Serialize, Deserialize)]
+pub struct GameStateV10 {
+    pub tick: u64,
+    pub win_days: u32,
+    pub tiles: Vec<Tile>,
+    pub buildings: Vec<Building>,
+    pub survivors: Vec<Survivor>,
+    pub stock: StockpileV10,
+    pub furnace_level: u8,
+    pub furnace_lit: bool,
+    pub cold_snap: bool,
+    pub players: Vec<PlayerInfo>,
+    pub phase: GamePhase,
+    pub events: Vec<GameEvent>,
+    pub total_events: u64,
+    pub chat: Vec<ChatLine>,
+    pub total_chat: u64,
+    pub pings: Vec<Ping>,
+    pub missions: Vec<Mission>,
+    pub tunnel: TunnelState,
+    pub graduated: bool,
+    pub central: bool,
+    pub techs: Vec<Tech>,
+    pub disease_until: u64,
+    pub blizzard_until: u64,
+    pub pending_event: Option<CaravanOffer>,
+    pub event_rng: u64,
+    pub guest_perm: GuestPermission,
+    pub owner_id: Option<u64>,
+    pub next_id: u32,
+    pub rng: u64,
+    pub central_ledger: Vec<LedgerEntry>,
+    pub leader: Option<u32>,
+    pub mourning_until: u64,
+    pub morale: f32,
+    pub pending_migrant: Option<TunnelMigrant>,
+    pub wildlife: Wildlife,
+    pub corpses: Vec<Corpse>,
+    pub graves: Vec<Grave>,
+    pub livestock: Livestock,
+}
+
+impl From<GameStateV9> for GameStateV10 {
+    fn from(v9: GameStateV9) -> GameStateV10 {
+        GameStateV10 {
+            tick: v9.tick,
+            win_days: v9.win_days,
+            tiles: v9.tiles,
+            buildings: v9.buildings,
+            survivors: v9.survivors,
+            stock: v9.stock,
+            furnace_level: v9.furnace_level,
+            furnace_lit: v9.furnace_lit,
+            cold_snap: v9.cold_snap,
+            players: v9.players,
+            phase: v9.phase,
+            events: v9.events,
+            total_events: v9.total_events,
+            chat: v9.chat,
+            total_chat: v9.total_chat,
+            pings: v9.pings,
+            missions: v9.missions,
+            tunnel: v9.tunnel,
+            graduated: v9.graduated,
+            central: v9.central,
+            techs: v9.techs,
+            disease_until: v9.disease_until,
+            blizzard_until: v9.blizzard_until,
+            pending_event: v9.pending_event,
+            event_rng: v9.event_rng,
+            guest_perm: v9.guest_perm,
+            owner_id: v9.owner_id,
+            next_id: v9.next_id,
+            rng: v9.rng,
+            central_ledger: v9.central_ledger,
+            leader: v9.leader,
+            mourning_until: v9.mourning_until,
+            morale: v9.morale,
+            pending_migrant: v9.pending_migrant,
+            wildlife: v9.wildlife,
+            corpses: v9.corpses,
+            graves: v9.graves,
+            // V9 predates the Farmhouse/livestock system entirely — an old
+            // save resuming under V0.12+ must NOT start with zero cows/sheep
+            // (same "logistic growth from 0 never leaves 0" reasoning as the
+            // V7->V8 wildlife default). Start at the same levels a brand-new
+            // world gets.
+            livestock: Livestock { cow: COW_START, sheep: SHEEP_START },
+        }
+    }
+}
+
+impl From<GameStateV10> for GameState {
+    fn from(v10: GameStateV10) -> GameState {
+        GameState {
+            tick: v10.tick,
+            win_days: v10.win_days,
+            tiles: v10.tiles,
+            buildings: v10.buildings,
+            survivors: v10.survivors,
+            stock: Stockpile {
+                wood: v10.stock.wood,
+                coal: v10.stock.coal,
+                food: v10.stock.food,
+                fur: v10.stock.fur,
+                cloth: v10.stock.cloth,
+                water: v10.stock.water,
+                // V10 predates the trade caravan entirely — nobody could
+                // have banked any gold yet.
+                gold: 0.0,
+            },
+            furnace_level: v10.furnace_level,
+            furnace_lit: v10.furnace_lit,
+            cold_snap: v10.cold_snap,
+            players: v10.players,
+            phase: v10.phase,
+            events: v10.events,
+            total_events: v10.total_events,
+            chat: v10.chat,
+            total_chat: v10.total_chat,
+            pings: v10.pings,
+            missions: v10.missions,
+            tunnel: v10.tunnel,
+            graduated: v10.graduated,
+            central: v10.central,
+            techs: v10.techs,
+            disease_until: v10.disease_until,
+            blizzard_until: v10.blizzard_until,
+            pending_event: v10.pending_event,
+            event_rng: v10.event_rng,
+            guest_perm: v10.guest_perm,
+            owner_id: v10.owner_id,
+            next_id: v10.next_id,
+            rng: v10.rng,
+            central_ledger: v10.central_ledger,
+            leader: v10.leader,
+            mourning_until: v10.mourning_until,
+            morale: v10.morale,
+            pending_migrant: v10.pending_migrant,
+            wildlife: v10.wildlife,
+            corpses: v10.corpses,
+            graves: v10.graves,
+            livestock: v10.livestock,
+            // V10 predates the trade caravan — nobody could have had one on
+            // the road when this world was saved.
+            pending_caravan: None,
+        }
+    }
+}
+
+/// V9 -> V11 straight through V10, needed by `persist::load_at`'s one-hop
+/// `FCWORLD9` path (a V9 file goes all the way to the live format in a
 /// single `.into()`).
+impl From<GameStateV9> for GameState {
+    fn from(v9: GameStateV9) -> GameState {
+        GameStateV10::from(v9).into()
+    }
+}
+
+/// V8 -> V11 straight through V9 -> V10, needed by `persist::load_at`'s
+/// one-hop `FCWORLD8` path (a V8 file goes all the way to the live format in
+/// a single `.into()`).
+impl From<GameStateV8> for GameState {
+    fn from(v8: GameStateV8) -> GameState {
+        GameStateV9::from(v8).into()
+    }
+}
+
+/// V7 -> V11 straight through V8 -> V9 -> V10, needed by
+/// `persist::load_at`'s one-hop `FCWORLD7` path (a V7 file goes all the way
+/// to the live format in a single `.into()`).
+impl From<GameStateV7> for GameState {
+    fn from(v7: GameStateV7) -> GameState {
+        GameStateV8::from(v7).into()
+    }
+}
+
+/// V6 -> V11 straight through V7 -> V8 -> V9 -> V10, needed by
+/// `persist::load_at`'s one-hop `FCWORLD6` path (a V6 file goes all the way
+/// to the live format in a single `.into()`).
+impl From<GameStateV6> for GameState {
+    fn from(v6: GameStateV6) -> GameState {
+        GameStateV7::from(v6).into()
+    }
+}
+
+/// V5 -> V11 straight through V6 -> V7 -> V8 -> V9 -> V10, needed by
+/// `persist::load_at`'s one-hop `FCWORLD5` path (a V5 file goes all the way
+/// to the live format in a single `.into()`).
 impl From<GameStateV5> for GameState {
     fn from(v5: GameStateV5) -> GameState {
         GameStateV6::from(v5).into()
     }
 }
 
-/// V4 -> V7 straight through V5 -> V6, needed by `persist::load_at`'s one-hop
-/// `FCWORLD4` path (a V4 file goes all the way to the live format in a
-/// single `.into()`).
+/// V4 -> V11 straight through V5 -> V6 -> V7 -> V8 -> V9 -> V10, needed by
+/// `persist::load_at`'s one-hop `FCWORLD4` path (a V4 file goes all the way
+/// to the live format in a single `.into()`).
 impl From<GameStateV4> for GameState {
     fn from(v4: GameStateV4) -> GameState {
         GameStateV5::from(v4).into()
     }
 }
 
-/// V3 -> V7 straight through V4 -> V5 -> V6, needed by `persist::load_at`'s
-/// one-hop `FCWORLD3` path (a V3 file goes all the way to the live format in
-/// a single `.into()`).
+/// V3 -> V11 straight through V4 -> V5 -> V6 -> V7 -> V8 -> V9 -> V10,
+/// needed by `persist::load_at`'s one-hop `FCWORLD3` path (a V3 file goes
+/// all the way to the live format in a single `.into()`).
 impl From<GameStateV3> for GameState {
     fn from(v3: GameStateV3) -> GameState {
         GameStateV4::from(v3).into()
     }
 }
 
-/// V2 -> V7 straight through V3 -> V4 -> V5 -> V6, needed by
-/// `persist::load_at`'s one-hop `FCWORLD2` path.
+/// V2 -> V11 straight through V3 -> V4 -> V5 -> V6 -> V7 -> V8 -> V9 -> V10,
+/// needed by `persist::load_at`'s one-hop `FCWORLD2` path.
 impl From<GameStateV2> for GameState {
     fn from(v2: GameStateV2) -> GameState {
         GameStateV3::from(v2).into()
     }
 }
 
-/// V1 -> V7 straight through V2 -> V3 -> V4 -> V5 -> V6, for
-/// `persist::load_at`'s one-shot fallback path (a V1 file goes all the way to
-/// the live format in a single `.into()`).
+/// V1 -> V11 straight through V2 -> V3 -> V4 -> V5 -> V6 -> V7 -> V8 -> V9 ->
+/// V10, for `persist::load_at`'s one-shot fallback path (a V1 file goes all
+/// the way to the live format in a single `.into()`).
 impl From<GameStateV1> for GameState {
     fn from(v1: GameStateV1) -> GameState {
         GameStateV2::from(v1).into()

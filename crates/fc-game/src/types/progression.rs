@@ -107,7 +107,7 @@ impl Tech {
             Tech::Insulation => "Everyone shrugs off the cold a little better.",
             Tech::EfficientFurnace => "The furnace burns 25% less fuel.",
             Tech::Tools => "Workers produce 25% more.",
-            Tech::Rationing => "The city eats 15% less food.",
+            Tech::Rationing => "The city eats and drinks more carefully.",
             Tech::Medicine => "Hospitals heal 50% faster.",
         }
     }

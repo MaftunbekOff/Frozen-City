@@ -51,6 +51,8 @@ pub const BRASS_DIM: Color = Color::srgba(0.760, 0.620, 0.360, 0.45);
 pub const RES_WOOD: Color = Color::srgb(0.850, 0.680, 0.420);
 pub const RES_COAL: Color = Color::srgb(0.620, 0.660, 0.750);
 pub const RES_FOOD: Color = Color::srgb(0.550, 0.820, 0.480);
+pub const RES_WATER: Color = Color::srgb(0.400, 0.680, 0.900);
+pub const RES_GOLD: Color = Color::srgb(0.900, 0.760, 0.300);
 
 // ---------- Tipografika va masofa shkalasi ----------
 

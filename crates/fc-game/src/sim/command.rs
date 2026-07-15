@@ -273,6 +273,36 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
             s.chop_target = Some((*x, *y));
             s.carrying_wood = false;
         }
+        PlayerCommand::Bury { survivor, corpse } => {
+            let Some(s_idx) = state.survivors.iter().position(|s| s.id == *survivor) else {
+                return;
+            };
+            let Some(c_idx) = state.corpses.iter().position(|c| c.id == *corpse) else {
+                return;
+            };
+            // Already claimed by someone else — a second player can't pile
+            // onto the same body.
+            if state.corpses[c_idx].being_buried_by.is_some() {
+                return;
+            }
+            // Same override rules as ChopTile/MoveSurvivor: drop whatever
+            // they were doing, credit any wood already mid-carry.
+            if let Some(prev_id) = state.survivors[s_idx].assigned_building {
+                if let Some(b) = state.buildings.iter_mut().find(|b| b.id == prev_id) {
+                    b.workers = b.workers.saturating_sub(1);
+                }
+            }
+            if state.survivors[s_idx].carrying_wood {
+                state.stock.wood += 1.0;
+            }
+            let s = &mut state.survivors[s_idx];
+            s.assigned_building = None;
+            s.move_target = None;
+            s.chop_target = None;
+            s.carrying_wood = false;
+            s.bury_target = Some(*corpse);
+            state.corpses[c_idx].being_buried_by = Some(*survivor);
+        }
         PlayerCommand::SetLeader { survivor } => {
             if state.survivors.iter().any(|s| s.id == *survivor) {
                 state.leader = Some(*survivor);
@@ -424,6 +454,78 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                 }
             }
         }
+        PlayerCommand::DispatchTradeCaravan { good, amount, selling } => {
+            // Only one caravan on the road at a time (single-slot, same
+            // convention as `pending_migrant`), and the Tunnel must at least
+            // be breached (not necessarily fully excavated — see
+            // `CARAVAN_TRIP_TICKS`'s doc comment).
+            if !state.tunnel.unlocked
+                || state.pending_caravan.is_some()
+                || *amount == 0
+                || *amount > CARAVAN_MAX_AMOUNT
+            {
+                return;
+            }
+            if *selling {
+                if good.amount_in(&state.stock) < *amount as f32 {
+                    return;
+                }
+                // Loaded onto the caravan immediately — it leaves the
+                // stockpile now, not on return, same as a manual chop
+                // crediting wood the moment it's cut.
+                good.credit(&mut state.stock, -(*amount as f32));
+                let gold = *amount as f32 * good.sell_price();
+                state.pending_caravan = Some(TradeCaravan {
+                    selling: true,
+                    good: *good,
+                    amount: *amount,
+                    gold,
+                    departed_tick: state.tick,
+                    return_tick: state.tick + CARAVAN_TRIP_TICKS,
+                });
+                push_event(state, format!("A caravan departed through the Tunnel to sell {} {}.", amount, good.name()));
+            } else {
+                let cost = *amount as f32 * good.buy_price();
+                if state.stock.gold < cost {
+                    return;
+                }
+                state.stock.gold -= cost;
+                state.pending_caravan = Some(TradeCaravan {
+                    selling: false,
+                    good: *good,
+                    amount: *amount,
+                    gold: 0.0,
+                    departed_tick: state.tick,
+                    return_tick: state.tick + CARAVAN_TRIP_TICKS,
+                });
+                push_event(state, format!("A caravan departed through the Tunnel to buy {} {}.", amount, good.name()));
+            }
+        }
+        PlayerCommand::RelocateBuilding { building, x, y } => {
+            if state.can_relocate(*building, *x, *y).is_ok() {
+                // Bo'sh ishchilar soni mutatsiyadan OLDIN, xuddi
+                // UpgradeBuilding'dagi kabi.
+                let idle = state.idle_workers();
+                if let Some(i) = state.buildings.iter().position(|b| b.id == *building) {
+                    let kind = state.buildings[i].kind;
+                    let b = &mut state.buildings[i];
+                    b.x = *x;
+                    b.y = *y;
+                    // Free — no wood charged (see `GameState::can_relocate`'s
+                    // doc comment) — just a discounted rebuild timer;
+                    // `level` and any named worker assignments carry over
+                    // unchanged.
+                    b.build_left = kind.build_workdays() * RELOCATE_WORKDAYS_FACTOR;
+                    let idle = if state.central { 0 } else { idle };
+                    let add = (CONSTRUCTION_CREW_MAX.saturating_sub(b.workers) as u32).min(idle) as u8;
+                    b.workers += add;
+                    let name = state.player(player).map(|p| p.name.clone());
+                    if let Some(name) = name {
+                        push_action_event(state, format!("{} started relocating a {}.", name, kind.name()));
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -440,8 +542,16 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
 /// else, or let the seat go empty, and they're back to their own trade's
 /// normal match/mismatch behavior next tick.
 pub(crate) fn survivor_contribution(s: &Survivor, kind: BuildingKind, leader: Option<u32>) -> f32 {
-    let profession_factor = if leader == Some(s.id) || s.profession.matching_building() == kind {
+    let is_match = leader == Some(s.id) || s.profession.matches_building(kind);
+    let profession_factor = if is_match {
         PROFESSION_MATCH_BONUS
+    } else if kind.requires_specialist() {
+        // V0.11: a specialized trade (currently just Medic/Hospital) isn't
+        // picked up informally the way general labor is — a mismatched
+        // survivor here produces almost nothing instead of the ordinary
+        // 1.0x baseline every other mismatch keeps. The leader exemption
+        // above still applies first (a leader stays a generalist).
+        SKILLED_MISMATCH_PENALTY
     } else {
         1.0
     };

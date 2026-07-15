@@ -1,9 +1,11 @@
 //! Routes an authenticated login to that account's own persistent world,
 //! spawning a fresh `sim_loop` thread (reused unmodified from `server.rs`)
-//! on first use and evicting it once nobody's connected for a while — see
-//! `ServerConfig::idle_shutdown`. Guest connections (`Hello`, no account)
-//! never touch this module; they keep joining the single shared world exactly
-//! as before.
+//! on first use and keeping it ticking in the background — production,
+//! survival needs, weather, births and deaths — long after the owner
+//! disconnects, only evicting it after a long, mostly-just-a-backstop
+//! stretch of nobody connecting at all — see `ServerConfig::idle_shutdown`.
+//! Guest connections (`Hello`, no account) never touch this module; they
+//! keep joining the single shared world exactly as before.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -88,11 +90,17 @@ impl InviteBook {
 }
 
 /// How long an account's world keeps running with nobody connected before it
-/// saves and its thread exits. Long enough to comfortably outlast a
-/// reconnect (page reload, brief network blip) without keeping every
-/// account's sim ticking (and cloning its state every tick, see
-/// `sim_loop`'s broadcast) forever after they've logged off.
-const IDLE_SHUTDOWN: Duration = Duration::from_secs(300);
+/// saves and its thread exits. Deliberately long, not short: the colony is
+/// meant to keep living — production, hunger/thirst, weather, births and
+/// deaths all keep ticking — while its owner is away, the same way the
+/// single shared world always has, rather than freezing the moment the last
+/// client disconnects and only resuming on the next login. A short timeout
+/// here (this used to be 5 minutes) is exactly what made the world pause.
+/// Not `None` (never evict): an account that never logs back in again should
+/// eventually stop costing a thread, so this is a long-but-finite backstop
+/// rather than a true "always on" guarantee — 200 accounts idle forever
+/// would otherwise mean 200 permanent threads for good.
+const IDLE_SHUTDOWN: Duration = Duration::from_secs(30 * 24 * 3600);
 
 /// Hard cap on simultaneously spawned per-account worlds — mirrors
 /// `server::MAX_CONNECTIONS`'s per-process budget, bounding worst-case

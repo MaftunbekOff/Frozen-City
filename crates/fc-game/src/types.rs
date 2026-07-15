@@ -224,6 +224,159 @@ pub const CARAVAN_FOOD_PER_PERSON: u32 = 4;
 /// How long the player has to decide (half an in-game day).
 pub const CARAVAN_EXPIRE_TICKS: u64 = TICKS_PER_DAY / 2;
 
+// --- V0.10: Tailor Shop & wildlife (deer/rabbit -> fur -> cloth) ---
+
+/// Starting deer/rabbit population on a fresh world, and the migration
+/// default for saves that predate this feature (see `fc-net`'s V7->V8 hop) —
+/// deliberately NOT zero, so a `HunterHut` can hunt immediately rather than
+/// waiting for population to regrow from nothing (logistic growth from 0
+/// never leaves 0).
+pub const DEER_START: f32 = 40.0;
+pub const RABBIT_START: f32 = 80.0;
+/// Population ceiling each species' logistic regen approaches.
+pub const DEER_CAP: f32 = 60.0;
+pub const RABBIT_CAP: f32 = 120.0;
+/// Logistic regen rate (fraction of current population regrown per day at
+/// the inflection point) — deer regenerate slower than rabbits, the classic
+/// K-strategist/r-strategist split.
+pub const DEER_REGEN_PER_DAY: f32 = 0.18;
+pub const RABBIT_REGEN_PER_DAY: f32 = 0.45;
+/// Population consumed per hunt-unit (see the `HunterHut` production arm in
+/// `sim::tick`) — deer cost more population per unit hunted than rabbits,
+/// reflecting a smaller, slower-growing source.
+pub const DEER_HUNT_PER_UNIT: f32 = 0.35;
+pub const RABBIT_HUNT_PER_UNIT: f32 = 0.65;
+/// Food + fur yielded per unit of deer/rabbit hunted.
+pub const DEER_FOOD_PER_UNIT: f32 = 1.6;
+pub const DEER_FUR_PER_UNIT: f32 = 0.9;
+pub const RABBIT_FOOD_PER_UNIT: f32 = 0.6;
+pub const RABBIT_FUR_PER_UNIT: f32 = 0.15;
+/// Fur consumed per cloth produced by a staffed Tailor Shop.
+pub const FUR_PER_CLOTH: f32 = 2.0;
+/// Extra warmth from a staffed Tailor Shop while cloth lasts — stacks
+/// additively with `TECH_INSULATION_WARMTH` rather than replacing it.
+pub const TAILORING_WARMTH: f32 = 3.0;
+/// Cloth consumed per in-game day to sustain `TAILORING_WARMTH` (garments
+/// wearing out) — a flat colony-wide drain while any Tailor Shop is staffed
+/// and cloth remains, same "staffed flag" granularity as Kitchen's
+/// efficiency bonus.
+pub const CLOTH_UPKEEP_PER_DAY: f32 = 1.0;
+
+// --- V0.11: births, death/burial, profession-gating, thirst & the Well ---
+
+/// Tick-of-day births are checked (offset from `ARRIVAL_TICK` so a birth
+/// event never lands in the same tick's log as a morning-arrival one).
+pub const BIRTH_TICK: u64 = ARRIVAL_TICK + 50;
+/// Later than `EVENT_GRACE_DAY`/arrivals' `day >= 2` — a birth should read
+/// as "the colony has settled", not day-1 luck.
+pub const BIRTH_GRACE_DAY: u32 = 5;
+/// Per-day chance, deliberately far below arrivals (0.55) or even caravans
+/// (0.22) — a birth is a slow background trickle on top of external growth,
+/// not a replacement for it.
+pub const BIRTH_CHANCE: f32 = 0.12;
+/// A colony must be doing reasonably well (not thriving, just not actively
+/// suffering) for a birth to fire.
+pub const BIRTH_MIN_MORALE: f32 = 55.0;
+/// A few days' food buffer at `FOOD_PER_SURVIVOR_DAY`, so a birth is never
+/// itself the tipping point into starvation the same day.
+pub const BIRTH_MIN_FOOD_STOCK: f32 = 10.0;
+
+/// How long an unburied corpse stays before it fades into a `Grave` on its
+/// own — never a permanent map obstruction, matching "vaqtinchalik iz".
+pub const CORPSE_DECAY_TICKS: u64 = 2 * TICKS_PER_DAY;
+/// How long a `Grave` (from burial or decay) lingers before it too fades.
+pub const GRAVE_FADE_TICKS: u64 = 3 * TICKS_PER_DAY;
+/// How long a survivor sent to bury a corpse stands there performing the
+/// timed action — small but non-zero, roughly one Furnace chop-carry trip.
+pub const BURY_DURATION_TICKS: u64 = TICKS_PER_DAY / 20;
+
+/// A mismatched survivor at a "skilled" building (see
+/// `Profession::is_skilled_at`) produces almost nothing — specialized trades
+/// aren't picked up informally the way general labor is. Every other
+/// mismatch keeps today's 1.0x baseline; only these specific pairs replace
+/// it with this harsher penalty.
+pub const SKILLED_MISMATCH_PENALTY: f32 = 0.1;
+
+/// Water needed per survivor per in-game day — set above `FOOD_PER_SURVIVOR_
+/// DAY` (1.2) since thirst is calibrated to become critical sooner than
+/// hunger (see the drink/HP-drain thresholds on `Survivor::thirst`).
+pub const WATER_PER_SURVIVOR_DAY: f32 = 1.6;
+/// Water-consumption multiplier while any Kitchen is staffed — mirrors
+/// `KITCHEN_FOOD_EFFICIENCY` exactly (a kitchen serves both food and drink).
+pub const KITCHEN_WATER_EFFICIENCY: f32 = 0.75;
+/// Thirst-accrual multiplier with Rationing — mirrors `TECH_RATIONING_FOOD`
+/// (the same tech now covers both: "the city eats and drinks carefully").
+pub const TECH_RATIONING_WATER: f32 = 0.85;
+/// Colony-wide morale penalty per day while anyone is critically thirsty —
+/// mirrors `MORALE_STARVATION_PER_DAY` exactly, stacking additively with it.
+pub const MORALE_THIRST_PER_DAY: f32 = 3.0;
+/// Water units produced per Well worker per in-game day — flat and
+/// uncapped (no map-tile deposit to exhaust, mirroring Greenhouse's simplest-
+/// producer shape), calibrated so ~2 Wells comfortably cover a maxed
+/// (`MAX_POPULATION`) colony's daily thirst, the same "not a hard
+/// bottleneck" design intent food production already has.
+pub const WELL_WATER_PER_WORKER_DAY: f32 = 22.0;
+
+// --- V0.12: Farmhouse & livestock (cow/sheep -> food) ---
+
+/// Starting cow/sheep population on a fresh world, and the migration default
+/// for saves that predate this feature (see `fc-net`'s V9->V10 hop) —
+/// deliberately NOT zero, same "logistic growth from 0 never leaves 0"
+/// reasoning as `DEER_START`/`RABBIT_START`.
+pub const COW_START: f32 = 25.0;
+pub const SHEEP_START: f32 = 50.0;
+/// Population ceiling each species' logistic regen approaches.
+pub const COW_CAP: f32 = 40.0;
+pub const SHEEP_CAP: f32 = 90.0;
+/// Logistic regen rate (fraction of current population regrown per day at
+/// the inflection point) — cows regenerate slower than sheep, same
+/// K-strategist/r-strategist split as deer/rabbit.
+pub const COW_REGEN_PER_DAY: f32 = 0.16;
+pub const SHEEP_REGEN_PER_DAY: f32 = 0.40;
+/// Population consumed per farm-unit (see the `Farmhouse` production arm in
+/// `sim::tick`) — cows cost more population per unit raised than sheep,
+/// reflecting a smaller, slower-growing herd.
+pub const COW_HARVEST_PER_UNIT: f32 = 0.30;
+pub const SHEEP_HARVEST_PER_UNIT: f32 = 0.55;
+/// Food yielded per unit of cow/sheep raised.
+pub const COW_FOOD_PER_UNIT: f32 = 2.0;
+pub const SHEEP_FOOD_PER_UNIT: f32 = 0.8;
+
+// --- V0.13: Tunnel trade caravan (see `economy::TradeCaravan`) ---
+
+/// Available the moment the Tunnel is unlocked (all missions done) — same
+/// gate as `TunnelMigrant`, deliberately NOT tied to `InvestTunnel`'s full
+/// excavation/graduation, since graduating ends the personal world's normal
+/// tick loop entirely (see `GamePhase::Won`). Trading is an ongoing back-
+/// and-forth with the Global World while the colony is still very much
+/// alive, not a one-time departure.
+pub const CARAVAN_TRIP_TICKS: u64 = TICKS_PER_DAY + TICKS_PER_DAY / 2;
+/// Only one caravan can be on the road at a time (see
+/// `GameState::pending_caravan`) — same single-slot convention as
+/// `pending_migrant`/`pending_event`.
+pub const CARAVAN_MAX_AMOUNT: u32 = 200;
+
+// --- V0.14: building relocation (see `PlayerCommand::RelocateBuilding`) ---
+
+/// Relocating reuses `Building::build_left`/`under_construction` exactly
+/// like a level upgrade does, just at a discount vs `build_workdays()` —
+/// the foundation and materials are already there, only reassembly is
+/// needed. No wood is charged either way (see `GameState::can_relocate`).
+pub const RELOCATE_WORKDAYS_FACTOR: f32 = 0.4;
+
+// --- V0.15: daily routine (see `sim::tick::routine_goal`) ---
+
+/// `GameState::time_of_day()` windows an otherwise-idle survivor (no
+/// `move_target`/`chop_target`/`bury_target`/`assigned_building` — truly
+/// nobody telling them where to be) heads to the Kitchen for, if one's
+/// finished. Two short windows, not the whole day: a real "people gather to
+/// eat, then disperse" rhythm rather than a permanent loitering crowd.
+/// Purely cosmetic (see the doc comment on `routine_goal`) — no stockpile
+/// effect of its own; the real food/water consumption already happens
+/// unconditionally elsewhere in `tick`, wherever a survivor happens to be.
+pub const BREAKFAST_WINDOW: (f32, f32) = (0.27, 0.31);
+pub const LUNCH_WINDOW: (f32, f32) = (0.48, 0.52);
+
 pub fn tile_index(x: u8, y: u8) -> usize {
     y as usize * MAP_W + x as usize
 }

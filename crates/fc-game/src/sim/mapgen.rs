@@ -16,6 +16,12 @@ const START_SURVIVORS: usize = 1;
 const START_WOOD: f32 = 60.0;
 const START_COAL: f32 = 40.0;
 const START_FOOD: f32 = 25.0;
+/// V0.11: same "a few weeks' buffer for the lone starting survivor" ratio
+/// `START_FOOD` uses relative to `FOOD_PER_SURVIVOR_DAY` (~21 days), applied
+/// to `WATER_PER_SURVIVOR_DAY` — without this, a fresh colony has no way to
+/// get any water at all before thirst turns lethal (well under a day), long
+/// before there's been any real chance to build and staff a Well.
+const START_WATER: f32 = 30.0;
 
 pub fn new_game(seed: u64, win_days: u32) -> GameState {
     let mut rng = Rng::new(seed);
@@ -115,6 +121,10 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
             wood: START_WOOD,
             coal: START_COAL,
             food: START_FOOD,
+            fur: 0.0,
+            cloth: 0.0,
+            water: START_WATER,
+            gold: 0.0,
         },
         // Unset until the leader finishes building the furnace (see the
         // `Building` above) — `tick.rs`'s construction-complete arm sets
@@ -153,6 +163,11 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
         mourning_until: 0,
         morale: MORALE_START,
         pending_migrant: None,
+        wildlife: Wildlife { deer: DEER_START, rabbit: RABBIT_START },
+        corpses: Vec::new(),
+        graves: Vec::new(),
+        livestock: Livestock { cow: COW_START, sheep: SHEEP_START },
+        pending_caravan: None,
     };
     push_event(
         &mut state,
@@ -264,6 +279,7 @@ pub(crate) fn new_survivor(rng: &mut Rng, next_id: &mut u32) -> Survivor {
         name: NAMES[rng.below(NAMES.len() as u32) as usize].to_string(),
         hp: 85.0 + rng.below(16) as f32,
         hunger: 20.0 + rng.below(21) as f32,
+        thirst: 15.0 + rng.below(21) as f32,
         assigned_building: None,
         owner: None,
         x,
@@ -278,6 +294,7 @@ pub(crate) fn new_survivor(rng: &mut Rng, next_id: &mut u32) -> Survivor {
         trained_kind: None,
         chop_target: None,
         carrying_wood: false,
+        bury_target: None,
     }
 }
 

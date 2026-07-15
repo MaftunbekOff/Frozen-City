@@ -231,7 +231,7 @@ fn city_survives_to_victory_on_short_run() {
 fn freezing_city_is_lost() {
     let mut state = sim::new_game(11, 12);
     state.furnace_level = 0;
-    state.stock = Stockpile { wood: 0.0, coal: 0.0, food: 0.0 };
+    state.stock = Stockpile { wood: 0.0, coal: 0.0, food: 0.0, ..Default::default() };
     for s in &mut state.survivors {
         s.hp = 0.5;
         s.hunger = 100.0;

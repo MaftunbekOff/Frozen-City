@@ -16,6 +16,15 @@ const SEED: u64 = 12345;
 #[test]
 fn no_events_before_grace_day() {
     let mut state = sim::new_game(SEED, 12);
+    // V0.11: this loop is keyed to `state.tick`, which stops advancing
+    // entirely if the lone starting survivor dies (`tick()` no-ops once
+    // `GamePhase` leaves `Running`) — an unfunded water stockpile would make
+    // that an infinite loop instead of a slow one, since thirst is now
+    // enough on its own to kill them well within the ~2 in-game days this
+    // runs. Fund both so survival is never in question; this test is about
+    // event timing, not survival.
+    state.stock.food = 9999.0;
+    state.stock.water = 9999.0;
 
     // Day EVENT_GRACE_DAY (3) begins at absolute tick
     // (EVENT_GRACE_DAY - 1) * TICKS_PER_DAY; stop one tick short of that
@@ -23,6 +32,8 @@ fn no_events_before_grace_day() {
     // this makes the assertion below hold regardless of `event_rng`.
     let just_before_grace = (EVENT_GRACE_DAY as u64 - 1) * TICKS_PER_DAY - 1;
     while state.tick < just_before_grace {
+        state.stock.food = 9999.0;
+        state.stock.water = 9999.0;
         sim::tick(&mut state);
     }
 
@@ -45,6 +56,12 @@ fn disease_eventually_strikes_and_drains_hp() {
     for seed in 0..200u64 {
         let mut state = sim::new_game(seed, 30);
         for _ in 0..(12 * TICKS_PER_DAY) {
+            // V0.11: this hunts for disease's own (independent) trigger —
+            // fund food/water every tick so an unrelated thirst/starvation
+            // death never shrinks the effective seed pool before disease
+            // gets a fair chance to fire.
+            state.stock.food = 9999.0;
+            state.stock.water = 9999.0;
             sim::tick(&mut state);
             if state.phase != GamePhase::Running {
                 break; // this world ended early; try the next seed

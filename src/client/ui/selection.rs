@@ -23,6 +23,8 @@ pub fn selection_panel_update(
         Query<&mut Node, With<DemolishBtn>>,
         Query<&mut Node, With<FurnaceRow>>,
         Query<(&mut Node, &mut BackgroundColor), With<UpgradeBtn>>,
+        Query<&mut Node, With<CaravanRow>>,
+        Query<&mut Node, With<RelocateBtn>>,
     )>,
     mut texts: Query<(&mut Text, &SelText)>,
 ) {
@@ -98,6 +100,19 @@ pub fn selection_panel_update(
             node.display = demolish_display;
         }
     }
+    // V0.14: only a FINISHED buildable building can be relocated (mirrors
+    // `GameState::can_relocate`'s own gate) — unlike Demolish, which works
+    // on a construction site too.
+    let relocate_display = if b.kind.buildable() && !b.under_construction() {
+        Display::Flex
+    } else {
+        Display::None
+    };
+    for mut node in &mut nodes.p6() {
+        if node.display != relocate_display {
+            node.display = relocate_display;
+        }
+    }
     // Burn-intensity buttons (0-3, `state.furnace_level`) appear only for
     // the Furnace, only once it's been lit at least once (`SetFurnaceLevel`
     // is a no-op before that — see `state.furnace_level > 0` below, kept
@@ -116,6 +131,20 @@ pub fn selection_panel_update(
     for mut node in &mut nodes.p3() {
         if node.display != furnace_display {
             node.display = furnace_display;
+        }
+    }
+    // V0.13: caravan quick-trade buttons — only for the Tunnel, and only
+    // once it's at least breached (`tunnel.unlocked`, same gate as
+    // `PlayerCommand::DispatchTradeCaravan` itself checks server-side).
+    let caravan_display =
+        if b.kind == BuildingKind::Tunnel && state.tunnel.unlocked && !state.central {
+            Display::Flex
+        } else {
+            Display::None
+        };
+    for mut node in &mut nodes.p5() {
+        if node.display != caravan_display {
+            node.display = caravan_display;
         }
     }
 
@@ -151,6 +180,8 @@ pub fn selection_panel_update(
         ),
         BuildingKind::HunterHut => i18n_hud::sel_info_hunter_hut(
             b.kind.production_per_worker_day() * b.kind.max_workers() as f32,
+            state.wildlife.deer,
+            state.wildlife.rabbit,
             lang,
         ),
         BuildingKind::Greenhouse => i18n_hud::sel_info_greenhouse(
@@ -179,11 +210,32 @@ pub fn selection_panel_update(
                 i18n_hud::sel_info_warehouse_unstaffed(cut, lang)
             }
         }
+        BuildingKind::TailorShop => i18n_hud::sel_info_tailor_shop(
+            b.kind.production_per_worker_day() * b.kind.max_workers() as f32,
+            state.stock.fur,
+            lang,
+        ),
+        // Decorative, no stats to report — the building's own description
+        // already says everything there is to say.
+        BuildingKind::Wall | BuildingKind::Gate => i18n_names::building_desc(b.kind, lang).to_string(),
+        BuildingKind::Well => i18n_hud::sel_info_well(
+            b.kind.production_per_worker_day() * b.kind.max_workers() as f32,
+            state.stock.water,
+            lang,
+        ),
+        BuildingKind::Farmhouse => i18n_hud::sel_info_farmhouse(
+            b.kind.production_per_worker_day() * b.kind.max_workers() as f32,
+            state.livestock.cow,
+            state.livestock.sheep,
+            lang,
+        ),
         BuildingKind::Tunnel => i18n_hud::sel_info_tunnel(
             state.tunnel.unlocked,
             state.tunnel.stage,
             frozen_city::game::types::TUNNEL_STAGES,
             state.pending_migrant.map(|m| m.count),
+            state.stock.gold,
+            state.pending_caravan.map(|c| (c.selling, c.good, c.amount)),
             lang,
         ),
     };
@@ -289,12 +341,14 @@ pub fn selection_panel_buttons(
     net: Res<NetConn>,
     view: Res<GameView>,
     mut selection: ResMut<Selection>,
+    mut relocate: ResMut<RelocateMode>,
     minus: Query<&Interaction, (Changed<Interaction>, With<WorkerMinus>)>,
     plus: Query<&Interaction, (Changed<Interaction>, With<WorkerPlus>)>,
     none_btn: Query<&Interaction, (Changed<Interaction>, With<WorkerNoneBtn>)>,
     max_btn: Query<&Interaction, (Changed<Interaction>, With<WorkerMaxBtn>)>,
     upgrade: Query<&Interaction, (Changed<Interaction>, With<UpgradeBtn>)>,
     demolish: Query<&Interaction, (Changed<Interaction>, With<DemolishBtn>)>,
+    relocate_btn: Query<&Interaction, (Changed<Interaction>, With<RelocateBtn>)>,
 ) {
     let Some(id) = selection.0 else { return };
     if minus.iter().any(|i| *i == Interaction::Pressed) {
@@ -344,5 +398,10 @@ pub fn selection_panel_buttons(
     if demolish.iter().any(|i| *i == Interaction::Pressed) {
         net.send(ClientMsg::Cmd(PlayerCommand::Demolish { building: id }));
         selection.0 = None;
+    }
+    // V0.14: hands off to `RelocateMode` — the actual `RelocateBuilding`
+    // dispatch happens once the player picks a target tile (`input::build_input`).
+    if relocate_btn.iter().any(|i| *i == Interaction::Pressed) {
+        relocate.0 = Some(id);
     }
 }

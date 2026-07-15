@@ -35,6 +35,24 @@ pub fn hud_food(n: i64, l: Lang) -> String {
     }
 }
 
+/// V0.11: colony water stockpile — mirrors `hud_food` exactly.
+pub fn hud_water(n: i64, l: Lang) -> String {
+    match l {
+        Lang::Uz => format!("Suv {n}"),
+        Lang::En => format!("Water {n}"),
+        Lang::Ru => format!("Вода {n}"),
+    }
+}
+
+/// V0.13: gold earned/spent trading through the Tunnel — mirrors `hud_food`.
+pub fn hud_gold(n: i64, l: Lang) -> String {
+    match l {
+        Lang::Uz => format!("Oltin {n}"),
+        Lang::En => format!("Gold {n}"),
+        Lang::Ru => format!("Золото {n}"),
+    }
+}
+
 /// `pop` is the survivor count, `idle` the currently unassigned worker count.
 pub fn hud_pop(pop: usize, idle: u32, l: Lang) -> String {
     match l {
@@ -320,11 +338,28 @@ pub fn build_cat_services(l: Lang) -> &'static str {
     }
 }
 
+pub fn build_cat_defense(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Mudofaa",
+        Lang::En => "Defense",
+        Lang::Ru => "Оборона",
+    }
+}
+
 pub fn demolish_label(l: Lang) -> &'static str {
     match l {
         Lang::Uz => "Buzish (40% qaytadi)",
         Lang::En => "Demolish (40% refund)",
         Lang::Ru => "Снести (40% возврат)",
+    }
+}
+
+/// V0.14: enter `RelocateMode` — free (no wood), but takes rebuild time.
+pub fn relocate_label(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Ko'chirish (bepul)",
+        Lang::En => "Relocate (free)",
+        Lang::Ru => "Перенести (бесплатно)",
     }
 }
 
@@ -484,7 +519,16 @@ pub fn sel_info_tent(housing: usize, pop: usize, l: Lang) -> String {
 
 /// Tunnel selection-panel info block. `pending` is the traveler count
 /// currently waiting at the mouth, if any (`GameState.pending_migrant`).
-pub fn sel_info_tunnel(unlocked: bool, stage: u8, stages: u8, pending: Option<u32>, l: Lang) -> String {
+#[allow(clippy::too_many_arguments)]
+pub fn sel_info_tunnel(
+    unlocked: bool,
+    stage: u8,
+    stages: u8,
+    pending: Option<u32>,
+    gold: f32,
+    caravan: Option<(bool, frozen_city::game::types::TradeGood, u32)>,
+    l: Lang,
+) -> String {
     if !unlocked {
         return match l {
             Lang::Uz => "Hali yopiq. Uni ochish uchun\nbarcha vazifalarni bajaring.".to_string(),
@@ -492,16 +536,71 @@ pub fn sel_info_tunnel(unlocked: bool, stage: u8, stages: u8, pending: Option<u3
             Lang::Ru => "Пока запечатан. Выполните все\nзадания, чтобы его открыть.".to_string(),
         };
     }
-    let base = match l {
+    let mut base = match l {
         Lang::Uz => format!("Qazilgan: {stage}/{stages} bosqich.\nVaqti-vaqti bilan yo'lovchilar chiqib turadi."),
         Lang::En => format!("Excavated: stage {stage}/{stages}.\nTravelers emerge from it from time to time."),
         Lang::Ru => format!("Раскопано: этап {stage}/{stages}.\nВремя от времени оттуда выходят путники."),
     };
-    match (pending, l) {
-        (Some(n), Lang::Uz) => format!("{base}\n{n} kishi kirishni kutmoqda —\njoy bo'lsa qabul qilinadi, bo'lmasa qaytib ketadi."),
-        (Some(n), Lang::En) => format!("{base}\n{n} waiting to come in — they'll join\nif there's room, or turn back if not."),
-        (Some(n), Lang::Ru) => format!("{base}\n{n} ждут у входа — войдут, если\nесть место, иначе повернут назад."),
-        (None, _) => base,
+    if let (Some(n), _) = (pending, l) {
+        let line = match l {
+            Lang::Uz => format!("{n} kishi kirishni kutmoqda — joy bo'lsa qabul qilinadi, bo'lmasa qaytib ketadi."),
+            Lang::En => format!("{n} waiting to come in — they'll join if there's room, or turn back if not."),
+            Lang::Ru => format!("{n} ждут у входа — войдут, если есть место, иначе повернут назад."),
+        };
+        base = format!("{base}\n{line}");
+    }
+    let gold_line = match l {
+        Lang::Uz => format!("Oltin: {:.0}.", gold),
+        Lang::En => format!("Gold: {:.0}.", gold),
+        Lang::Ru => format!("Золото: {:.0}.", gold),
+    };
+    base = format!("{base}\n{gold_line}");
+    if let Some((selling, good, amount)) = caravan {
+        let good_name = trade_good_name(good, l);
+        let line = match (selling, l) {
+            (true, Lang::Uz) => format!("Karvon {amount} {good_name} sotish uchun yo'lda."),
+            (true, Lang::En) => format!("A caravan is on the road selling {amount} {good_name}."),
+            (true, Lang::Ru) => format!("Караван в пути — продаёт {amount} {good_name}."),
+            (false, Lang::Uz) => format!("Karvon {amount} {good_name} sotib olish uchun yo'lda."),
+            (false, Lang::En) => format!("A caravan is on the road buying {amount} {good_name}."),
+            (false, Lang::Ru) => format!("Караван в пути — покупает {amount} {good_name}."),
+        };
+        base = format!("{base}\n{line}");
+    }
+    base
+}
+
+pub fn trade_good_name(good: frozen_city::game::types::TradeGood, l: Lang) -> &'static str {
+    use frozen_city::game::types::TradeGood;
+    match (good, l) {
+        (TradeGood::Wood, Lang::Uz) => "yog'och",
+        (TradeGood::Wood, Lang::En) => "wood",
+        (TradeGood::Wood, Lang::Ru) => "дерево",
+        (TradeGood::Coal, Lang::Uz) => "ko'mir",
+        (TradeGood::Coal, Lang::En) => "coal",
+        (TradeGood::Coal, Lang::Ru) => "уголь",
+        (TradeGood::Food, Lang::Uz) => "oziq",
+        (TradeGood::Food, Lang::En) => "food",
+        (TradeGood::Food, Lang::Ru) => "еду",
+        (TradeGood::Fur, Lang::Uz) => "teri",
+        (TradeGood::Fur, Lang::En) => "fur",
+        (TradeGood::Fur, Lang::Ru) => "мех",
+        (TradeGood::Cloth, Lang::Uz) => "mato",
+        (TradeGood::Cloth, Lang::En) => "cloth",
+        (TradeGood::Cloth, Lang::Ru) => "ткань",
+    }
+}
+
+/// Short caravan quick-action button label, e.g. "Sell Wood" / "Buy Wood".
+pub fn caravan_btn_label(good: frozen_city::game::types::TradeGood, selling: bool, l: Lang) -> String {
+    let good_name = trade_good_name(good, l);
+    match (selling, l) {
+        (true, Lang::Uz) => format!("Sot: {good_name}"),
+        (true, Lang::En) => format!("Sell {good_name}"),
+        (true, Lang::Ru) => format!("Прод: {good_name}"),
+        (false, Lang::Uz) => format!("Ol: {good_name}"),
+        (false, Lang::En) => format!("Buy {good_name}"),
+        (false, Lang::Ru) => format!("Куп: {good_name}"),
     }
 }
 
@@ -533,11 +632,59 @@ pub fn sel_info_coal_mine(production: f32, remaining: u16, l: Lang) -> String {
     }
 }
 
-pub fn sel_info_hunter_hut(production: f32, l: Lang) -> String {
+pub fn sel_info_hunter_hut(production: f32, deer: f32, rabbit: f32, l: Lang) -> String {
     match l {
-        Lang::Uz => format!("To'liq ekipaj bilan +{production:.0} oziq/kun."),
-        Lang::En => format!("+{production:.0} food/day at full crew."),
-        Lang::Ru => format!("+{production:.0} еды/день при полном составе."),
+        Lang::Uz => format!(
+            "To'liq ekipaj bilan +{production:.0} oziq/kun.\nYovvoyi hayvonlar: {deer:.0} kiyik, {rabbit:.0} quyon.",
+        ),
+        Lang::En => format!(
+            "+{production:.0} food/day at full crew.\nWildlife: {deer:.0} deer, {rabbit:.0} rabbits.",
+        ),
+        Lang::Ru => format!(
+            "+{production:.0} еды/день при полном составе.\nДичь: {deer:.0} оленей, {rabbit:.0} кроликов.",
+        ),
+    }
+}
+
+pub fn sel_info_farmhouse(production: f32, cow: f32, sheep: f32, l: Lang) -> String {
+    match l {
+        Lang::Uz => format!(
+            "To'liq ekipaj bilan +{production:.0} oziq/kun.\nChorva: {cow:.0} sigir, {sheep:.0} qo'y.",
+        ),
+        Lang::En => format!(
+            "+{production:.0} food/day at full crew.\nLivestock: {cow:.0} cows, {sheep:.0} sheep.",
+        ),
+        Lang::Ru => format!(
+            "+{production:.0} еды/день при полном составе.\nСкот: {cow:.0} коров, {sheep:.0} овец.",
+        ),
+    }
+}
+
+pub fn sel_info_tailor_shop(production: f32, fur: f32, l: Lang) -> String {
+    match l {
+        Lang::Uz => format!(
+            "To'liq ekipaj bilan +{production:.0} mato/kun (agar teri yetsa).\nOmborda teri: {fur:.0}.",
+        ),
+        Lang::En => format!(
+            "+{production:.0} cloth/day at full crew (fur permitting).\nFur in stock: {fur:.0}.",
+        ),
+        Lang::Ru => format!(
+            "+{production:.0} ткани/день при полном составе (если хватает меха).\nМеха в запасе: {fur:.0}.",
+        ),
+    }
+}
+
+pub fn sel_info_well(production: f32, water: f32, l: Lang) -> String {
+    match l {
+        Lang::Uz => format!(
+            "To'liq ekipaj bilan +{production:.0} suv/kun.\nOmborda suv: {water:.0}.",
+        ),
+        Lang::En => format!(
+            "+{production:.0} water/day at full crew.\nWater in stock: {water:.0}.",
+        ),
+        Lang::Ru => format!(
+            "+{production:.0} воды/день при полном составе.\nВоды в запасе: {water:.0}.",
+        ),
     }
 }
 
