@@ -100,7 +100,7 @@ thread) boradi. Akkaunt bilan kirish (`Login`/`EnterCentral`) esa
 |---|---|---|---|
 | `protocol.rs` | Wire format | `ClientMsg` (`Hello`/`Cmd`/`Cursor`/`Chat`/`Ping`/`SetGuestPermission`/`Kick`/`Login`/`EnterCentral`), `ServerMsg` (`Welcome`/`State`/`AuthFailed`), `Included` (delta-snapshot bayroqlari), `encode`/`decode` (bincode + `miniz_oxide` deflate), `write_frame`/`read_frame` (4-bayt little-endian uzunlik prefiksi). **MUHIM:** bincode positional bo'lgani uchun `ClientMsg`/`ServerMsg` enum variantlari **faqat OXIRIGA** qo'shiladi — o'rtaga qo'shish yoki tartibni o'zgartirish eski client/saqlovlarni buzadi | `server.rs`, `client.rs`, `ws.rs`, `legacy.rs` (saqlashda ham xuddi shu tamoyil) |
 | `server/` (modul-ildiz `server.rs` + submodullar: `config`·`listener`·`native`·`web`·`ratelimit`·`messages`·`simloop`·`util`) | TCP/WS/HTTP qabul qilish + sim_loop + persistensiya orkestratsiyasi | `sim_loop` (asosiy tick tsikli — `pub(crate)`, `world_manager.rs` ham qayta ishlatadi), `accept_loop`/`handle_socket` (4-bayt sniffing: `"GET "` → HTTP/WS, aks holda native), `route_first_msg` (Hello/Login/EnterCentral marshrutlash), `RateLimiter` (Cmd 30/s, Chat 4/s, Ping 6/s, Cursor 60/s), sessiya tokenlari (`fresh_token()` — OS CSPRNG, har reconnect'da rotatsiya), `ServerConfig`/`ServerHandle`, `MAX_CONNECTIONS=128`, auto-reset (`WORLD_RESET_AFTER`), avtosaqlash (`AUTOSAVE_INTERVAL=20s`) | `main.rs` (`run_dedicated`), `client/menu.rs` (host/singleplayer in-process), `world_manager.rs` |
-| `world_manager.rs` | Akkaunt → shaxsiy olam marshrutlash, lazy-spawn/idle-evict | `WorldManager::join_account` (login → akkauntning o'z `sim_loop` thread'i, birinchi so'rovda spawn qilinadi), `enter_central` (Tunnel bitirgan akkauntni markaziy olamga kiritadi, `extract_migrants`/`inject_migrants` orqali aholi ko'chiradi, `CENTRAL_MIGRANTS_PER_ACCOUNT=5`gacha), idle-evict 300s'dan keyin (`IDLE_SHUTDOWN`), `MAX_ACCOUNT_WORLDS=200` cap (markaziy olam bundan mustasno) | `main.rs` (`run_dedicated`, faqat asosiy region), `server.rs::route_first_msg` |
+| `world_manager.rs` | Akkaunt → shaxsiy olam marshrutlash, lazy-spawn/idle-evict | `WorldManager::join_account` (login → akkauntning o'z `sim_loop` thread'i, birinchi so'rovda spawn qilinadi), `enter_central` (Tunnel bitirgan akkauntni markaziy olamga kiritadi, `extract_migrants`/`inject_migrants` orqali aholi ko'chiradi, `CENTRAL_MIGRANTS_PER_ACCOUNT=5`gacha), idle-evict 300s'dan keyin (`IDLE_SHUTDOWN`), `MAX_ACCOUNT_WORLDS=200` cap (markaziy olam bundan mustasno) | `main.rs` (`run_dedicated`), `server.rs::route_first_msg` |
 | `accounts.rs` | Akkaunt autentifikatsiyasi (SQLite, o'qish-only) | `authenticate(login, password)` → `(account_id, display_name)` yoki `None` (barcha xato holatlar — DB yo'q, login topilmadi, parol xato — bir xil `None`ga tushadi, enumeration oldini olish uchun), bcrypt tekshiruvi | `server.rs::route_first_msg` |
 | `persist.rs` | Diskka saqlash/yuklash, versiyalangan format | `save_at`/`load_at` (`MAGIC_V2 = b"FCWORLD2"` header + bincode; atomik yozish: temp fayl + rename), magic'siz fayl `legacy.rs`dagi V1 ko'zgu orqali o'qiladi va migratsiya qilinadi | `server.rs` (`sim_loop`, `save_world`), `world_manager.rs`, `examples/checksave.rs` |
 | `legacy.rs` | V1 (markaziy-olamgacha) format ko'zgusi — **hech qachon o'zgartirilmaydi** | `GameStateV1`/`SurvivorV1`/`PlayerInfoV1` (V1 layout aynan), `impl From<GameStateV1> for GameState` (yangi maydonlarga default: `owner: None`, `account: None`, `central: false`) | `persist.rs::load_at` (magic yo'q fayllar uchun) |
@@ -140,15 +140,13 @@ koordinata konvertatsiya funksiyalari `tile_center_world`/`world_to_tile`).
 
 Uchta olam turi, barchasi bitta `GameState`/`sim` mexanizmidan foydalanadi:
 
-1. **Mehmon umumiy olami** — `Hello` (akkauntsiz) bilan kiriladi. Har region
-   (asosiy + region2 + region3 — 3 mustaqil static process/port) o'zining
+1. **Mehmon umumiy olami** — `Hello` (akkauntsiz) bilan kiriladi. Server
    bitta umumiy `sim_loop`ini yuritadi (`ServerConfig::persistent=true`,
    `save_path: None` → `persist::save`/`load`, `FC_WORLD_SAVE`). G'alaba/
    mag'lubiyatdan so'ng `WORLD_RESET_AFTER=45s`dan keyin yangi xarita bilan
    qayta boshlaydi (o'yinchilar ulanishda qoladi).
-2. **Shaxsiy akkaunt-olam** — `Login` bilan kiriladi (asosiy regionda,
-   `/ws`da; region2/3 `FC_DISABLE_ACCOUNTS=1` bilan rad etadi).
-   `WorldManager` `account_id` bo'yicha alohida `sim_loop` thread'ini
+2. **Shaxsiy akkaunt-olam** — `Login` bilan kiriladi. `WorldManager`
+   `account_id` bo'yicha alohida `sim_loop` thread'ini
    lazy-spawn qiladi (`/var/lib/frozen-city/accounts/{id}.bin`), 300s
    faolsizlikdan keyin avto-evict+save. Missiyalar, Tunnel, texnologiya
    daraxti — shu yerda progressiya. Tunnel bitgach `graduated = true`
@@ -203,17 +201,18 @@ production saqlovlar nusxasi `examples/checksave.rs` bilan tekshiriladi.
 
 | Xizmat | Vazifasi | Port | Eslatma |
 |---|---|---|---|
-| `frozen-city` | Asosiy region — umumiy olam + akkauntlar/markaziy olam | 4595 | `/ws`; `--days 60`, `RuntimeMaxSec=10800`, `FC_TELEMETRY_PATH` |
-| `frozen-city-region2` | Qo'shimcha static region | 4596 | `/ws-r2`; `FC_DISABLE_ACCOUNTS` yo'q lekin server kodi region2/3'da hech qachon `world_manager` bilan ishga tushmaydi — faqat asosiy `main.rs::run_dedicated` chaqiruv nuqtasi orqali |
-| `frozen-city-region3` | Qo'shimcha static region | 4597 | `/ws-r3` |
+| `frozen-city` | Umumiy olam + akkauntlar/markaziy olam | 4595 | `/ws`; `--days 60`, `RuntimeMaxSec=10800`, `FC_TELEMETRY_PATH` |
 | `frozen-city-bot` | Telegram ro'yxatdan o'tish boti (`bot/register_bot.py`) | — | SQLite accounts DB yagona yozuvchisi (`/var/lib/frozen-city-accounts/accounts.db`) |
 | `frozen-city-deploy-listen` | Telegram'da "gitup" xabarini kutadi, `deploy.sh`ni ishga tushiradi | — | Pollingsiz — faqat so'rov bo'yicha deploy |
 
+> **2026-07-16:** ko'p-region infratuzilmasi (`frozen-city-region2`/`-region3`,
+> `/ws-r2`/`/ws-r3`, `FC_DISABLE_ACCOUNTS`) butunlay olib tashlandi — kod,
+> jonli systemd xizmatlari, nginx marshrutlari va saqlangan dunyo fayllari
+> bilan birga. Endi bitta jarayon, bitta port.
+
 ### nginx marshrutlar (`game.twelfth.uz` va `twelfth.uz/game/`)
 
-- `/ws` → `127.0.0.1:4595` (asosiy region, WebSocket proxy, `proxy_read_timeout 4h`)
-- `/ws-r2` → `127.0.0.1:4596` (region2)
-- `/ws-r3` → `127.0.0.1:4597` (region3)
+- `/ws` → `127.0.0.1:4595` (WebSocket proxy, `proxy_read_timeout 4h`)
 - `/` (yoki `/game/`) → statik web build (`gzip_static on`, `pkg-webgpu`/`pkg-webgl` keshsiz)
 
 ### Deploy oqimi (`deploy.sh`)

@@ -303,68 +303,13 @@ pub fn players_you_owner(l: Lang) -> &'static str {
     }
 }
 
-/// "Players — you are a Guest ({perm})".
-pub fn players_you_guest(perm: &str, l: Lang) -> String {
+/// "Players — you are a Guest". Every guest has full co-op authority
+/// alongside the owner; the only owner-only action left is `Kick`.
+pub fn players_you_guest(l: Lang) -> &'static str {
     match l {
-        Lang::Uz => format!("O'yinchilar — siz Mehmonsiz ({perm})"),
-        Lang::En => format!("Players — you are a Guest ({perm})"),
-        Lang::Ru => format!("Игроки — вы Гость ({perm})"),
-    }
-}
-
-pub fn perm_view_only(l: Lang) -> &'static str {
-    match l {
-        Lang::Uz => "faqat ko'rish",
-        Lang::En => "view only",
-        Lang::Ru => "только просмотр",
-    }
-}
-
-pub fn perm_build(l: Lang) -> &'static str {
-    match l {
-        Lang::Uz => "qurish",
-        Lang::En => "build",
-        Lang::Ru => "стройка",
-    }
-}
-
-pub fn perm_full(l: Lang) -> &'static str {
-    match l {
-        Lang::Uz => "to'liq",
-        Lang::En => "full",
-        Lang::Ru => "полный",
-    }
-}
-
-pub fn guests_label(l: Lang) -> &'static str {
-    match l {
-        Lang::Uz => "Mehmonlar:",
-        Lang::En => "Guests:",
-        Lang::Ru => "Гости:",
-    }
-}
-
-pub fn perm_btn_view(l: Lang) -> &'static str {
-    match l {
-        Lang::Uz => "Ko'rish",
-        Lang::En => "View",
-        Lang::Ru => "Вид",
-    }
-}
-
-pub fn perm_btn_build(l: Lang) -> &'static str {
-    match l {
-        Lang::Uz => "Qurish",
-        Lang::En => "Build",
-        Lang::Ru => "Стройка",
-    }
-}
-
-pub fn perm_btn_full(l: Lang) -> &'static str {
-    match l {
-        Lang::Uz => "To'liq",
-        Lang::En => "Full",
-        Lang::Ru => "Полный",
+        Lang::Uz => "O'yinchilar — siz Mehmonsiz",
+        Lang::En => "Players — you are a Guest",
+        Lang::Ru => "Игроки — вы Гость",
     }
 }
 

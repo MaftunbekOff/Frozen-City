@@ -255,26 +255,6 @@ fn insulation_reduces_cold_damage() {
     );
 }
 
-#[test]
-fn can_issue_research_under_build_but_not_view_only() {
-    let mut state = sim::new_game(SEED, 12);
-    sim::player_joined(&mut state, 1, "Owner");
-    sim::player_joined(&mut state, 2, "Guest");
-
-    // new_game defaults to GuestPermission::Build.
-    assert_eq!(state.guest_perm, GuestPermission::Build);
-    assert!(
-        state.can_issue(2, &PlayerCommand::Research { tech: Tech::Tools }),
-        "guests should be able to research under Build"
-    );
-
-    sim::set_guest_permission(&mut state, GuestPermission::ViewOnly);
-    assert!(
-        !state.can_issue(2, &PlayerCommand::Research { tech: Tech::Tools }),
-        "guests should not be able to research under ViewOnly"
-    );
-}
-
 // --- helpers ---
 
 fn find_spot(state: &GameState, kind: BuildingKind) -> (u8, u8) {

@@ -17,8 +17,8 @@
 // on install just guarantees an offline fallback exists from the first
 // visit; it is never preferred over a live network response.
 //
-// WebSocket upgrades (/ws, /ws-r2, /ws-r3) never go through the fetch
-// event at all, so there's nothing to special-case for them here.
+// WebSocket upgrades (/ws) never go through the fetch event at all, so
+// there's nothing to special-case for them here.
 
 const CACHE_VERSION = 'frozen-city-v1';
 

@@ -262,19 +262,6 @@ fn events_do_not_break_determinism() {
 }
 
 #[test]
-fn can_issue_respond_event_under_build_but_not_view_only() {
-    let mut state = sim::new_game(SEED, 12);
-    sim::player_joined(&mut state, 1, "Owner");
-    sim::player_joined(&mut state, 2, "Guest");
-
-    state.guest_perm = GuestPermission::Build;
-    assert!(state.can_issue(2, &PlayerCommand::RespondEvent { accept: true }));
-
-    state.guest_perm = GuestPermission::ViewOnly;
-    assert!(!state.can_issue(2, &PlayerCommand::RespondEvent { accept: true }));
-}
-
-#[test]
 fn caravan_accept_charges_only_for_admitted_refugees() {
     let mut state = sim::new_game(5, 12);
     // Only room for 1 more (no tents -> capacity 0, so space = 0 + 2 - pop).

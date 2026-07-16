@@ -29,8 +29,6 @@ pub enum ClientMsg {
     Chat { text: String },
     /// Drop a transient map marker at world tile coordinates (Alt+click).
     Ping { x: f32, y: f32 },
-    /// Owner-only: change what guests are allowed to do. Ignored from guests.
-    SetGuestPermission { perm: fc_game::types::GuestPermission },
     /// Owner-only: remove a guest from the world by player id. Ignored from guests.
     Kick { target: u64 },
     /// Alternative to `Hello` as the first message on a connection: sign in

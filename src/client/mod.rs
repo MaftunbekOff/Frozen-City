@@ -554,8 +554,6 @@ impl Plugin for ClientPlugin {
                     menu::autostart,
                     menu::menu_buttons,
                     menu::overlay_buttons,
-                    #[cfg(target_arch = "wasm32")]
-                    menu::region_buttons,
                     menu::login_field_focus,
                     menu::login_form_keyboard,
                     #[cfg(target_arch = "wasm32")]

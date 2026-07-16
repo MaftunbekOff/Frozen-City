@@ -443,11 +443,6 @@ fn submit_login(
         password: password.to_string(),
         token: None,
     };
-    // Region choice applies to guest co-op only: accounts are main-region-only
-    // (see `main_region_addr`), so an account login ignores a picked `/ws-r2`.
-    #[cfg(target_arch = "wasm32")]
-    let addr = main_region_addr(&settings.join_addr);
-    #[cfg(not(target_arch = "wasm32"))]
     let addr = settings.join_addr.clone();
     #[cfg(not(target_arch = "wasm32"))]
     let conn = frozen_city::net::client::connect_tcp_with(&addr, hello)
@@ -497,10 +492,6 @@ fn submit_register(
         password: password.to_string(),
         name: name.to_string(),
     };
-    // Accounts are main-region-only, same reasoning as `submit_login`.
-    #[cfg(target_arch = "wasm32")]
-    let addr = main_region_addr(&settings.join_addr);
-    #[cfg(not(target_arch = "wasm32"))]
     let addr = settings.join_addr.clone();
     #[cfg(not(target_arch = "wasm32"))]
     let conn = frozen_city::net::client::connect_tcp_with(&addr, hello)

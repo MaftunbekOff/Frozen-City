@@ -1,5 +1,5 @@
 //! Ramps up concurrent native-protocol connections against a running server
-//! to find this box's realistic per-region capacity (F5). Talks the real
+//! to find this box's realistic capacity (F5). Talks the real
 //! wire protocol via `net::client::connect_tcp`, same as any native client —
 //! no protocol reimplementation, no risk of testing something the game
 //! doesn't actually do.

@@ -221,22 +221,24 @@ pub struct PlayerInfo {
     pub account: Option<i64>,
 }
 
-/// A player's authority in the world. The first to join owns it; everyone else
-/// is a guest, bounded by the world's [`GuestPermission`].
+/// A player's authority in the world. The first to join owns it; everyone
+/// else is a guest — guests have full command authority alongside the owner
+/// (see `GameState::can_issue`), `Role` only gates the owner-only admin
+/// actions (`Kick`).
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Role {
     Owner,
     Guest,
 }
 
-/// What guests are allowed to do, chosen by the owner. The owner always has
-/// full authority; a world with no connected owner behaves as `Full`.
+/// Retired (2026-07-16): guest permission tiering (view-only/build/full) was
+/// removed — every guest now has full authority, same as `Role::Owner`. This
+/// type is kept ONLY so `legacy.rs`'s frozen `GameStateV11` mirror (and
+/// earlier) can still deserialize old on-disk saves that carry this field;
+/// nothing live reads or writes it anymore.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GuestPermission {
-    /// Chat, ping and move the cursor only — no world changes.
     ViewOnly,
-    /// Place buildings, assign workers, and demolish their OWN buildings.
     Build,
-    /// Everything the owner can do (except owner-only admin: set policy, kick).
     Full,
 }

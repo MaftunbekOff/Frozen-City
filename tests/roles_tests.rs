@@ -1,7 +1,8 @@
 //! Pure-simulation tests for the roles/ownership system: who owns a world,
-//! what guests may do under each `GuestPermission`, and the two related
-//! robustness fixes (system-event eviction protection, zalgo-mark capping in
-//! chat). Mirrors the style of `sim_tests.rs`.
+//! guest command authority (guests have full authority alongside the owner —
+//! see `GameState::can_issue`), and the two related robustness fixes
+//! (system-event eviction protection, zalgo-mark capping in chat). Mirrors
+//! the style of `sim_tests.rs`.
 
 use frozen_city::game::sim;
 use frozen_city::game::types::*;
@@ -42,53 +43,18 @@ fn can_issue_owner_may_do_everything() {
 }
 
 #[test]
-fn can_issue_guest_view_only_denies_everything() {
-    let mut state = sim::new_game(5, 12);
-    sim::player_joined(&mut state, 1, "Owner");
-    sim::player_joined(&mut state, 2, "Guest");
-    sim::set_guest_permission(&mut state, GuestPermission::ViewOnly);
-
-    let (x, y) = find_spot(&state, BuildingKind::Tent);
-    assert!(!state.can_issue(2, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y }));
-    assert!(!state.can_issue(2, &PlayerCommand::AdjustWorkers { building: 0, delta: 1 }));
-    assert!(!state.can_issue(2, &PlayerCommand::Demolish { building: 0 }));
-    assert!(!state.can_issue(2, &PlayerCommand::SetFurnaceLevel { level: 2 }));
-}
-
-#[test]
-fn can_issue_guest_build_may_place_and_adjust_workers() {
-    let mut state = sim::new_game(5, 12);
-    sim::player_joined(&mut state, 1, "Owner");
-    sim::player_joined(&mut state, 2, "Guest");
-    assert_eq!(state.guest_perm, GuestPermission::Build, "default policy is Build");
-
-    let (x, y) = find_spot(&state, BuildingKind::Tent);
-    assert!(state.can_issue(2, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y }));
-    assert!(state.can_issue(2, &PlayerCommand::AdjustWorkers { building: 0, delta: 1 }));
-}
-
-#[test]
-fn can_issue_guest_build_may_demolish_own_building_but_not_others() {
+fn can_issue_guest_has_full_authority_including_others_buildings() {
     let mut state = sim::new_game(5, 12);
     sim::player_joined(&mut state, 1, "Owner");
     sim::player_joined(&mut state, 2, "Guest");
 
-    let (gx, gy) = find_spot(&state, BuildingKind::Tent);
-    state.buildings.push(Building {
-        id: 101,
-        kind: BuildingKind::Tent,
-        x: gx,
-        y: gy,
-        workers: 0,
-        progress: 0.0,
-        owner: Some(2),
-        owner_account: None,
-        level: 1,
-        build_left: 0.0,
-    });
+    // Owned by the owner, not the guest — demolishing it proves guests are
+    // no longer restricted to their own buildings (the retired `Build` tier
+    // used to enforce that; guests now have the same authority as `Full`
+    // always did).
     let (ox, oy) = find_spot(&state, BuildingKind::Tent);
     state.buildings.push(Building {
-        id: 102,
+        id: 101,
         kind: BuildingKind::Tent,
         x: ox,
         y: oy,
@@ -100,31 +66,15 @@ fn can_issue_guest_build_may_demolish_own_building_but_not_others() {
         build_left: 0.0,
     });
 
-    assert!(state.can_issue(2, &PlayerCommand::Demolish { building: 101 }), "guest may demolish their own building");
-    assert!(!state.can_issue(2, &PlayerCommand::Demolish { building: 102 }), "guest may not demolish someone else's building");
-}
-
-#[test]
-fn can_issue_guest_build_may_assign_named_survivors() {
-    let mut state = sim::new_game(5, 12);
-    sim::player_joined(&mut state, 1, "Owner");
-    sim::player_joined(&mut state, 2, "Guest");
-    assert_eq!(state.guest_perm, GuestPermission::Build, "default policy is Build");
-
+    let (x, y) = find_spot(&state, BuildingKind::Tent);
+    assert!(state.can_issue(2, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y }));
+    assert!(state.can_issue(2, &PlayerCommand::AdjustWorkers { building: 0, delta: 1 }));
+    assert!(
+        state.can_issue(2, &PlayerCommand::Demolish { building: 101 }),
+        "guests have full authority, including buildings they don't own"
+    );
+    assert!(state.can_issue(2, &PlayerCommand::SetFurnaceLevel { level: 2 }));
     assert!(state.can_issue(
-        2,
-        &PlayerCommand::AssignSurvivor { survivor: 1, building: Some(0) }
-    ));
-}
-
-#[test]
-fn can_issue_guest_view_only_denies_assign_survivor() {
-    let mut state = sim::new_game(5, 12);
-    sim::player_joined(&mut state, 1, "Owner");
-    sim::player_joined(&mut state, 2, "Guest");
-    sim::set_guest_permission(&mut state, GuestPermission::ViewOnly);
-
-    assert!(!state.can_issue(
         2,
         &PlayerCommand::AssignSurvivor { survivor: 1, building: Some(0) }
     ));
@@ -143,28 +93,6 @@ fn can_issue_owner_may_assign_survivors() {
 }
 
 #[test]
-fn can_issue_guest_build_may_not_set_furnace_level() {
-    let mut state = sim::new_game(5, 12);
-    sim::player_joined(&mut state, 1, "Owner");
-    sim::player_joined(&mut state, 2, "Guest");
-    assert!(!state.can_issue(2, &PlayerCommand::SetFurnaceLevel { level: 2 }));
-}
-
-#[test]
-fn can_issue_guest_full_may_do_everything() {
-    let mut state = sim::new_game(5, 12);
-    sim::player_joined(&mut state, 1, "Owner");
-    sim::player_joined(&mut state, 2, "Guest");
-    sim::set_guest_permission(&mut state, GuestPermission::Full);
-
-    let (x, y) = find_spot(&state, BuildingKind::Tent);
-    assert!(state.can_issue(2, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y }));
-    assert!(state.can_issue(2, &PlayerCommand::AdjustWorkers { building: 0, delta: 1 }));
-    assert!(state.can_issue(2, &PlayerCommand::Demolish { building: 0 }));
-    assert!(state.can_issue(2, &PlayerCommand::SetFurnaceLevel { level: 2 }));
-}
-
-#[test]
 fn can_issue_owner_less_world_allows_guest_everything() {
     let mut state = sim::new_game(5, 12);
     // `player_joined` always makes the first joiner Owner, so to exercise the
@@ -178,23 +106,6 @@ fn can_issue_owner_less_world_allows_guest_everything() {
     let (x, y) = find_spot(&state, BuildingKind::Tent);
     assert!(state.can_issue(2, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y }));
     assert!(state.can_issue(2, &PlayerCommand::SetFurnaceLevel { level: 2 }));
-}
-
-#[test]
-fn apply_command_enforces_view_only_guest_place_is_a_noop() {
-    let mut state = sim::new_game(5, 12);
-    sim::player_joined(&mut state, 1, "Owner");
-    sim::player_joined(&mut state, 2, "Guest");
-    sim::set_guest_permission(&mut state, GuestPermission::ViewOnly);
-
-    let (x, y) = find_spot(&state, BuildingKind::Tent);
-    let wood_before = state.stock.wood;
-    let buildings_before = state.buildings.len();
-
-    sim::apply_command(&mut state, 2, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
-
-    assert_eq!(state.buildings.len(), buildings_before, "guest Place must be rejected under ViewOnly");
-    assert_eq!(state.stock.wood, wood_before, "no wood spent on a rejected command");
 }
 
 #[test]
@@ -246,19 +157,6 @@ fn push_chat_caps_stacked_combining_marks() {
         combining_count <= 2,
         "expected at most ~2 stacked combining marks, got {combining_count}: {stored:?}"
     );
-}
-
-#[test]
-fn set_guest_permission_updates_state() {
-    let mut state = sim::new_game(5, 12);
-    sim::player_joined(&mut state, 1, "Owner");
-    assert_eq!(state.guest_perm, GuestPermission::Build);
-
-    sim::set_guest_permission(&mut state, GuestPermission::ViewOnly);
-    assert_eq!(state.guest_perm, GuestPermission::ViewOnly);
-
-    sim::set_guest_permission(&mut state, GuestPermission::Full);
-    assert_eq!(state.guest_perm, GuestPermission::Full);
 }
 
 #[test]

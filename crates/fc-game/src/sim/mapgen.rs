@@ -154,7 +154,6 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
         blizzard_until: 0,
         pending_event: None,
         event_rng: Rng::new(seed.rotate_left(21) ^ 0x00E0_0DE0_1234_5678).0,
-        guest_perm: GuestPermission::Build,
         owner_id: None,
         next_id,
         rng: rng.0,

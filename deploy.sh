@@ -84,7 +84,11 @@ notify "🧊 <b>Frozen City</b>: new commit, testing…
 ${HEADER}"
 
 log "running tests..."
-if ! cargo test --release >>"$LOG" 2>&1; then
+# --workspace: without it, `cargo test` from this root package only runs
+# frozen_city's own tests/*.rs — fc-net's and fc-game's own internal
+# `#[cfg(test)]` unit tests (e.g. persist.rs's save-format migration tests,
+# accounts.rs's auth tests) silently never ran under this gate at all.
+if ! cargo test --release --workspace >>"$LOG" 2>&1; then
     log "ERROR: tests failed at ${REMOTE:0:7} — deploy aborted, live service untouched. See $LOG for the failing test."
     notify "🧊❌ <b>Frozen City</b>: deploy failed (tests)
 ${HEADER}

@@ -59,17 +59,6 @@ pub fn player_left(state: &mut GameState, id: u64) {
     state.players.retain(|p| p.id != id);
 }
 
-/// Owner-only: change what guests in this world are allowed to do.
-pub fn set_guest_permission(state: &mut GameState, perm: GuestPermission) {
-    state.guest_perm = perm;
-    let label = match perm {
-        GuestPermission::ViewOnly => "view only",
-        GuestPermission::Build => "build",
-        GuestPermission::Full => "full",
-    };
-    push_event(state, format!("Guests can now: {}.", label));
-}
-
 /// Owner-only: remove `target` from the roster. No-op if they're not present
 /// (already disconnected, or the id never joined).
 pub fn kick_player(state: &mut GameState, target: u64) {

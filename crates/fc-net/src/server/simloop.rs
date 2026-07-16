@@ -130,6 +130,20 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
     if config.central {
         state.central = true;
     }
+    // `state.players` is the CONNECTED roster, not persistent identity — but
+    // it's still part of the saved `GameState`, so a restart while someone
+    // was connected (a deploy, a systemd restart, this exact process ever
+    // stopping) used to leave their entry behind forever: `clients`/
+    // `player_of`/`sessions` all start fresh and empty below, so that old
+    // entry could never be claimed by a real reconnect (which always
+    // allocates a NEW roster entry, via `player_joined_as` or a
+    // token-matched `player_rejoined`) or cleaned up by a real disconnect
+    // (nothing is "connected" to it anymore to ever disconnect). Left
+    // alone, this accumulates a ghost "<name> (owner)" duplicate in the
+    // roster on every restart a player happened to be online for — a real
+    // production bug found 2026-07-15. `owner_id` is untouched: it's a
+    // separate field and ownership must survive with nobody connected.
+    state.players.clear();
     // Telemetry dimension for this world, fixed for its lifetime: the central
     // hub, an account's personal world (keyed by that account), or the shared
     // guest world. `-1` matches `world_manager::CENTRAL_KEY`.
@@ -378,11 +392,11 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                         | ClientMsg::Invite { .. } => limiters
                             .get_mut(&client)
                             .is_some_and(|l| l.allow_chat(now)),
-                        // Low-frequency owner-only admin actions: never rate
-                        // limited (they're structurally rare — one click each
-                        // — and gating them behind the cmd/chat/ping caps
-                        // would let a flood on those channels starve a kick).
-                        ClientMsg::SetGuestPermission { .. } | ClientMsg::Kick { .. } => true,
+                        // Low-frequency owner-only admin action: never rate
+                        // limited (structurally rare — one click — and gating
+                        // it behind the cmd/chat/ping caps would let a flood
+                        // on those channels starve a kick).
+                        ClientMsg::Kick { .. } => true,
                         // Showcase reads a save file per friend from disk —
                         // its own dedicated cooldown (see `allow_showcase`),
                         // not the 1 s chat/cmd budget.
@@ -390,7 +404,7 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                             .get_mut(&client)
                             .is_some_and(|l| l.allow_showcase(now)),
                         // Rare owner-only setting change; same reasoning as
-                        // SetGuestPermission/Kick above.
+                        // Kick above.
                         ClientMsg::SetVisitPolicy { .. } => true,
                     };
                     if allowed {
@@ -533,11 +547,6 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                                             let _ = out.send(system_bubble(feedback));
                                         }
                                     }
-                                }
-                            }
-                            ClientMsg::SetGuestPermission { perm } => {
-                                if state.is_owner(pid) {
-                                    sim::set_guest_permission(&mut state, perm);
                                 }
                             }
                             ClientMsg::Kick { target } => {
@@ -711,19 +720,27 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
 
             // A dead (or victorious) persistent world starts over, so the
             // public server never sits in a game-over screen for hours.
+            // Personal (owner-scoped) worlds are the exception: they now
+            // keep ticking in the background for a long time after their
+            // owner disconnects (see `world_manager::IDLE_SHUTDOWN`), so a
+            // fragile colony dying while nobody's watching must NOT
+            // silently reset itself before the owner ever sees what
+            // happened — the countdown only starts once someone is actually
+            // connected to read it, same as any single-player "you died"
+            // screen waits for you to look at it. The shared/central worlds
+            // (`owner_account: None`) are unaffected: nobody in particular
+            // owns them, so the original behavior (auto-reset regardless of
+            // who's connected) still applies.
             if config.persistent {
                 if state.phase == GamePhase::Running {
                     game_over_since = None;
-                } else {
+                } else if config.owner_account.is_none() || !clients.is_empty() {
                     let since = *game_over_since.get_or_insert(now);
                     if now.duration_since(since) >= WORLD_RESET_AFTER {
                         game_over_since = None;
                         let seed = state.rng ^ 0xA5A5_5A5A_D00D_FEED ^ state.tick;
                         let players = state.players.clone();
-                        // Carry ownership and the owner-set guest policy across
-                        // the reset, otherwise a ViewOnly-locked world silently
-                        // reopens to Build for everyone each game cycle.
-                        let guest_perm = state.guest_perm;
+                        // Carry ownership across the reset.
                         let owner_id = state.owner_id;
                         // Graduation is a permanent achievement, not a
                         // property of one map: it's what admits this world's
@@ -733,7 +750,6 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                         let graduated = state.graduated;
                         state = sim::new_game(seed, config.win_days);
                         state.players = players;
-                        state.guest_perm = guest_perm;
                         state.owner_id = owner_id;
                         state.graduated = graduated;
                         printed_events = 0;

@@ -3,21 +3,22 @@
 //! grew new fields. Bincode is positional — any field added to the live types
 //! makes old bytes undecodable as them — so `persist::load_at` falls back to
 //! decoding the right mirror (by magic header) and migrating forward,
-//! V1 -> V2 -> V3 -> V4 -> V5 -> V6 -> V7 -> V8 -> V9 -> V10 -> V11 (the live
-//! format), one `From` hop at a time.
+//! V1 -> V2 -> V3 -> V4 -> V5 -> V6 -> V7 -> V8 -> V9 -> V10 -> V11 -> V12
+//! (the live format), one `From` hop at a time.
 //!
 //! These structs must never change again: they ARE their on-disk layout.
 //! Types shared unchanged across versions (Tile, Mission, ...) are reused
-//! from `types` directly; only the ones that grew fields between versions are
-//! mirrored. Serialize is derived solely so tests can fabricate old bytes.
+//! from `types` directly; only the ones that grew (or, as of V12, shrank)
+//! fields between versions are mirrored. Serialize is derived solely so
+//! tests can fabricate old bytes.
 
 use serde::{Deserialize, Serialize};
 
 use fc_game::types::{
     Building, CaravanOffer, ChatLine, Corpse, COW_START, DEER_START, GameEvent, GamePhase,
     GameState, Grave, GuestPermission, LedgerEntry, Livestock, Mission, Ping, PlayerInfo,
-    Profession, RABBIT_START, Role, SHEEP_START, Stockpile, Survivor, Tech, Tile, TunnelMigrant,
-    TunnelState, Wildlife,
+    Profession, RABBIT_START, Role, SHEEP_START, Stockpile, Survivor, Tech, Tile, TradeCaravan,
+    TunnelMigrant, TunnelState, Wildlife,
 };
 
 /// `Stockpile`'s shape through V7 — three f32s, no `fur`/`cloth` (added in V8
@@ -1213,9 +1214,58 @@ impl From<GameStateV9> for GameStateV10 {
     }
 }
 
-impl From<GameStateV10> for GameState {
-    fn from(v10: GameStateV10) -> GameState {
-        GameState {
+/// V11 (pre-guest-permission-removal, i.e. every field the live `GameState`
+/// has today PLUS `guest_perm`) shape: what `persist.rs` wrote under the
+/// `FCWORLD11` header before this change. `Stockpile` already has `gold`
+/// (added at the V10->V11 hop, see the old trade-caravan comment below) —
+/// only `GameState` itself loses a field going into V12, so `Stockpile` is
+/// reused from `types` directly, same as V10.
+#[derive(Serialize, Deserialize)]
+pub struct GameStateV11 {
+    pub tick: u64,
+    pub win_days: u32,
+    pub tiles: Vec<Tile>,
+    pub buildings: Vec<Building>,
+    pub survivors: Vec<Survivor>,
+    pub stock: Stockpile,
+    pub furnace_level: u8,
+    pub furnace_lit: bool,
+    pub cold_snap: bool,
+    pub players: Vec<PlayerInfo>,
+    pub phase: GamePhase,
+    pub events: Vec<GameEvent>,
+    pub total_events: u64,
+    pub chat: Vec<ChatLine>,
+    pub total_chat: u64,
+    pub pings: Vec<Ping>,
+    pub missions: Vec<Mission>,
+    pub tunnel: TunnelState,
+    pub graduated: bool,
+    pub central: bool,
+    pub techs: Vec<Tech>,
+    pub disease_until: u64,
+    pub blizzard_until: u64,
+    pub pending_event: Option<CaravanOffer>,
+    pub event_rng: u64,
+    pub guest_perm: GuestPermission,
+    pub owner_id: Option<u64>,
+    pub next_id: u32,
+    pub rng: u64,
+    pub central_ledger: Vec<LedgerEntry>,
+    pub leader: Option<u32>,
+    pub mourning_until: u64,
+    pub morale: f32,
+    pub pending_migrant: Option<TunnelMigrant>,
+    pub wildlife: Wildlife,
+    pub corpses: Vec<Corpse>,
+    pub graves: Vec<Grave>,
+    pub livestock: Livestock,
+    pub pending_caravan: Option<TradeCaravan>,
+}
+
+impl From<GameStateV10> for GameStateV11 {
+    fn from(v10: GameStateV10) -> GameStateV11 {
+        GameStateV11 {
             tick: v10.tick,
             win_days: v10.win_days,
             tiles: v10.tiles,
@@ -1271,25 +1321,83 @@ impl From<GameStateV10> for GameState {
     }
 }
 
-/// V9 -> V11 straight through V10, needed by `persist::load_at`'s one-hop
-/// `FCWORLD9` path (a V9 file goes all the way to the live format in a
+/// V12 dropped `guest_perm` entirely: the tiered guest-permission system
+/// (ViewOnly/Build/Full) was retired (2026-07-16) — every guest now has full
+/// command authority, same as the owner (see `GameState::can_issue`). Every
+/// other field carries straight through unchanged.
+impl From<GameStateV11> for GameState {
+    fn from(v11: GameStateV11) -> GameState {
+        GameState {
+            tick: v11.tick,
+            win_days: v11.win_days,
+            tiles: v11.tiles,
+            buildings: v11.buildings,
+            survivors: v11.survivors,
+            stock: v11.stock,
+            furnace_level: v11.furnace_level,
+            furnace_lit: v11.furnace_lit,
+            cold_snap: v11.cold_snap,
+            players: v11.players,
+            phase: v11.phase,
+            events: v11.events,
+            total_events: v11.total_events,
+            chat: v11.chat,
+            total_chat: v11.total_chat,
+            pings: v11.pings,
+            missions: v11.missions,
+            tunnel: v11.tunnel,
+            graduated: v11.graduated,
+            central: v11.central,
+            techs: v11.techs,
+            disease_until: v11.disease_until,
+            blizzard_until: v11.blizzard_until,
+            pending_event: v11.pending_event,
+            event_rng: v11.event_rng,
+            owner_id: v11.owner_id,
+            next_id: v11.next_id,
+            rng: v11.rng,
+            central_ledger: v11.central_ledger,
+            leader: v11.leader,
+            mourning_until: v11.mourning_until,
+            morale: v11.morale,
+            pending_migrant: v11.pending_migrant,
+            wildlife: v11.wildlife,
+            corpses: v11.corpses,
+            graves: v11.graves,
+            livestock: v11.livestock,
+            pending_caravan: v11.pending_caravan,
+        }
+    }
+}
+
+/// V10 -> V12 straight through V11, needed by `persist::load_at`'s one-hop
+/// `FCWORLD10` path (a V10 file goes all the way to the live format in a
 /// single `.into()`).
+impl From<GameStateV10> for GameState {
+    fn from(v10: GameStateV10) -> GameState {
+        GameStateV11::from(v10).into()
+    }
+}
+
+/// V9 -> V12 straight through V10 -> V11, needed by `persist::load_at`'s
+/// one-hop `FCWORLD9` path (a V9 file goes all the way to the live format in
+/// a single `.into()`).
 impl From<GameStateV9> for GameState {
     fn from(v9: GameStateV9) -> GameState {
         GameStateV10::from(v9).into()
     }
 }
 
-/// V8 -> V11 straight through V9 -> V10, needed by `persist::load_at`'s
-/// one-hop `FCWORLD8` path (a V8 file goes all the way to the live format in
-/// a single `.into()`).
+/// V8 -> V12 straight through V9 -> V10 -> V11, needed by
+/// `persist::load_at`'s one-hop `FCWORLD8` path (a V8 file goes all the way
+/// to the live format in a single `.into()`).
 impl From<GameStateV8> for GameState {
     fn from(v8: GameStateV8) -> GameState {
         GameStateV9::from(v8).into()
     }
 }
 
-/// V7 -> V11 straight through V8 -> V9 -> V10, needed by
+/// V7 -> V12 straight through V8 -> V9 -> V10 -> V11, needed by
 /// `persist::load_at`'s one-hop `FCWORLD7` path (a V7 file goes all the way
 /// to the live format in a single `.into()`).
 impl From<GameStateV7> for GameState {
@@ -1298,7 +1406,7 @@ impl From<GameStateV7> for GameState {
     }
 }
 
-/// V6 -> V11 straight through V7 -> V8 -> V9 -> V10, needed by
+/// V6 -> V12 straight through V7 -> V8 -> V9 -> V10 -> V11, needed by
 /// `persist::load_at`'s one-hop `FCWORLD6` path (a V6 file goes all the way
 /// to the live format in a single `.into()`).
 impl From<GameStateV6> for GameState {
@@ -1307,7 +1415,7 @@ impl From<GameStateV6> for GameState {
     }
 }
 
-/// V5 -> V11 straight through V6 -> V7 -> V8 -> V9 -> V10, needed by
+/// V5 -> V12 straight through V6 -> V7 -> V8 -> V9 -> V10 -> V11, needed by
 /// `persist::load_at`'s one-hop `FCWORLD5` path (a V5 file goes all the way
 /// to the live format in a single `.into()`).
 impl From<GameStateV5> for GameState {
@@ -1316,16 +1424,16 @@ impl From<GameStateV5> for GameState {
     }
 }
 
-/// V4 -> V11 straight through V5 -> V6 -> V7 -> V8 -> V9 -> V10, needed by
-/// `persist::load_at`'s one-hop `FCWORLD4` path (a V4 file goes all the way
-/// to the live format in a single `.into()`).
+/// V4 -> V12 straight through V5 -> V6 -> V7 -> V8 -> V9 -> V10 -> V11,
+/// needed by `persist::load_at`'s one-hop `FCWORLD4` path (a V4 file goes
+/// all the way to the live format in a single `.into()`).
 impl From<GameStateV4> for GameState {
     fn from(v4: GameStateV4) -> GameState {
         GameStateV5::from(v4).into()
     }
 }
 
-/// V3 -> V11 straight through V4 -> V5 -> V6 -> V7 -> V8 -> V9 -> V10,
+/// V3 -> V12 straight through V4 -> V5 -> V6 -> V7 -> V8 -> V9 -> V10 -> V11,
 /// needed by `persist::load_at`'s one-hop `FCWORLD3` path (a V3 file goes
 /// all the way to the live format in a single `.into()`).
 impl From<GameStateV3> for GameState {
@@ -1334,17 +1442,17 @@ impl From<GameStateV3> for GameState {
     }
 }
 
-/// V2 -> V11 straight through V3 -> V4 -> V5 -> V6 -> V7 -> V8 -> V9 -> V10,
-/// needed by `persist::load_at`'s one-hop `FCWORLD2` path.
+/// V2 -> V12 straight through V3 -> V4 -> V5 -> V6 -> V7 -> V8 -> V9 -> V10
+/// -> V11, needed by `persist::load_at`'s one-hop `FCWORLD2` path.
 impl From<GameStateV2> for GameState {
     fn from(v2: GameStateV2) -> GameState {
         GameStateV3::from(v2).into()
     }
 }
 
-/// V1 -> V11 straight through V2 -> V3 -> V4 -> V5 -> V6 -> V7 -> V8 -> V9 ->
-/// V10, for `persist::load_at`'s one-shot fallback path (a V1 file goes all
-/// the way to the live format in a single `.into()`).
+/// V1 -> V12 straight through V2 -> V3 -> V4 -> V5 -> V6 -> V7 -> V8 -> V9 ->
+/// V10 -> V11, for `persist::load_at`'s one-shot fallback path (a V1 file
+/// goes all the way to the live format in a single `.into()`).
 impl From<GameStateV1> for GameState {
     fn from(v1: GameStateV1) -> GameState {
         GameStateV2::from(v1).into()

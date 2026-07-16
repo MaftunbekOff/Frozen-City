@@ -3,27 +3,25 @@
 //! socket, real clients over `client::connect_tcp`, shared authoritative
 //! state. Mirrors the style of `net_e2e.rs` / `coop_e2e.rs`.
 //!
-//! Three things are exercised, all against ONE running server (kept to a
+//! Two things are exercised, both against ONE running server (kept to a
 //! single `#[test]` — no env vars are touched here, unlike
 //! `account_world_e2e.rs`/`social_server_tests.rs`, but starting one server
 //! and walking it through several scenarios in turn is cheaper than booting
-//! three and keeps the causal order — move, then lead, then a guest's
-//! attempt — obvious top to bottom):
+//! two and keeps the causal order — move, then lead — obvious top to
+//! bottom):
 //!
 //!  1. `MoveSurvivor` actually drives the survivor's server-authoritative
 //!     (x, y) toward the target tick over tick, and clears `move_target` (and
 //!     `assigned_building`) once arrived.
-//!  2. `SetLeader` is owner-only: the owner's command sets `state.leader`; the
-//!     same command from a guest is silently ignored (leader unchanged).
-//!  3. `GuestPermission` actually gates `MoveSurvivor` on the wire: under
-//!     `ViewOnly` a guest's move command is dropped (no target recorded, no
-//!     position change); flipping to `Build` lets the very same guest move a
-//!     survivor.
+//!  2. `SetLeader` works over the wire for a guest, not just the owner: guests
+//!     have full command authority alongside the owner (see
+//!     `GameState::can_issue`), so the same command from a guest also sets
+//!     `state.leader`.
 
 use std::time::{Duration, Instant};
 
 use frozen_city::game::sim;
-use frozen_city::game::types::{GameState, GuestPermission, PlayerCommand};
+use frozen_city::game::types::{GameState, PlayerCommand};
 use frozen_city::net::client::{self, ClientConn};
 use frozen_city::net::persist;
 use frozen_city::net::protocol::{ClientMsg, ServerMsg};
@@ -59,24 +57,9 @@ fn wait_state(conn: &ClientConn, mut pred: impl FnMut(&GameState) -> bool) -> Ga
     panic!("condition not met within 10s");
 }
 
-/// Drains states for `dur`, returning the LAST one seen (or `None` if none
-/// arrived) — used where we need to assert something did NOT happen (e.g.
-/// leadership did not change) rather than waiting for a specific predicate
-/// that might never come true.
-fn drain_states_for(conn: &ClientConn, dur: Duration) -> Option<GameState> {
-    let deadline = Instant::now() + dur;
-    let mut last = None;
-    while Instant::now() < deadline {
-        if let Ok(ServerMsg::State { state, .. }) = conn.recv_timeout(Duration::from_millis(200)) {
-            last = Some(state);
-        }
-    }
-    last
-}
-
 /// This suite is about the survivor-control wire commands themselves (move,
-/// lead, guest-gating) — not about the "one leader lights the furnace" opening
-/// (`SetLeader`'s guest-no-op check in particular wants a second survivor to
+/// lead) — not about the "one leader lights the furnace" opening
+/// (`SetLeader`'s guest check in particular wants a second survivor to
 /// appoint, so the assertion is unambiguous — see the `other_candidate` pick
 /// below). Pre-seed a save file with `sim::new_game_bootstrapped`'s starting
 /// state (furnace already lit, full population) and point a `persistent`
@@ -190,7 +173,7 @@ fn survivor_control_over_the_wire() {
         final_survivor.y
     );
 
-    // ================= (b) SetLeader is owner-only =================
+    // ================= (b) SetLeader works for a guest too =================
     let leader_candidate = arrived.survivors.first().expect("some survivor to appoint").id;
     alice.send(ClientMsg::Cmd(PlayerCommand::SetLeader { survivor: leader_candidate }));
     let led = wait_state(&alice, |s| s.leader == Some(leader_candidate));
@@ -201,8 +184,8 @@ fn survivor_control_over_the_wire() {
     let (_bob_id, _bob_token, _) = recv_welcome(&bob);
     wait_state(&alice, |s| s.players.len() == 2);
 
-    // A different survivor for Bob to (attempt to) appoint, so a silent
-    // no-op is unambiguous versus "nothing changed because it's the same id".
+    // A different survivor for Bob to appoint, so the change is unambiguous
+    // versus "nothing changed because it's the same id".
     let other_candidate = led
         .survivors
         .iter()
@@ -211,72 +194,14 @@ fn survivor_control_over_the_wire() {
         .expect("at least two survivors exist");
     bob.send(ClientMsg::Cmd(PlayerCommand::SetLeader { survivor: other_candidate }));
 
-    // Give the server several ticks to (not) apply it, then confirm the
-    // leader is still Alice's earlier pick — a guest's SetLeader must be a
-    // total no-op, not just "doesn't crash".
-    let after_guest_attempt = drain_states_for(&bob, Duration::from_secs(2));
-    if let Some(s) = after_guest_attempt {
-        assert_eq!(s.leader, Some(leader_candidate), "guest SetLeader must not change the leader");
-    }
-    // Belt-and-suspenders: ask Alice's connection too, since Bob might not
-    // have received a State in the drain window.
-    let confirmed = wait_state(&alice, |s| s.leader == Some(leader_candidate));
-    assert_eq!(confirmed.leader, Some(leader_candidate), "leader must remain the owner's original pick");
-
-    // ================= (c) GuestPermission gates MoveSurvivor =================
-    // Owner locks the world to ViewOnly: guests may look, not touch.
-    alice.send(ClientMsg::SetGuestPermission { perm: GuestPermission::ViewOnly });
-    wait_state(&bob, |s| s.guest_perm == GuestPermission::ViewOnly);
-
-    // Pick a survivor Bob will try (and fail) to move, and remember where
-    // they are right now.
-    let guest_target_survivor = confirmed
-        .survivors
-        .iter()
-        .find(|s| s.id != leader_candidate)
-        .map(|s| s.id)
-        .unwrap_or(leader_candidate);
-    let pre_attempt_pos = confirmed
-        .survivors
-        .iter()
-        .find(|s| s.id == guest_target_survivor)
-        .map(|s| (s.x, s.y))
-        .unwrap();
-
-    bob.send(ClientMsg::Cmd(PlayerCommand::MoveSurvivor {
-        survivor: guest_target_survivor,
-        x: 2,
-        y: 2,
-    }));
-    // Under ViewOnly, `can_issue` refuses the command outright — confirm no
-    // move_target is ever recorded and the position never leaves its spot.
-    let after_denied = drain_states_for(&bob, Duration::from_secs(2));
-    if let Some(s) = after_denied {
-        let sv = s.survivors.iter().find(|s| s.id == guest_target_survivor).unwrap();
-        assert_eq!(sv.move_target, None, "ViewOnly guest's MoveSurvivor must be refused");
-        assert_eq!((sv.x, sv.y), pre_attempt_pos, "position must not change under a refused command");
-    }
-
-    // Owner relaxes the policy to Build: the SAME guest, same command kind,
-    // now succeeds — proving the earlier refusal was the permission gate and
-    // not some unrelated bug.
-    alice.send(ClientMsg::SetGuestPermission { perm: GuestPermission::Build });
-    wait_state(&bob, |s| s.guest_perm == GuestPermission::Build);
-
-    bob.send(ClientMsg::Cmd(PlayerCommand::MoveSurvivor {
-        survivor: guest_target_survivor,
-        x: 2,
-        y: 2,
-    }));
-    let allowed = wait_state(&bob, |s| {
-        s.survivors
-            .iter()
-            .find(|sv| sv.id == guest_target_survivor)
-            .map(|sv| sv.move_target == Some((2, 2)))
-            .unwrap_or(false)
-    });
-    let moved_sv = allowed.survivors.iter().find(|s| s.id == guest_target_survivor).unwrap();
-    assert_eq!(moved_sv.move_target, Some((2, 2)), "guest's MoveSurvivor must succeed under Build");
+    // Guests have full command authority alongside the owner (see
+    // `GameState::can_issue`), so this must actually take effect.
+    let guest_led = wait_state(&alice, |s| s.leader == Some(other_candidate));
+    assert_eq!(
+        guest_led.leader,
+        Some(other_candidate),
+        "a guest's SetLeader must succeed — guests have full command authority"
+    );
 
     handle.stop();
 }

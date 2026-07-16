@@ -29,15 +29,17 @@ pub const DEFAULT_SAVE_PATH: &str = "/var/lib/frozen-city/world.bin";
 /// `GameState::corpses`/`graves` — births, death/burial and the thirst/Well
 /// system; V10: `GameState::livestock` — the Farmhouse / cow-sheep livestock
 /// resource system; V11: `Stockpile::gold`, `GameState::pending_caravan` —
-/// the Tunnel trade caravan). Bincode is positional, so without a header
-/// there'd be no way to tell one version's file from another's — and
-/// misreading one version as another would "collapse to None" in `load_at`
-/// and silently wipe a production world on the first deploy after a format
-/// change. Files WITHOUT any recognized prefix are decoded through the
-/// frozen V1 mirror (`legacy.rs`) and migrated all the way to V11; files
-/// with `MAGIC_V2`/`MAGIC_V3`/`MAGIC_V4`/`MAGIC_V5`/`MAGIC_V6`/`MAGIC_V7`/
-/// `MAGIC_V8`/`MAGIC_V9`/`MAGIC_V10` decode through the matching mirror and
-/// migrate the rest of the way.
+/// the Tunnel trade caravan; V12: `GameState::guest_perm` REMOVED — the
+/// tiered guest-permission system was retired, every guest now has full
+/// authority). Bincode is positional, so without a header there'd be no way
+/// to tell one version's file from another's — and misreading one version as
+/// another would "collapse to None" in `load_at` and silently wipe a
+/// production world on the first deploy after a format change. Files WITHOUT
+/// any recognized prefix are decoded through the frozen V1 mirror
+/// (`legacy.rs`) and migrated all the way to V12; files with
+/// `MAGIC_V2`/`MAGIC_V3`/`MAGIC_V4`/`MAGIC_V5`/`MAGIC_V6`/`MAGIC_V7`/
+/// `MAGIC_V8`/`MAGIC_V9`/`MAGIC_V10`/`MAGIC_V11` decode through the matching
+/// mirror and migrate the rest of the way.
 const MAGIC_V2: &[u8; 8] = b"FCWORLD2";
 const MAGIC_V3: &[u8; 8] = b"FCWORLD3";
 const MAGIC_V4: &[u8; 8] = b"FCWORLD4";
@@ -46,11 +48,12 @@ const MAGIC_V6: &[u8; 8] = b"FCWORLD6";
 const MAGIC_V7: &[u8; 8] = b"FCWORLD7";
 const MAGIC_V8: &[u8; 8] = b"FCWORLD8";
 const MAGIC_V9: &[u8; 8] = b"FCWORLD9";
-// One byte longer than every prior header — "FCWORLD" + "10"/"11" is 9
+// One byte longer than every prior header — "FCWORLD" + "10"/"11"/"12" is 9
 // bytes, not 8. `strip_prefix` works fine against a differently-sized slice;
 // only the const's own array-length annotation needs to match.
 const MAGIC_V10: &[u8; 9] = b"FCWORLD10";
 const MAGIC_V11: &[u8; 9] = b"FCWORLD11";
+const MAGIC_V12: &[u8; 9] = b"FCWORLD12";
 
 fn resolve_path() -> String {
     std::env::var("FC_WORLD_SAVE").unwrap_or_else(|_| DEFAULT_SAVE_PATH.to_string())
@@ -80,8 +83,8 @@ pub fn save_at(state: &GameState, path: &str) -> io::Result<()> {
     }
     let body =
         bincode::serialize(state).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    let mut bytes = Vec::with_capacity(MAGIC_V11.len() + body.len());
-    bytes.extend_from_slice(MAGIC_V11);
+    let mut bytes = Vec::with_capacity(MAGIC_V12.len() + body.len());
+    bytes.extend_from_slice(MAGIC_V12);
     bytes.extend_from_slice(&body);
     // Write to a sibling temp file and rename over the target: a kill mid-write
     // (the exact moment this feature exists to survive) leaves the previous,
@@ -103,76 +106,84 @@ pub fn load_at(path: &str) -> Option<GameState> {
 
 fn load_at_raw(path: &str) -> Option<GameState> {
     let bytes = fs::read(path).ok()?;
-    if let Some(body) = bytes.strip_prefix(MAGIC_V11.as_slice()) {
+    if let Some(body) = bytes.strip_prefix(MAGIC_V12.as_slice()) {
         return bincode::deserialize(body).ok();
+    }
+    if let Some(body) = bytes.strip_prefix(MAGIC_V11.as_slice()) {
+        // V11 (pre-guest-permission-removal): decode through the frozen V11
+        // mirror and migrate one hop to V12. The next autosave rewrites it
+        // as V12.
+        return bincode::deserialize::<crate::legacy::GameStateV11>(body)
+            .ok()
+            .map(GameState::from);
     }
     if let Some(body) = bytes.strip_prefix(MAGIC_V10.as_slice()) {
         // V10 (pre-trade-caravan): decode through the frozen V10 mirror and
-        // migrate one hop to V11. The next autosave rewrites it as V11.
+        // migrate two hops to V12. The next autosave rewrites it as V12.
         return bincode::deserialize::<crate::legacy::GameStateV10>(body)
             .ok()
             .map(GameState::from);
     }
     if let Some(body) = bytes.strip_prefix(MAGIC_V9.as_slice()) {
         // V9 (pre-livestock): decode through the frozen V9 mirror and
-        // migrate two hops to V11. The next autosave rewrites it as V11.
+        // migrate three hops to V12. The next autosave rewrites it as V12.
         return bincode::deserialize::<crate::legacy::GameStateV9>(body)
             .ok()
             .map(GameState::from);
     }
     if let Some(body) = bytes.strip_prefix(MAGIC_V8.as_slice()) {
         // V8 (pre-death/burial/thirst): decode through the frozen V8 mirror
-        // and migrate three hops to V11. The next autosave rewrites it as V11.
+        // and migrate four hops to V12. The next autosave rewrites it as V12.
         return bincode::deserialize::<crate::legacy::GameStateV8>(body)
             .ok()
             .map(GameState::from);
     }
     if let Some(body) = bytes.strip_prefix(MAGIC_V7.as_slice()) {
         // V7 (pre-wildlife/Tailor-Shop): decode through the frozen V7 mirror
-        // and migrate four hops to V11. The next autosave rewrites it as V11.
+        // and migrate five hops to V12. The next autosave rewrites it as V12.
         return bincode::deserialize::<crate::legacy::GameStateV7>(body)
             .ok()
             .map(GameState::from);
     }
     if let Some(body) = bytes.strip_prefix(MAGIC_V6.as_slice()) {
         // V6 (pre-Tunnel-migrants): decode through the frozen V6 mirror and
-        // migrate five hops to V11. The next autosave rewrites it as V11.
+        // migrate six hops to V12. The next autosave rewrites it as V12.
         return bincode::deserialize::<crate::legacy::GameStateV6>(body)
             .ok()
             .map(GameState::from);
     }
     if let Some(body) = bytes.strip_prefix(MAGIC_V5.as_slice()) {
         // V5 (pre-chop/carry): decode through the frozen V5 mirror and
-        // migrate six hops to V11. The next autosave rewrites it as V11.
+        // migrate seven hops to V12. The next autosave rewrites it as V12.
         return bincode::deserialize::<crate::legacy::GameStateV5>(body)
             .ok()
             .map(GameState::from);
     }
     if let Some(body) = bytes.strip_prefix(MAGIC_V4.as_slice()) {
         // V4 (pre-building-levels): decode through the frozen V4 mirror and
-        // migrate seven hops to V11. The next autosave rewrites it as V11.
+        // migrate eight hops to V12. The next autosave rewrites it as V12.
         return bincode::deserialize::<crate::legacy::GameStateV4>(body)
             .ok()
             .map(GameState::from);
     }
     if let Some(body) = bytes.strip_prefix(MAGIC_V3.as_slice()) {
         // V3 (pre-survivor-management): decode through the frozen V3 mirror
-        // and migrate eight hops to V11. The next autosave rewrites it as V11.
+        // and migrate nine hops to V12. The next autosave rewrites it as V12.
         return bincode::deserialize::<crate::legacy::GameStateV3>(body)
             .ok()
             .map(GameState::from);
     }
     if let Some(body) = bytes.strip_prefix(MAGIC_V2.as_slice()) {
         // V2 (pre-account-ownership/contribution-ledger): decode through the
-        // frozen V2 mirror and migrate nine hops to V11. The next autosave
-        // rewrites it as V11.
+        // frozen V2 mirror and migrate ten hops to V12. The next autosave
+        // rewrites it as V12.
         return bincode::deserialize::<crate::legacy::GameStateV2>(body)
             .ok()
             .map(GameState::from);
     }
     // No recognized header: a save written before versioning existed at
     // all — decode it through the frozen V1 mirror and migrate all the way
-    // to V11. The next autosave rewrites it as V11.
+    // to V12. The next autosave rewrites it as V12.
     bincode::deserialize::<crate::legacy::GameStateV1>(&bytes)
         .ok()
         .map(GameState::from)
@@ -322,7 +333,7 @@ mod tests {
             blizzard_until: modern.blizzard_until,
             pending_event: modern.pending_event,
             event_rng: modern.event_rng,
-            guest_perm: modern.guest_perm,
+            guest_perm: fc_game::types::GuestPermission::Build,
             owner_id: modern.owner_id,
             next_id: modern.next_id,
             rng: modern.rng,
@@ -411,7 +422,7 @@ mod tests {
             blizzard_until: modern.blizzard_until,
             pending_event: modern.pending_event,
             event_rng: modern.event_rng,
-            guest_perm: modern.guest_perm,
+            guest_perm: fc_game::types::GuestPermission::Build,
             owner_id: modern.owner_id,
             next_id: modern.next_id,
             rng: modern.rng,
@@ -496,7 +507,7 @@ mod tests {
             blizzard_until: modern.blizzard_until,
             pending_event: modern.pending_event,
             event_rng: modern.event_rng,
-            guest_perm: modern.guest_perm,
+            guest_perm: fc_game::types::GuestPermission::Build,
             owner_id: modern.owner_id,
             next_id: modern.next_id,
             rng: modern.rng,
@@ -591,7 +602,7 @@ mod tests {
             blizzard_until: modern.blizzard_until,
             pending_event: modern.pending_event,
             event_rng: modern.event_rng,
-            guest_perm: modern.guest_perm,
+            guest_perm: fc_game::types::GuestPermission::Build,
             owner_id: modern.owner_id,
             next_id: modern.next_id,
             rng: modern.rng,
@@ -682,7 +693,7 @@ mod tests {
             blizzard_until: modern.blizzard_until,
             pending_event: modern.pending_event,
             event_rng: modern.event_rng,
-            guest_perm: modern.guest_perm,
+            guest_perm: fc_game::types::GuestPermission::Build,
             owner_id: modern.owner_id,
             next_id: modern.next_id,
             rng: modern.rng,
@@ -766,7 +777,7 @@ mod tests {
             blizzard_until: modern.blizzard_until,
             pending_event: modern.pending_event,
             event_rng: modern.event_rng,
-            guest_perm: modern.guest_perm,
+            guest_perm: fc_game::types::GuestPermission::Build,
             owner_id: modern.owner_id,
             next_id: modern.next_id,
             rng: modern.rng,
@@ -851,7 +862,7 @@ mod tests {
             blizzard_until: modern.blizzard_until,
             pending_event: modern.pending_event,
             event_rng: modern.event_rng,
-            guest_perm: modern.guest_perm,
+            guest_perm: fc_game::types::GuestPermission::Build,
             owner_id: modern.owner_id,
             next_id: modern.next_id,
             rng: modern.rng,
@@ -947,7 +958,7 @@ mod tests {
             blizzard_until: modern.blizzard_until,
             pending_event: modern.pending_event,
             event_rng: modern.event_rng,
-            guest_perm: modern.guest_perm,
+            guest_perm: fc_game::types::GuestPermission::Build,
             owner_id: modern.owner_id,
             next_id: modern.next_id,
             rng: modern.rng,
@@ -1028,7 +1039,7 @@ mod tests {
             blizzard_until: modern.blizzard_until,
             pending_event: modern.pending_event,
             event_rng: modern.event_rng,
-            guest_perm: modern.guest_perm,
+            guest_perm: fc_game::types::GuestPermission::Build,
             owner_id: modern.owner_id,
             next_id: modern.next_id,
             rng: modern.rng,
@@ -1107,7 +1118,7 @@ mod tests {
             blizzard_until: modern.blizzard_until,
             pending_event: modern.pending_event,
             event_rng: modern.event_rng,
-            guest_perm: modern.guest_perm,
+            guest_perm: fc_game::types::GuestPermission::Build,
             owner_id: modern.owner_id,
             next_id: modern.next_id,
             rng: modern.rng,
@@ -1142,6 +1153,87 @@ mod tests {
         // And once re-saved (V11, with header), it round-trips as-is.
         save_at(&loaded, &path).unwrap();
         assert_eq!(load_at(&path).expect("V11 reload"), loaded);
+        fs::remove_file(&path).ok();
+    }
+
+    /// A world saved under `FCWORLD11` (pre-guest-permission-removal: still
+    /// carries `guest_perm`, the last field V12 dropped) must load and
+    /// migrate one hop to V12 — same non-negotiable "never collapses to
+    /// None" guarantee as V1..V10. Deliberately uses a `guest_perm` value
+    /// (`ViewOnly`) that doesn't match any default, to prove the field is
+    /// genuinely dropped rather than coincidentally ignored.
+    #[test]
+    fn v11_save_migrates() {
+        use crate::legacy::GameStateV11;
+
+        let path = throwaway_path("v11-migrate");
+        let mut modern = sim::new_game(111, 12);
+        sim::player_joined(&mut modern, 14, "Sardor");
+        modern.graduated = true;
+        let v11 = GameStateV11 {
+            tick: modern.tick,
+            win_days: modern.win_days,
+            tiles: modern.tiles.clone(),
+            buildings: modern.buildings.clone(),
+            survivors: modern.survivors.clone(),
+            stock: modern.stock,
+            furnace_level: modern.furnace_level,
+            furnace_lit: modern.furnace_lit,
+            cold_snap: modern.cold_snap,
+            players: modern.players.clone(),
+            phase: modern.phase,
+            events: modern.events.clone(),
+            total_events: modern.total_events,
+            chat: modern.chat.clone(),
+            total_chat: modern.total_chat,
+            pings: modern.pings.clone(),
+            missions: modern.missions.clone(),
+            tunnel: modern.tunnel,
+            graduated: modern.graduated,
+            central: modern.central,
+            techs: modern.techs.clone(),
+            disease_until: modern.disease_until,
+            blizzard_until: modern.blizzard_until,
+            pending_event: modern.pending_event,
+            event_rng: modern.event_rng,
+            guest_perm: fc_game::types::GuestPermission::ViewOnly,
+            owner_id: modern.owner_id,
+            next_id: modern.next_id,
+            rng: modern.rng,
+            central_ledger: modern.central_ledger.clone(),
+            leader: modern.leader,
+            mourning_until: modern.mourning_until,
+            morale: modern.morale,
+            pending_migrant: modern.pending_migrant,
+            wildlife: modern.wildlife,
+            corpses: modern.corpses.clone(),
+            graves: modern.graves.clone(),
+            livestock: modern.livestock,
+            pending_caravan: modern.pending_caravan.clone(),
+        };
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(MAGIC_V11);
+        bytes.extend_from_slice(&bincode::serialize(&v11).unwrap());
+        fs::write(&path, bytes).unwrap();
+
+        let loaded = load_at(&path).expect("V11 save must migrate, never wipe");
+        assert_eq!(loaded.survivors, modern.survivors);
+        assert_eq!(loaded.players, modern.players);
+        assert!(loaded.graduated, "graduation must survive migration");
+        assert_eq!(loaded.stock, modern.stock);
+        assert_eq!(loaded.buildings, modern.buildings);
+        assert_eq!(loaded.wildlife, modern.wildlife);
+        assert_eq!(loaded.livestock, modern.livestock);
+        assert_eq!(loaded.corpses, modern.corpses);
+        assert_eq!(loaded.graves, modern.graves);
+        assert_eq!(
+            loaded.pending_caravan, modern.pending_caravan,
+            "V11 already has the trade caravan"
+        );
+
+        // And once re-saved (V12, with header), it round-trips as-is.
+        save_at(&loaded, &path).unwrap();
+        assert_eq!(load_at(&path).expect("V12 reload"), loaded);
         fs::remove_file(&path).ok();
     }
 

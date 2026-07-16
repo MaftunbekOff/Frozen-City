@@ -157,23 +157,6 @@ fn central_world_may_never_dispatch_a_caravan() {
 }
 
 #[test]
-fn guest_may_dispatch_caravan_under_build_but_not_view_only() {
-    let mut state = sim::new_game(SEED, 12);
-    sim::player_joined(&mut state, 1, "Owner");
-    sim::player_joined(&mut state, 2, "Guest");
-    assert_eq!(state.guest_perm, GuestPermission::Build, "default policy is Build");
-
-    let cmd = PlayerCommand::DispatchTradeCaravan { good: TradeGood::Wood, amount: 20, selling: true };
-    assert!(
-        state.can_issue(2, &cmd),
-        "guests should be able to help dispatch a caravan under Build, same as InvestTunnel"
-    );
-
-    sim::set_guest_permission(&mut state, GuestPermission::ViewOnly);
-    assert!(!state.can_issue(2, &cmd), "ViewOnly guests may not issue any world-changing command");
-}
-
-#[test]
 fn buy_then_sell_prices_have_a_market_spread() {
     // A round trip (buy then immediately sell the same amount back) must
     // never be free money — otherwise trading isn't a real economic choice.

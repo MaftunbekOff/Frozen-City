@@ -87,10 +87,9 @@ pub fn spawn_menu(
 /// Tablet/Desktop) — a big title, subtitle and accent bar, the primary Play
 /// actions, and a two-button row that opens the Account / Settings modals.
 /// Account and Settings themselves live in overlays ([`spawn_overlay`]) so the
-/// landing stays to clean actions, the way a polished game menu does. Region
-/// only appears on wasm (see `RegionButton`'s doc). The final step spawns the
-/// currently-open `overlay` on top, so every rebuild (open, close, language)
-/// re-renders it in the current state.
+/// landing stays to clean actions, the way a polished game menu does. The
+/// final step spawns the currently-open `overlay` on top, so every rebuild
+/// (open, close, language) re-renders it in the current state.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_menu(
     mut commands: Commands,
@@ -218,33 +217,6 @@ pub(crate) fn build_menu(
                                 ));
                             });
                     }
-                });
-
-                // ---------------------------------------------------Region
-                // Which reverse-proxy path (and thus which independent
-                // region-server process) Join/sign-in dial. Native desktop
-                // only ever dials a LAN address directly, so this section is
-                // browser-only.
-                #[cfg(target_arch = "wasm32")]
-                col.spawn(menu_section()).with_children(|section| {
-                    section.spawn(theme::section(mtxt::section_region(lang)));
-                    section.spawn(theme::divider());
-                    section.spawn(theme::text(mtxt::region_label(lang), theme::FS_SMALL, theme::TEXT_MUTED));
-                    section
-                        .spawn(menu_row())
-                        .with_children(|row| {
-                            for (n, path) in [(1u8, "/ws"), (2, "/ws-r2"), (3, "/ws-r3")] {
-                                row.spawn(theme::button(Val::Percent(100.0 / 3.0), ff.btn_h(), theme::BTN))
-                                    .insert(RegionButton(path))
-                                    .with_children(|b| {
-                                        b.spawn(theme::text(
-                                            mtxt::region_name(n, lang),
-                                            theme::FS_SMALL,
-                                            theme::TEXT_PRIMARY,
-                                        ));
-                                    });
-                            }
-                        });
                 });
 
                 // ------------------------------------- Account / Settings

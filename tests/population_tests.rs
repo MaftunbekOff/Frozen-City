@@ -475,21 +475,3 @@ fn central_world_settlers_never_get_buried() {
     );
 }
 
-#[test]
-fn guest_may_bury_under_build_but_not_view_only() {
-    let mut state = sim::new_game(SEED, 12);
-    sim::player_joined(&mut state, 1, "Owner");
-    sim::player_joined(&mut state, 2, "Guest");
-    assert_eq!(state.guest_perm, GuestPermission::Build, "default policy is Build");
-
-    assert!(
-        state.can_issue(2, &PlayerCommand::Bury { survivor: 1, corpse: 1 }),
-        "guests should be able to help with burial under Build, same as ChopTile/MoveSurvivor"
-    );
-
-    sim::set_guest_permission(&mut state, GuestPermission::ViewOnly);
-    assert!(
-        !state.can_issue(2, &PlayerCommand::Bury { survivor: 1, corpse: 1 }),
-        "ViewOnly guests may not issue any world-changing command"
-    );
-}

@@ -4,7 +4,7 @@
 
 use std::time::{Duration, Instant};
 
-use frozen_city::game::types::{BuildingKind, GameState, GuestPermission, PlayerCommand};
+use frozen_city::game::types::{BuildingKind, GameState, PlayerCommand};
 use frozen_city::net::client::{self, ClientConn};
 use frozen_city::net::protocol::{ClientMsg, ServerMsg};
 use frozen_city::net::server::{self, ServerConfig};
@@ -70,10 +70,11 @@ fn some_tent_spot(state: &GameState) -> (u8, u8) {
         .expect("some valid tent spot")
 }
 
-/// The owner is whoever connects first; a `Build`-policy guest may place
-/// buildings by default, and the owner sees them appear.
+/// The owner is whoever connects first; a guest may place buildings (guests
+/// have full command authority alongside the owner), and the owner sees them
+/// appear.
 #[test]
-fn guest_can_place_under_default_build_permission() {
+fn guest_can_place_by_default() {
     let handle = start_server(2001);
     let addr = addr_of(&handle);
 
@@ -100,93 +101,6 @@ fn guest_can_place_under_default_build_permission() {
             .any(|b| b.kind == BuildingKind::Tent && b.owner == Some(carol_id))
     });
     assert_eq!(seen.buildings.len(), 3, "furnace + tunnel + the guest's tent");
-
-    handle.stop();
-}
-
-/// `SetFurnaceLevel` is owner-only authority (not just an owner-only admin
-/// message like Kick/SetGuestPermission — it's gated by `can_issue` under
-/// every guest policy except Full); a guest's attempt must be silently
-/// rejected and never show up in any later snapshot.
-#[test]
-fn guest_set_furnace_level_is_rejected() {
-    let handle = start_server(2002);
-    let addr = addr_of(&handle);
-
-    let bob = client::connect_tcp(&addr, "Bob", None).expect("bob connects");
-    let (_bob_id, _bob_token, bob_state) = recv_welcome(&bob);
-    let starting_level = bob_state.furnace_level;
-
-    let carol = client::connect_tcp(&addr, "Carol", None).expect("carol connects");
-    let (_carol_id, _carol_token, _) = recv_welcome(&carol);
-
-    wait_state(&bob, |s| s.players.len() == 2);
-
-    // Sanity: the game must not already start at the level we're about to
-    // (illegitimately) request, or a no-op would look like a pass.
-    assert_ne!(starting_level, 3, "test setup assumes the game doesn't start at level 3");
-    carol.send(ClientMsg::Cmd(PlayerCommand::SetFurnaceLevel { level: 3 }));
-
-    // Watch a handful of subsequent snapshots: the level must never move.
-    let mut checked = 0;
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < deadline && checked < 10 {
-        if let Ok(ServerMsg::State { state, .. }) = bob.recv_timeout(Duration::from_millis(500)) {
-            assert_eq!(
-                state.furnace_level, starting_level,
-                "guest must not be able to change the furnace level"
-            );
-            checked += 1;
-        }
-    }
-    assert!(checked > 0, "expected to observe at least one snapshot");
-
-    handle.stop();
-}
-
-/// The owner can tighten the guest policy to `ViewOnly` at runtime, and it
-/// takes effect immediately: a guest's subsequent Place becomes a no-op.
-#[test]
-fn owner_can_restrict_guests_to_view_only() {
-    let handle = start_server(2003);
-    let addr = addr_of(&handle);
-
-    let bob = client::connect_tcp(&addr, "Bob", None).expect("bob connects");
-    let (_bob_id, _bob_token, _) = recv_welcome(&bob);
-
-    let carol = client::connect_tcp(&addr, "Carol", None).expect("carol connects");
-    let (_carol_id, _carol_token, carol_state) = recv_welcome(&carol);
-
-    wait_state(&bob, |s| s.players.len() == 2);
-
-    bob.send(ClientMsg::SetGuestPermission { perm: GuestPermission::ViewOnly });
-    // Wait for the policy change to actually propagate before testing
-    // enforcement, rather than relying on timing.
-    let after_policy = wait_state(&carol, |s| s.guest_perm == GuestPermission::ViewOnly);
-    let building_count_before = after_policy.buildings.len();
-
-    let spot = some_tent_spot(&carol_state);
-    carol.send(ClientMsg::Cmd(PlayerCommand::Place {
-        kind: BuildingKind::Tent,
-        x: spot.0,
-        y: spot.1,
-    }));
-
-    // Watch a handful of subsequent snapshots: the building count must never
-    // increase once ViewOnly is in effect.
-    let mut checked = 0;
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < deadline && checked < 10 {
-        if let Ok(ServerMsg::State { state, .. }) = bob.recv_timeout(Duration::from_millis(500)) {
-            assert_eq!(
-                state.buildings.len(),
-                building_count_before,
-                "guest Place must be a no-op under ViewOnly"
-            );
-            checked += 1;
-        }
-    }
-    assert!(checked > 0, "expected to observe at least one snapshot");
 
     handle.stop();
 }

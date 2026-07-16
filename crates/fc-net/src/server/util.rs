@@ -1,12 +1,6 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-/// True on processes (extra region servers) where account login and the
-/// central world are switched off — see `ACCOUNTS_DISABLED_REASON`.
-pub(crate) fn accounts_disabled() -> bool {
-    std::env::var("FC_DISABLE_ACCOUNTS").is_ok_and(|v| !v.is_empty() && v != "0")
-}
-
 /// In-process registration throttle: at most this many new accounts per
 /// sliding minute, across all connections. bcrypt hashing is also CPU-heavy,
 /// so this doubles as a hash-flood guard.

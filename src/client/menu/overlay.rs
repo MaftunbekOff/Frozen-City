@@ -15,7 +15,7 @@ use bevy::prelude::*;
 use super::super::i18n::Lang;
 use super::super::i18n_menu as mtxt;
 use super::super::theme::{self, BaseColor, FormFactor};
-use super::super::{AudioSettings, GameView, QualityPref, Settings};
+use super::super::{AudioSettings, GameView, QualityPref, Screen, Settings};
 use super::*;
 
 /// Which overlay modal is open over the menu landing (see `layout::build_menu`).
@@ -28,7 +28,14 @@ pub enum MenuOverlay {
 }
 
 /// The scrim + modal despawn root, a sibling of `MenuRoot`. Rebuilt whenever
-/// the open overlay (or the language) changes.
+/// the open overlay (or the language) changes — see `overlay_buttons`'s
+/// manual despawn+respawn for that same-state case, same reasoning as
+/// `MenuRoot`'s doc comment. Unlike `MenuRoot`, this ALSO carries
+/// `DespawnOnExit(Screen::Menu)` (see `spawn_overlay`): a real production
+/// bug had a successful Login/Register leave this modal orphaned on top of
+/// the game — `account_login_button`'s and `handle_control_action`'s Submit
+/// paths call `next.set(Screen::Game)` but never explicitly close the
+/// overlay, and without this marker nothing else ever did either.
 #[derive(Component)]
 pub(crate) struct OverlayRoot;
 
@@ -57,7 +64,7 @@ pub(crate) fn spawn_overlay(
         MenuOverlay::Settings => mtxt::section_settings(lang),
     };
     commands
-        .spawn((theme::scrim(ff), OverlayRoot, GlobalZIndex(10)))
+        .spawn((theme::scrim(ff), OverlayRoot, GlobalZIndex(10), DespawnOnExit(Screen::Menu)))
         .with_children(|scrim| {
             // The panel itself captures clicks (its own `Interaction`) so a
             // click inside the modal never falls through to anything behind.

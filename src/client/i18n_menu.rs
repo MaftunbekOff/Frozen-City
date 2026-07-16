@@ -41,16 +41,6 @@ pub fn section_account(l: Lang) -> &'static str {
     }
 }
 
-/// Only shown on wasm (the region picker section, see `RegionButton`'s doc).
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-pub fn section_region(l: Lang) -> &'static str {
-    match l {
-        Lang::Uz => "MINTAQA",
-        Lang::En => "REGION",
-        Lang::Ru => "РЕГИОН",
-    }
-}
-
 pub fn section_settings(l: Lang) -> &'static str {
     match l {
         Lang::Uz => "SOZLAMALAR",
@@ -98,28 +88,6 @@ pub fn btn_quit(l: Lang) -> &'static str {
         Lang::Uz => "Chiqish",
         Lang::En => "Quit",
         Lang::Ru => "Выход",
-    }
-}
-
-// ------------------------------------------------------------------- region
-
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-pub fn region_label(l: Lang) -> &'static str {
-    match l {
-        Lang::Uz => "Mintaqa:",
-        Lang::En => "Region:",
-        Lang::Ru => "Регион:",
-    }
-}
-
-/// `region_name(1, l)` .. `region_name(3, l)` — labels for the three
-/// region-server picker buttons (browser build only).
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-pub fn region_name(n: u8, l: Lang) -> String {
-    match l {
-        Lang::Uz => format!("{n}-mintaqa"),
-        Lang::En => format!("Region {n}"),
-        Lang::Ru => format!("Регион {n}"),
     }
 }
 
@@ -275,7 +243,7 @@ pub fn err_register_fields_required(l: Lang) -> &'static str {
 
 // ------------------------------------------------------------------- errors
 
-/// `"Could not join {addr}: {e}"` — a failed dial (Join, region switch,
+/// `"Could not join {addr}: {e}"` — a failed dial (Join, world switch,
 /// account login/register, reconnection).
 pub fn err_could_not_join(l: Lang, addr: &str, e: &str) -> String {
     match l {

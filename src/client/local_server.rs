@@ -95,8 +95,8 @@ pub fn tick(mut server: ResMut<ServerRes>, time: Res<Time>) {
                         | ClientMsg::RefreshShowcase
                         | ClientMsg::SetVisitPolicy { .. },
                     ) => {}
-                    // Singleplayer is a solo owner: no guests to gate or kick.
-                    Ok(ClientMsg::SetGuestPermission { .. } | ClientMsg::Kick { .. }) => {}
+                    // Singleplayer is a solo owner: nobody to kick.
+                    Ok(ClientMsg::Kick { .. }) => {}
                     Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
                 }
             }

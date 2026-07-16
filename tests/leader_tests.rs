@@ -23,14 +23,15 @@ fn find_sawmill_spot_near_forest(state: &GameState) -> (u8, u8) {
 }
 
 #[test]
-fn set_leader_records_the_survivor_and_is_owner_gated() {
+fn set_leader_records_the_survivor_and_guests_may_issue_it_too() {
     let mut state = sim::new_game(SEED, 12);
     sim::player_joined(&mut state, 1, "Owner");
     sim::player_joined(&mut state, 2, "Guest");
     let candidate = state.survivors[0].id;
 
-    // Default guest policy (Build) does not include SetLeader.
-    assert!(!state.can_issue(2, &PlayerCommand::SetLeader { survivor: candidate }));
+    // Guests have full command authority alongside the owner (see
+    // `GameState::can_issue`), so both may issue SetLeader.
+    assert!(state.can_issue(2, &PlayerCommand::SetLeader { survivor: candidate }));
     assert!(state.can_issue(1, &PlayerCommand::SetLeader { survivor: candidate }));
 
     sim::apply_command(&mut state, 1, &PlayerCommand::SetLeader { survivor: candidate });

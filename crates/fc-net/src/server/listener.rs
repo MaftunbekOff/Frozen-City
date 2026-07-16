@@ -28,13 +28,10 @@ const SERVER_FULL_REASON: &str = "Server hozircha to'la, birozdan so'ng qayta ur
 const NOT_GRADUATED_REASON: &str =
     "Global Olamga o'tish uchun avval shaxsiy olamda Tunnelni qurib bitiring.";
 
-/// Sent back as `ServerMsg::AuthFailed` for a `Login`/`EnterCentral` on a
-/// process that has accounts disabled (`FC_DISABLE_ACCOUNTS`, set on the
-/// extra region servers): each process has its own `WorldManager`, so letting
-/// accounts in there would silently fork one account's "single" personal
-/// world into per-region copies — accounts live on the main region only.
-const ACCOUNTS_DISABLED_REASON: &str =
-    "Akkaunt bilan kirish faqat asosiy regionda ishlaydi. Asosiy regionni tanlang.";
+/// Sent back as `ServerMsg::AuthFailed` for a `VisitFriend`/`EnterCentral` on
+/// a process with no `WorldManager` at all (a guest-only co-op host, or a
+/// test harness) — these features are inherently account-based.
+const NO_ACCOUNTS_REASON: &str = "Bu server akkaunt funksiyalarini qo'llab-quvvatlamaydi.";
 
 /// Sent back as `ServerMsg::AuthFailed` for a `VisitFriend` with no standing
 /// invite (or an expired one).
@@ -53,8 +50,6 @@ const REGISTER_THROTTLED_REASON: &str =
 /// Hard cap on concurrent accepted connections (native, WebSocket and plain
 /// HTTP all share this accept path), so a connection flood can't spawn
 /// unbounded OS threads and exhaust memory/handles.
-// Per-process: when several regions run side by side on one box, each gets
-// its own independent 128-connection budget, not a shared one.
 const MAX_CONNECTIONS: usize = 128;
 
 pub(crate) fn accept_loop(
@@ -167,9 +162,6 @@ pub(crate) fn route_first_msg(
             password,
             name,
         } => {
-            if accounts_disabled() {
-                return FirstMsgOutcome::Refused(ACCOUNTS_DISABLED_REASON);
-            }
             if register_throttled() {
                 return FirstMsgOutcome::Refused(REGISTER_THROTTLED_REASON);
             }
@@ -206,9 +198,6 @@ pub(crate) fn route_first_msg(
             host,
             token,
         } => {
-            if accounts_disabled() {
-                return FirstMsgOutcome::Refused(ACCOUNTS_DISABLED_REASON);
-            }
             match accounts::authenticate(&login, &password) {
                 Some((account_id, display_name)) => {
                     let name = sanitize_name(&display_name);
@@ -225,7 +214,7 @@ pub(crate) fn route_first_msg(
                                 FirstMsgOutcome::Refused(SERVER_FULL_REASON)
                             }
                         },
-                        None => FirstMsgOutcome::Refused(ACCOUNTS_DISABLED_REASON),
+                        None => FirstMsgOutcome::Refused(NO_ACCOUNTS_REASON),
                     }
                 }
                 None => FirstMsgOutcome::Refused(AUTH_FAILED_REASON),
@@ -236,9 +225,6 @@ pub(crate) fn route_first_msg(
             password,
             token,
         } => {
-            if accounts_disabled() {
-                return FirstMsgOutcome::Refused(ACCOUNTS_DISABLED_REASON);
-            }
             match accounts::authenticate(&login, &password) {
                 Some((account_id, display_name)) => {
                     let name = sanitize_name(&display_name);
@@ -265,9 +251,6 @@ pub(crate) fn route_first_msg(
             password,
             token,
         } => {
-            if accounts_disabled() {
-                return FirstMsgOutcome::Refused(ACCOUNTS_DISABLED_REASON);
-            }
             match accounts::authenticate(&login, &password) {
                 Some((account_id, display_name)) => {
                     let name = sanitize_name(&display_name);
@@ -284,7 +267,7 @@ pub(crate) fn route_first_msg(
                             }
                         },
                         // Only the dedicated server has a central world.
-                        None => FirstMsgOutcome::Refused(ACCOUNTS_DISABLED_REASON),
+                        None => FirstMsgOutcome::Refused(NO_ACCOUNTS_REASON),
                     }
                 }
                 None => FirstMsgOutcome::Refused(AUTH_FAILED_REASON),

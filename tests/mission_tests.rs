@@ -147,25 +147,6 @@ fn invest_tunnel_is_a_noop_while_locked() {
 }
 
 #[test]
-fn guest_may_invest_tunnel_under_build_but_not_view_only() {
-    let mut state = sim::new_game(5, 12);
-    sim::player_joined(&mut state, 1, "Owner");
-    sim::player_joined(&mut state, 2, "Guest");
-    assert_eq!(state.guest_perm, GuestPermission::Build, "default policy is Build");
-
-    assert!(
-        state.can_issue(2, &PlayerCommand::InvestTunnel),
-        "guests should be able to pitch in on the shared Tunnel goal under Build"
-    );
-
-    sim::set_guest_permission(&mut state, GuestPermission::ViewOnly);
-    assert!(
-        !state.can_issue(2, &PlayerCommand::InvestTunnel),
-        "ViewOnly guests may not issue any world-changing command"
-    );
-}
-
-#[test]
 fn min_win_days_never_pre_empts_the_survive_mission() {
     // Day-based victory returns from tick() before missions are evaluated, so
     // the configurable day-victory floor MUST outlast the longest SurviveDays

@@ -1,11 +1,10 @@
 //! End-to-end test for V0.6's invite / guest co-op acceptance criteria
-//! (ROADMAP.md V0.6 "Natija mezonlari": kick and permission limits are
-//! confirmed by test). Drives the real flow over the wire: two graduated
-//! accounts meet in the central world, the host `Invite`s the guest, the
-//! guest leaves the central world and `VisitFriend`s into the host's
-//! personal world, and from there the usual `GuestPermission`/`Kick`
-//! machinery (already covered in isolation by `roles_e2e.rs`) is exercised
-//! specifically through the visit path. Same harness style as
+//! (ROADMAP.md V0.6 "Natija mezonlari": kick is confirmed by test). Drives
+//! the real flow over the wire: two graduated accounts meet in the central
+//! world, the host `Invite`s the guest, the guest leaves the central world
+//! and `VisitFriend`s into the host's personal world, and from there the
+//! usual `Kick` machinery (already covered in isolation by `roles_e2e.rs`)
+//! is exercised specifically through the visit path. Same harness style as
 //! `central_world_e2e.rs` / `account_world_e2e.rs`.
 //!
 //! Per the concurrency note for this work: Agent B is in flight on
@@ -21,7 +20,7 @@
 use std::time::{Duration, Instant};
 
 use frozen_city::game::sim;
-use frozen_city::game::types::{BuildingKind, GameState, GuestPermission, PlayerCommand, Role};
+use frozen_city::game::types::{BuildingKind, GameState, PlayerCommand, Role};
 use frozen_city::net::client::{self, ClientConn};
 use frozen_city::net::persist;
 use frozen_city::net::protocol::{ClientMsg, ServerMsg};
@@ -147,21 +146,6 @@ fn some_tent_spot(state: &GameState) -> (u8, u8) {
         .flat_map(|y| (0..64u8).map(move |x| (x, y)))
         .find(|&(x, y)| state.can_place(BuildingKind::Tent, x, y).is_ok())
         .expect("some valid tent spot")
-}
-
-/// A second valid tent spot, far enough from `first` that placing a tent at
-/// `first` can't invalidate it. Both spots must be picked from a FULL state
-/// (the `Welcome` snapshot): delta `State` messages omit `tiles` on most
-/// ticks, and `can_place` -> `tile()` panics (index out of bounds) on an
-/// empty tile grid — see the quirk note in this test's final report.
-fn second_tent_spot(state: &GameState, first: (u8, u8)) -> (u8, u8) {
-    (0..64u8)
-        .flat_map(|y| (0..64u8).map(move |x| (x, y)))
-        .find(|&(x, y)| {
-            let far = (x as i16 - first.0 as i16).abs().max((y as i16 - first.1 as i16).abs()) >= 4;
-            far && state.can_place(BuildingKind::Tent, x, y).is_ok()
-        })
-        .expect("a second, far-away valid tent spot")
 }
 
 fn login_msg(login: &str, password: &str) -> ClientMsg {
@@ -306,11 +290,6 @@ fn invite_and_visit_flow() {
         .expect("host goes home");
     let (host_home_pid, host_home_state) = recv_welcome(&host_home);
     assert!(!host_home_state.central);
-    assert_eq!(
-        host_home_state.guest_perm,
-        GuestPermission::Build,
-        "personal worlds default to Build for guests"
-    );
 
     // --- (a) The visitor joins as Guest, not Owner; owner role stays
     // pinned to the host account no matter who is/was first in the roster. ---
@@ -328,8 +307,8 @@ fn invite_and_visit_flow() {
         .expect("guestly is in the roster");
     assert_eq!(guestly_role, Role::Guest);
 
-    // --- (c) Under the default Build permission the visitor CAN build, and
-    // the event feed attributes it to the visitor's own display name. ---
+    // --- (c) The visitor (a guest with full command authority) CAN build,
+    // and the event feed attributes it to the visitor's own display name. ---
     let spot = some_tent_spot(&guestly_visit_state);
     guestly_visit.send(ClientMsg::Cmd(PlayerCommand::Place {
         kind: BuildingKind::Tent,
@@ -351,42 +330,7 @@ fn invite_and_visit_flow() {
         built_state.events
     );
 
-    // --- (b) Tighten to ViewOnly: the visitor's next Place is a no-op. ---
-    host_home.send(ClientMsg::SetGuestPermission { perm: GuestPermission::ViewOnly });
-    let after_policy = wait_state(&guestly_visit, |s| s.guest_perm == GuestPermission::ViewOnly);
-    let building_count_before = after_policy.buildings.len();
-    // Picked from the full Welcome state, NOT `after_policy` (a delta
-    // snapshot whose `tiles` are omitted — `can_place` panics on those).
-    let spot2 = second_tent_spot(&guestly_visit_state, spot);
-    guestly_visit.send(ClientMsg::Cmd(PlayerCommand::Place {
-        kind: BuildingKind::Tent,
-        x: spot2.0,
-        y: spot2.1,
-    }));
-    // host_home's queue may still hold snapshots from before the guest's
-    // tent existed (it was last drained well before step (c)) — sync it to
-    // the present first, or the first recv below reads stale history and
-    // fails spuriously (buildings 1 vs 2).
-    wait_state(&host_home, |s| s.buildings.len() == building_count_before);
-    let mut checked = 0;
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < deadline && checked < 10 {
-        if let Ok(ServerMsg::State { state, .. }) = host_home.recv_timeout(Duration::from_millis(500)) {
-            assert_eq!(
-                state.buildings.len(),
-                building_count_before,
-                "guest Place must be a no-op under ViewOnly, even for an invited visitor"
-            );
-            checked += 1;
-        }
-    }
-    assert!(checked > 0, "expected to observe at least one snapshot under ViewOnly");
-
     // --- (d) Kick disconnects the visitor. ---
-    // Restore Build first so we can be sure the disconnect below is really
-    // from Kick, not a lingering ViewOnly side effect.
-    host_home.send(ClientMsg::SetGuestPermission { perm: GuestPermission::Build });
-    wait_state(&guestly_visit, |s| s.guest_perm == GuestPermission::Build);
     host_home.send(ClientMsg::Kick { target: guestly_pid });
     wait_state(&host_home, |s| s.players.len() == 1);
     let deadline = Instant::now() + Duration::from_secs(10);

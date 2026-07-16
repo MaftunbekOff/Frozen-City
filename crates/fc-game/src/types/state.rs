@@ -66,8 +66,6 @@ pub struct GameState {
     /// Private RNG stream for events, kept separate from the main sim RNG so
     /// adding events never perturbs mapgen/cold-snap/arrival determinism.
     pub event_rng: u64,
-    /// What guests may do in this world, set by the owner.
-    pub guest_perm: GuestPermission,
     /// The player id that owns this world. Set once when the very first player
     /// joins and never cleared automatically, so a momentarily-empty roster
     /// (owner mid-reconnect) can't let a stranger seize ownership.
@@ -368,8 +366,10 @@ impl GameState {
 
     /// The single source of truth for command authority, shared by the server
     /// (enforcement), the sim (`apply_command`) and the client (UI greying).
-    /// Unknown players (unit tests, trusted local calls) and owner-less worlds
-    /// are unrestricted so co-op never dead-ends when the owner leaves.
+    /// Outside the central world (see below), every connected player — owner
+    /// or guest alike — has full command authority; the only admin actions
+    /// that stay owner-only (`Kick`) aren't `PlayerCommand`s at all and are
+    /// checked separately via `is_owner` at the call site.
     pub fn can_issue(&self, pid: u64, cmd: &PlayerCommand) -> bool {
         // The central world has no owner/guest hierarchy at all — authority
         // follows settler ownership. This branch must come before the
@@ -450,42 +450,9 @@ impl GameState {
                 PlayerCommand::DispatchTradeCaravan { .. } => false,
             };
         }
-        let Some(p) = self.player(pid) else {
-            return true;
-        };
-        if p.role == Role::Owner || !self.owner_present() {
-            return true;
-        }
-        match self.guest_perm {
-            GuestPermission::Full => true,
-            GuestPermission::ViewOnly => false,
-            GuestPermission::Build => match cmd {
-                // Building (incl. upgrades), worker assignment and the shared
-                // Tunnel/research goals are the cooperative core, so guests
-                // may all pitch in.
-                PlayerCommand::Place { .. }
-                | PlayerCommand::UpgradeBuilding { .. }
-                | PlayerCommand::AdjustWorkers { .. }
-                | PlayerCommand::AssignSurvivor { .. }
-                | PlayerCommand::MoveSurvivor { .. }
-                | PlayerCommand::ChopTile { .. }
-                | PlayerCommand::Bury { .. }
-                | PlayerCommand::InvestTunnel
-                | PlayerCommand::Research { .. }
-                | PlayerCommand::RespondEvent { .. }
-                | PlayerCommand::DispatchTradeCaravan { .. }
-                | PlayerCommand::RelocateBuilding { .. } => true,
-                // Guests may only tear down their own buildings, never touch the
-                // furnace, under the Build policy.
-                PlayerCommand::Demolish { building } => self
-                    .find_building(*building)
-                    .map(|b| b.owner == Some(pid))
-                    .unwrap_or(false),
-                // Owner-only admin, same tier as `SetFurnaceLevel`: appointing
-                // a leader is a whole-city decision, not routine co-op upkeep.
-                PlayerCommand::SetFurnaceLevel { .. } | PlayerCommand::SetLeader { .. } => false,
-            },
-        }
+        // Personal/shared-guest worlds have no per-command permission tiering
+        // — any connected player, owner or guest, may issue any command.
+        true
     }
 
     pub fn total_workers(&self) -> u32 {

@@ -196,20 +196,3 @@ fn only_the_owning_account_may_relocate_a_central_building() {
     );
 }
 
-#[test]
-fn guest_may_relocate_under_build_but_not_view_only() {
-    let mut state = sim::new_game(SEED, 12);
-    sim::player_joined(&mut state, 1, "Owner");
-    sim::player_joined(&mut state, 2, "Guest");
-    state.stock.wood = 500.0;
-    let (x, y) = find_spot(&state, BuildingKind::Tent);
-    let id = place_and_finish(&mut state, BuildingKind::Tent, x, y);
-    let (tx, ty) = find_spot(&state, BuildingKind::Tent);
-    assert_eq!(state.guest_perm, GuestPermission::Build, "default policy is Build");
-
-    let cmd = PlayerCommand::RelocateBuilding { building: id, x: tx, y: ty };
-    assert!(state.can_issue(2, &cmd), "guests should be able to help relocate under Build");
-
-    sim::set_guest_permission(&mut state, GuestPermission::ViewOnly);
-    assert!(!state.can_issue(2, &cmd), "ViewOnly guests may not issue any world-changing command");
-}

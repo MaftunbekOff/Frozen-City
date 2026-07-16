@@ -73,9 +73,13 @@ tafsilotlar "V0.4" bo'limida):
 - **Dunyo persistensiyasi**: guest'lar uchun hamon bitta umumiy `world.bin` (bincode),
   har 20s avtosaqlash + SIGTERM handler. Akkaunt bilan kirganlar uchun endi
   **har akkauntga alohida** olam va fayl (`world_manager.rs`, "V0.4" bo'limida).
-- **Ko'p-region infratuzilmasi**: 3ta mustaqil static olam (asosiy + region2 + region3,
-  alohida systemd xizmat va portlarda), brauzerda region tanlash menyusi, PWA
-  (manifest+service worker), yuk-test vositasi (`examples/loadtest.rs`).
+- ~~**Ko'p-region infratuzilmasi**~~ — **olib tashlandi (2026-07-16)**: 3ta
+  mustaqil static olam (asosiy + region2 + region3, alohida systemd xizmat va
+  portlarda), brauzerda region tanlash menyusi va `FC_DISABLE_ACCOUNTS` gate'i
+  butunlay olib tashlandi (kod, jonli systemd/nginx marshrutlari va saqlangan
+  fayllar bilan birga) — endi bitta jarayon, bitta port. PWA (manifest+service
+  worker) va yuk-test vositasi (`examples/loadtest.rs`) region'ga bog'liq
+  emasligi sababli qoldi.
 - **Markaziy olam (V0.5'ning birinchi bosqichi, 2026-07-11)**: Tunnel bitgan akkaunt
   `EnterCentral` bilan bitta doimiy **Global Olamga** o'tadi; o'tishda shaxsiy
   olamidan 5 tagacha aholi **ko'chib o'tadi** (Tunnel orqali, shaxsiy olamdan
@@ -83,11 +87,7 @@ tafsilotlar "V0.4" bo'limida):
   aylanadi (`Survivor::owner`, akkaunt bo'yicha). Markaziy olamda ochlik/o'lim/
   g'alaba/mag'lubiyat yo'q — doimiy uchrashuv maydoni. Saqlash formati
   versiyalandi (`FCWORLD2` + V1 migratsiya, `net/legacy.rs`) — eski production
-  olamlar buzilmasdan o'qiladi. Akkauntlar va markaziy olam **faqat asosiy
-  regionda** (klient login/EnterCentral'ni `/ws`ga majburlaydi; region2/3
-  `FC_DISABLE_ACCOUNTS=1` bilan rad etadi) — aks holda har region o'z
-  WorldManager'i bilan bitta akkauntning "yagona" olamini regionlararo
-  nusxalarga bo'lib yuborar edi (V0.4'dagi ochiq savol shu tarzda yechildi).
+  olamlar buzilmasdan o'qiladi.
 
 **Hal qilingan follow-up'lar (avvalgi review'dan):**
 - ✅ Async reconnect — fon thread'ida dial, ilova muzlamaydi.
@@ -163,9 +163,12 @@ Butun ijtimoiy tsikl (mehmonlar, hub) shu poydevorga quriladi.
       `Building.owner`, voqealar lentasida «Aziz built a Tent»; har o'yinchining
       hissasi (`PlayerInfo.built/demolished`) statistikada, reconnect'da saqlanadi.
 - [x] **Rollar (egalik)**: birinchi kirgan o'yinchi — **egasi (Owner)**, qolganlar
-      mehmon (Guest). Egasi mehmonlar huquqini belgilaydi (`GuestPermission`:
-      ViewOnly / Build / Full) va mehmonni **chiqarib yuboradi (kick)**. Server
-      har buyruqni `GameState::can_issue` orqali tekshiradi (yagona haqiqat manbai).
+      mehmon (Guest). ~~Egasi mehmonlar huquqini belgilaydi (`GuestPermission`:
+      ViewOnly / Build / Full)~~ — **olib tashlandi (2026-07-16)**: darajali
+      mehmon-huquqi tizimi butunlay bekor qilindi, mehmonlar endi doim to'liq
+      vakolatga ega (egasi bilan bir xil), faqat mehmonni **chiqarib
+      yuborish (kick)** egaga xos bo'lib qoladi. Server har buyruqni
+      `GameState::can_issue` orqali tekshiradi (yagona haqiqat manbai).
       Egasi yo'q olam to'liq co-op. Taklif tizimining poydevori.
 - [x] **Reconnect**: sessiya tokeni (`Hello.token` / `Welcome.token`) — server
       ulanish-id'ni o'yinchi-id'dan ajratadi, uzilgan o'yinchining `PlayerInfo`'sini
@@ -244,8 +247,7 @@ hech qachon yo'qolmaydi.
 **Holat: ✅ to'liq bajarildi (2026-07-12).** Client-ichidan ro'yxatdan o'tish
 (menyuda Register rejimi, Telegram bot ham ishlayveradi), cross-device
 `tests/cross_device_e2e.rs`da isbotlangan (server restart bilan birga), 50+
-parallel shaxsiy olam yuk testi o'tdi. Faqat ko'p-region dinamik menejeri
-keyinga qoldirilgan (pastga qarang).
+parallel shaxsiy olam yuk testi o'tdi.
 
 ### Vazifalar
 
@@ -273,16 +275,9 @@ keyinga qoldirilgan (pastga qarang).
       ulanish ("ikki qurilma") bir xil shahar/binolarni ko'radi, jonli umumiy
       olamda qurishda davom etadi, va to'liq server restart'idan keyin ham
       uchinchi ulanish hammasini joyida topadi. ~~Nuance: region-mahalliylik~~ —
-      **yechildi (2026-07-11)**: akkauntlar (va markaziy olam) faqat asosiy
-      region processida yashaydi; klient akkaunt-login/EnterCentral'ni doim
-      `/ws`ga yo'naltiradi, region2/3 esa `FC_DISABLE_ACCOUNTS=1` bilan akkaunt
-      kirishini rad etadi. Region tanlash faqat mehmon co-op uchun qoldi.
-- [ ] **Olam menejeri (ko'p-region miqyosida)** — *ataylab V1.0+ ga qoldirildi*:
-      uchta region hamon 3ta mustaqil, qo'lda ishga tushirilgan static process.
-      50-olam yuk testi BITTA processda bemalol o'tgani uchun (quyida) dinamik
-      ko'p-region menejeri hozirgi masshtabda shart emas; per-akkaunt qatlamdagi
-      lazy-spawn/idle-evict naqshi (`world_manager.rs`) kelajakda shu qatlamga
-      ko'tariladi.
+      **butunlay bekor bo'ldi (2026-07-16)**: ko'p-region infratuzilmasining
+      o'zi olib tashlandi (yuqoriga qarang), shu sabab bu masala endi mavjud
+      emas — bitta jarayon, akkauntlar va markaziy olam har doim o'sha yerda.
 
 ### Natija mezonlari
 
@@ -386,9 +381,10 @@ bo'g'in, va deploy'dan oldin haqiqiy production saqlovlar nusxasini
       akkaunt bitta taklifni ikki marta ko'rmaydi).
 - [x] **Mehmon huquqlari** (V0.2 rollar ustiga): olam egaligi endi **akkauntga
       mahkamlangan** (`ServerConfig::owner_account` — tashrifchi birinchi
-      kirib ham Owner bo'lolmaydi); egasi `GuestPermission`ni belgilaydi
-      (ViewOnly/Build/Full) va kick qiladi — tashrifchiga ham xuddi shunday
-      amal qiladi (`tests/visit_e2e.rs`da tasdiqlangan).
+      kirib ham Owner bo'lolmaydi); ~~egasi `GuestPermission`ni belgilaydi
+      (ViewOnly/Build/Full)~~ — **2026-07-16: bekor qilindi**, egasi endi kick
+      qiladi xolos, tashrifchiga ham xuddi shunday amal qiladi
+      (`tests/visit_e2e.rs`da tasdiqlangan).
 - [x] **Egasiz kirish siyosati**: `allow_offline_guests` sozlamasi (standart:
       YO'Q) — akkaunt DB'dagi server-egalik `visit_policy` jadvali,
       `SetVisitPolicy`/`VisitPolicy` protokol jufti, social paneldagi toggle.

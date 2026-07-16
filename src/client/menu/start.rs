@@ -10,8 +10,6 @@ use bevy::prelude::*;
 use frozen_city::net::server::{self, ServerConfig};
 use frozen_city::net::protocol::ClientMsg;
 
-#[cfg(target_arch = "wasm32")]
-use super::buttons::with_path;
 use super::super::i18n::Lang;
 use super::super::i18n_menu as mtxt;
 use super::super::{
@@ -32,13 +30,6 @@ pub enum MenuAction {
 
 #[derive(Component)]
 pub struct MenuErrorText;
-
-/// One of the region-server picker buttons (browser build only). Holds the
-/// `/ws`-style path this button dials; ops routes each path to an
-/// independent region-server process at the nginx layer.
-#[cfg(target_arch = "wasm32")]
-#[derive(Component, Clone, Copy, PartialEq)]
-pub struct RegionButton(pub(crate) &'static str);
 
 /// Completes an in-game world switch (Tunnel → central world, or back): the
 /// game screen has just torn down, so dial the target world and re-enter
@@ -81,12 +72,6 @@ pub fn pending_switch(
             token: None,
         },
     };
-    // Accounts (and the central world) live on the main region process only —
-    // see `main_region_addr`.
-    #[cfg(target_arch = "wasm32")]
-    {
-        session.join_addr = main_region_addr(&session.join_addr);
-    }
     #[cfg(not(target_arch = "wasm32"))]
     let dialed = frozen_city::net::client::connect_tcp_with(&session.join_addr, first_msg)
         .map_err(|e| mtxt::err_could_not_join(*lang, &session.join_addr, &e.to_string()));
@@ -112,15 +97,6 @@ pub fn pending_switch(
             }
         }
     }
-}
-
-/// Rewrites `addr` to the main region's `/ws` path. Account logins and the
-/// central world are main-region-only: every region process has its own
-/// `WorldManager`, so signing in through `/ws-r2` would silently fork the
-/// account's "single" personal world into a per-region copy.
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn main_region_addr(addr: &str) -> String {
-    with_path(addr, "/ws")
 }
 
 /// Handle `--host`, `--join` and `--smoke`: act once, straight from the menu.
