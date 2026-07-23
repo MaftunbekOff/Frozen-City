@@ -101,6 +101,16 @@ pub fn btn_quit(l: Lang) -> &'static str {
     }
 }
 
+/// Link to the project briefing page (`web/investors.html`), shown as its own
+/// row on the menu landing — see `PresentationButton`.
+pub fn btn_presentation(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Taqdimot",
+        Lang::En => "Presentation",
+        Lang::Ru => "Презентация",
+    }
+}
+
 // ------------------------------------------------------------------- region
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]

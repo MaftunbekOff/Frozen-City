@@ -553,6 +553,7 @@ impl Plugin for ClientPlugin {
                     menu::pending_switch,
                     menu::autostart,
                     menu::menu_buttons,
+                    menu::presentation_button,
                     menu::overlay_buttons,
                     #[cfg(target_arch = "wasm32")]
                     menu::region_buttons,

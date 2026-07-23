@@ -71,6 +71,41 @@ pub fn menu_buttons(
     }
 }
 
+/// Absolute production URL — native has no "current tab" to navigate, so it
+/// always opens the live site's copy of the page in the system browser.
+#[cfg(not(target_arch = "wasm32"))]
+const PRESENTATION_URL: &str = "https://game.twelfth.uz/investors.html";
+
+/// Click handling for the project-briefing link. Native shells out to the OS
+/// "open URL" command (no extra crate: three one-line, platform-gated
+/// `Command`s); wasm navigates the current tab to the game's own
+/// `/investors.html` (relative, so it works under any host/mount), which
+/// links back to `/` to return here.
+pub fn presentation_button(q: Query<&Interaction, (With<PresentationButton>, Changed<Interaction>)>) {
+    for interaction in &q {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Some(win) = web_sys::window() {
+                let _ = win.location().set_href("/investors.html");
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            #[cfg(target_os = "windows")]
+            let _ = std::process::Command::new("cmd")
+                .args(["/C", "start", "", PRESENTATION_URL])
+                .spawn();
+            #[cfg(target_os = "macos")]
+            let _ = std::process::Command::new("open").arg(PRESENTATION_URL).spawn();
+            #[cfg(all(unix, not(target_os = "macos")))]
+            let _ = std::process::Command::new("xdg-open").arg(PRESENTATION_URL).spawn();
+        }
+    }
+}
+
 /// Click handling and per-frame active-region highlight for the region
 /// picker, combined in one system (same shape as `ui::build_buttons`). A
 /// click rewrites only the path component of `settings.join_addr`, so it

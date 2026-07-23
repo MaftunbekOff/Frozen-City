@@ -33,6 +33,13 @@ pub enum MenuAction {
 #[derive(Component)]
 pub struct MenuErrorText;
 
+/// The menu landing's link to the project briefing page
+/// (`web/investors.html`, served alongside the game itself) — native opens it
+/// in the system browser, wasm navigates the current tab (its own "Back to
+/// Frozen City" link returns here). See `buttons::presentation_button`.
+#[derive(Component)]
+pub struct PresentationButton;
+
 /// One of the region-server picker buttons (browser build only). Holds the
 /// `/ws`-style path this button dials; ops routes each path to an
 /// independent region-server process at the nginx layer.

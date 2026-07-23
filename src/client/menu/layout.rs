@@ -285,6 +285,28 @@ pub(crate) fn build_menu(
                     }
                 });
 
+                // Same visual weight as Account/Settings above (not tucked
+                // in a corner) so it's actually seen — see `PresentationButton`.
+                col.spawn((
+                    Button,
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(ff.btn_h()),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
+                        ..default()
+                    },
+                    BackgroundColor(theme::BTN),
+                    BorderColor::all(theme::BORDER),
+                    BaseColor(theme::BTN),
+                    PresentationButton,
+                ))
+                .with_children(|b| {
+                    b.spawn(theme::text(mtxt::btn_presentation(lang), theme::FS_SMALL, theme::TEXT_PRIMARY));
+                });
+
                 col.spawn(Node {
                     width: Val::Percent(100.0),
                     flex_direction: FlexDirection::Column,
