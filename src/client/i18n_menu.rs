@@ -91,6 +91,16 @@ pub fn btn_quit(l: Lang) -> &'static str {
     }
 }
 
+/// Link to the project briefing page (`web/investors.html`), shown as its own
+/// row on the menu landing — see `PresentationButton`.
+pub fn btn_presentation(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Taqdimot",
+        Lang::En => "Presentation",
+        Lang::Ru => "Презентация",
+    }
+}
+
 // ----------------------------------------------------------------- settings
 
 pub fn language_label(l: Lang) -> &'static str {

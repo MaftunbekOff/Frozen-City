@@ -553,6 +553,7 @@ impl Plugin for ClientPlugin {
                     menu::pending_switch,
                     menu::autostart,
                     menu::menu_buttons,
+                    menu::presentation_button,
                     menu::overlay_buttons,
                     menu::login_field_focus,
                     menu::login_form_keyboard,

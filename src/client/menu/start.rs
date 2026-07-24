@@ -31,6 +31,13 @@ pub enum MenuAction {
 #[derive(Component)]
 pub struct MenuErrorText;
 
+/// The menu landing's link to the project briefing page
+/// (`web/investors.html`, served alongside the game itself) — native opens it
+/// in the system browser, wasm navigates the current tab (its own "Back to
+/// Frozen City" link returns here). See `buttons::presentation_button`.
+#[derive(Component)]
+pub struct PresentationButton;
+
 /// Completes an in-game world switch (Tunnel → central world, or back): the
 /// game screen has just torn down, so dial the target world and re-enter
 /// `Screen::Game` immediately — the player sees one menu frame, not a menu.
