@@ -1,0 +1,676 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Frozen City — Pitch</title>
+<meta name="description" content="Frozen City — investor pitch deck (uz/en/ru)." />
+<style>
+  :root{
+    --bg:#0a1220; --bg2:#0e1828; --card:#111d30; --sunken:#070d18;
+    --ink:#e8f0f8; --dim:#9db0c4; --faint:#5d7288;
+    --accent:#ff8a3d; --teal:#5adfcf;
+    --line:rgba(232,240,248,.12); --line-soft:rgba(232,240,248,.06);
+    --font-d:'Bahnschrift','Arial Narrow Bold','Segoe UI Semibold','Helvetica Neue',Arial,sans-serif;
+    --font-b:'Segoe UI',system-ui,-apple-system,'Helvetica Neue',Arial,sans-serif;
+    --font-m:'Cascadia Mono',Consolas,'SF Mono',Menlo,'Ubuntu Mono',monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--ink);font-family:var(--font-b);line-height:1.55;-webkit-font-smoothing:antialiased;overflow:hidden}
+  h1,h2,h3{font-family:var(--font-d);font-weight:700;margin:0;letter-spacing:.01em;text-wrap:balance}
+  p{margin:0} a{color:var(--accent)}
+  a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  ::selection{background:var(--accent);color:#1a0900}
+
+  .deck{height:100svh;overflow-y:auto;scroll-snap-type:y mandatory;scroll-behavior:smooth}
+  .sl{position:relative;height:100svh;scroll-snap-align:start;scroll-snap-stop:always;display:flex;align-items:center;overflow:hidden;border-bottom:1px solid var(--line-soft)}
+  .sl.alt{background:var(--bg2)}
+  .wrap{width:100%;max-width:1060px;margin:0 auto;padding-inline:clamp(1.4rem,5vw,3.5rem)}
+  .eyebrow{font-family:var(--font-m);font-size:.72rem;text-transform:uppercase;letter-spacing:.2em;color:var(--accent);margin-bottom:.9rem}
+  .sl h2{font-size:clamp(1.7rem,3.4vw,3rem);margin-bottom:1.6rem;max-width:46rem}
+  .lead{font-size:clamp(1.02rem,1.4vw,1.3rem);color:var(--dim);max-width:40rem}
+
+  /* chrome */
+  .lang-switch{position:fixed;top:1rem;right:1.1rem;z-index:60;display:flex;font-family:var(--font-m);font-size:.7rem;background:rgba(10,18,32,.75);border:1px solid var(--line);backdrop-filter:blur(6px)}
+  .lang-switch button{appearance:none;border:0;background:transparent;color:var(--faint);padding:.45rem .6rem;cursor:pointer;font:inherit}
+  .lang-switch button + button{border-left:1px solid var(--line)}
+  .lang-switch button.active{color:#1a0900;background:var(--accent)}
+  .brandmark{position:fixed;top:1rem;left:1.1rem;z-index:60;font-family:var(--font-m);font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);text-decoration:none;background:rgba(10,18,32,.75);border:1px solid var(--line);padding:.42rem .65rem;backdrop-filter:blur(6px)}
+  .brandmark:hover{color:var(--accent)}
+  .counter{position:fixed;bottom:1.1rem;left:1.2rem;z-index:60;font-family:var(--font-m);font-size:.72rem;letter-spacing:.14em;color:var(--faint)}
+  .keyhint{position:fixed;bottom:1.1rem;right:1.2rem;z-index:60;font-family:var(--font-m);font-size:.66rem;letter-spacing:.08em;color:var(--faint)}
+  .nav-dots{position:fixed;right:1.05rem;top:50%;transform:translateY(-50%);z-index:60;display:flex;flex-direction:column;gap:.55rem}
+  .nav-dots button{appearance:none;border:0;padding:0;width:8px;height:8px;border-radius:50%;background:var(--faint);opacity:.4;cursor:pointer;transition:opacity .15s,transform .15s}
+  .nav-dots button.active{background:var(--accent);opacity:1;transform:scale(1.4)}
+  .nav-dots button:hover{opacity:1}
+  @media (max-width:760px){.nav-dots,.keyhint{display:none}}
+  @media (prefers-reduced-motion:reduce){.deck{scroll-behavior:auto}.flame-pulse{animation:none}}
+  @media (prefers-reduced-motion:no-preference){.flame-pulse{animation:flame 2.6s ease-in-out infinite}}
+  @keyframes flame{0%,100%{opacity:1}50%{opacity:.72}}
+
+  /* cover */
+  .sl.cover{align-items:flex-end}
+  .cover svg.scene{position:absolute;inset:0;width:100%;height:100%;z-index:0}
+  .cover .wrap{position:relative;z-index:2;padding-bottom:clamp(3rem,8vh,5.5rem)}
+  .cover-tag{display:inline-block;font-family:var(--font-m);font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;color:var(--teal);border:1px solid rgba(90,223,207,.35);padding:.4rem .65rem;margin-bottom:1.1rem;background:rgba(7,13,24,.55)}
+  .cover h1{font-size:clamp(2.8rem,7vw,6rem);line-height:.94;margin-block:.5rem .9rem;text-shadow:0 2px 50px rgba(255,138,61,.25)}
+  .cover .lead{text-shadow:0 1px 18px rgba(7,13,24,.85)}
+  .meta-row{margin-top:1.6rem;display:flex;flex-wrap:wrap;gap:.7rem 2.4rem;font-family:var(--font-m);font-size:.78rem;color:var(--faint)}
+  .meta-row b{color:var(--ink);font-weight:400}
+
+  .cols2{display:grid;grid-template-columns:1fr 1fr;gap:clamp(1.6rem,4vw,3rem);align-items:center}
+  @media (max-width:860px){.cols2{grid-template-columns:1fr}.cols2 .art-side{display:none}}
+  .art{width:100%;height:auto;display:block;max-height:52svh}
+  .art-frame{background:var(--sunken);border:1px solid var(--line-soft);padding:.9rem}
+
+  .cards3{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem}
+  @media (max-width:760px){.cards3{grid-template-columns:1fr;gap:.6rem}}
+  .card{background:var(--card);border:1px solid var(--line-soft);padding:1.2rem 1.1rem}
+  .card.hole{border:1px dashed rgba(255,138,61,.5);background:rgba(255,138,61,.1)}
+  .card h3{font-size:1rem;margin-bottom:.4rem}
+  .card p{color:var(--dim);font-size:.9rem}
+  .card svg{display:block;margin-bottom:.7rem}
+
+  .bullets{list-style:none;margin:0;padding:0;display:grid;gap:1rem;max-width:36rem}
+  .bullets li{border-left:3px solid var(--accent);padding:.35rem 0 .35rem 1.1rem;font-size:clamp(1rem,1.4vw,1.25rem)}
+  .bullets li b{font-family:var(--font-d);display:block}
+  .bullets li span{color:var(--dim);font-size:.92em}
+
+  .loop{display:grid;gap:.9rem;max-width:34rem}
+  .loop .step{border-left:2px solid var(--accent);padding-left:1rem}
+  .loop .step b{font-family:var(--font-d)}
+  .loop .step span{color:var(--dim);font-size:.92rem;display:block}
+  .content-row{margin-top:1.6rem;display:flex;flex-wrap:wrap;gap:.7rem 2rem;font-family:var(--font-m);font-size:.78rem;color:var(--dim)}
+  .content-row b{color:var(--teal);font-weight:400}
+
+  .tbl-scroll{overflow-x:auto;border:1px solid var(--line-soft)}
+  table.cmp{border-collapse:collapse;width:100%;min-width:540px;font-size:.9rem}
+  .cmp th,.cmp td{padding:.7rem .9rem;text-align:center;border-bottom:1px solid var(--line-soft)}
+  .cmp th{font-family:var(--font-m);font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);background:var(--sunken)}
+  .cmp td:first-child,.cmp th:first-child{text-align:left}
+  .cmp td:first-child{color:var(--dim)}
+  .cmp .fc{background:rgba(255,138,61,.06)}
+  .cmp th.fc{color:var(--accent)}
+  .yes{color:var(--teal);font-weight:700}.no-x{color:var(--faint)}.part{color:var(--dim)}
+
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem}
+  @media (max-width:760px){.stats{grid-template-columns:repeat(2,1fr)}}
+  .stat{background:var(--card);border:1px solid var(--line-soft);padding:1.3rem 1.2rem}
+  .stat .v{font-family:var(--font-d);font-size:clamp(2.2rem,4vw,3.4rem);color:var(--accent);line-height:1}
+  .stat .v small{font-size:52%}
+  .stat p{margin-top:.4rem;color:var(--dim);font-size:.85rem}
+
+  .chips{display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;max-width:52rem}
+  @media (max-width:700px){.chips{grid-template-columns:1fr}}
+  .chip{background:var(--card);border:1px solid var(--line-soft);border-top:2px solid var(--teal);padding:1.1rem 1.2rem}
+  .chip b{font-family:var(--font-d);display:block;margin-bottom:.3rem}
+  .chip span{color:var(--dim);font-size:.9rem}
+
+  .eras{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem}
+  @media (max-width:760px){.eras{grid-template-columns:repeat(2,1fr)}}
+  .era{background:var(--card);border:1px solid var(--line-soft);padding:1rem;text-align:center}
+  .era svg{display:block;margin:0 auto .5rem;width:64px;height:64px}
+  .era h3{font-size:.92rem}
+  .era .res{font-family:var(--font-m);font-size:.64rem;color:var(--teal);margin-top:.25rem;letter-spacing:.04em}
+  .badge{display:inline-block;font-family:var(--font-m);font-size:.6rem;letter-spacing:.1em;text-transform:uppercase;padding:.18rem .45rem;margin-bottom:.5rem}
+  .badge.live{color:#1a0900;background:var(--teal)}
+  .badge.plan{color:var(--dim);border:1px solid var(--line)}
+  .climate{margin-top:1.2rem;display:flex;flex-wrap:wrap;gap:.6rem 2rem;font-size:.9rem;color:var(--dim)}
+  .climate .c{display:flex;gap:.5rem;align-items:center}
+  .climate svg{width:26px;height:26px}
+  .climate b{color:var(--ink);font-family:var(--font-d);font-weight:400}
+
+  .road{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem}
+  @media (max-width:760px){.road{grid-template-columns:1fr;gap:.6rem}}
+  .road .col{background:var(--card);border-top:2px solid var(--accent);padding:1.1rem 1.2rem}
+  .road .col:nth-child(2){border-top-color:var(--teal)}
+  .road .col:nth-child(3){border-top-color:var(--dim)}
+  .road .k{font-family:var(--font-m);font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+  .road h3{margin:.3rem 0 .5rem;font-size:1rem}
+  .road ul{margin:0;padding-left:1.05rem;color:var(--dim);font-size:.88rem}
+  .road li{margin-bottom:.35rem}
+
+  .ask-ctas{display:flex;flex-wrap:wrap;gap:.8rem;margin-top:1.8rem}
+  .btn{display:inline-flex;align-items:center;gap:.55rem;text-decoration:none;font-family:var(--font-m);font-size:.84rem;letter-spacing:.04em;padding:.85rem 1.3rem}
+  .btn.primary{background:var(--accent);color:#1a0900}
+  .btn.ghost{border:1px solid var(--line);color:var(--ink)}
+  .btn:hover{filter:brightness(1.08)}
+  .ask-note{margin-top:1.4rem;font-family:var(--font-m);font-size:.72rem;color:var(--faint);letter-spacing:.06em}
+</style>
+</head>
+<body>
+
+<a class="brandmark" href="/" data-i18n="nav.back">← Frozen City</a>
+<div class="lang-switch" role="group" aria-label="Language">
+  <button data-lang="uz">UZ</button><button data-lang="en">EN</button><button data-lang="ru">RU</button>
+</div>
+<div class="counter"><span id="cur">01</span> / <span id="tot">10</span></div>
+<div class="keyhint" data-i18n="hint.keys">← → yoki aylantiring</div>
+<nav class="nav-dots" id="dots" aria-label="Slides"></nav>
+
+<main class="deck" id="deck">
+
+<!-- 1 COVER -->
+<section class="sl cover">
+  <svg class="scene" viewBox="0 0 1440 620" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+    <defs>
+      <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#060b16"/><stop offset=".55" stop-color="#0d1b2e"/><stop offset="1" stop-color="#132a40"/>
+      </linearGradient>
+      <linearGradient id="icefloor" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#223c58"/><stop offset="1" stop-color="#16293f"/>
+      </linearGradient>
+      <radialGradient id="glow" cx=".5" cy=".5" r=".5">
+        <stop offset="0" stop-color="#ff8a3d" stop-opacity=".55"/><stop offset=".55" stop-color="#ff8a3d" stop-opacity=".16"/><stop offset="1" stop-color="#ff8a3d" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <rect width="1440" height="620" fill="url(#sky)"/>
+    <polygon points="180,0 340,0 220,240 120,200" fill="#37e0c8" opacity=".07"/>
+    <polygon points="340,0 470,0 380,210 260,240" fill="#5adfcf" opacity=".05"/>
+    <polygon points="1040,0 1200,0 1130,190 1010,160" fill="#37e0c8" opacity=".06"/>
+    <g fill="#e8f0f8">
+      <circle cx="120" cy="70" r="1.3" opacity=".8"/><circle cx="260" cy="120" r="1" opacity=".5"/>
+      <circle cx="420" cy="60" r="1.2" opacity=".7"/><circle cx="560" cy="110" r="1" opacity=".45"/>
+      <circle cx="660" cy="45" r="1.4" opacity=".85"/><circle cx="790" cy="95" r="1" opacity=".5"/>
+      <circle cx="900" cy="55" r="1.2" opacity=".7"/><circle cx="1030" cy="115" r="1" opacity=".5"/>
+      <circle cx="1180" cy="70" r="1.3" opacity=".8"/><circle cx="1320" cy="130" r="1" opacity=".45"/>
+      <circle cx="1400" cy="60" r="1.2" opacity=".65"/><circle cx="60" cy="160" r="1" opacity=".4"/>
+    </g>
+    <g opacity=".9">
+      <polygon points="1250,88 1282,72 1314,88 1314,124 1282,140 1250,124" fill="#cfe0ef"/>
+      <polygon points="1250,88 1282,72 1282,140 1250,124" fill="#a9c2d8"/>
+      <polygon points="1282,72 1314,88 1282,106" fill="#e6f1fa"/>
+    </g>
+    <polygon points="-60,430 140,205 150,430" fill="#182f4a"/><polygon points="150,430 140,205 340,430" fill="#12233a"/>
+    <polygon points="140,205 112,252 168,252" fill="#8fb2cc" opacity=".85"/>
+    <polygon points="240,430 420,150 440,430" fill="#1a3352"/><polygon points="440,430 420,150 640,430" fill="#142842"/>
+    <polygon points="420,150 384,210 456,210" fill="#cfe4f4" opacity=".9"/>
+    <polygon points="600,430 760,230 780,430" fill="#172c46"/><polygon points="780,430 760,230 930,430" fill="#101f33"/>
+    <polygon points="760,230 736,270 786,270" fill="#8fb2cc" opacity=".8"/>
+    <polygon points="890,430 1080,170 1100,430" fill="#1b3554"/><polygon points="1100,430 1080,170 1320,430" fill="#132540"/>
+    <polygon points="1080,170 1048,224 1114,224" fill="#cfe4f4" opacity=".9"/>
+    <polygon points="1200,430 1340,240 1360,430" fill="#182f4a"/><polygon points="1360,430 1340,240 1500,430" fill="#12233a"/>
+    <polygon points="60,470 260,368 460,470" fill="#24405e" opacity=".9"/>
+    <polygon points="260,368 460,470 340,470" fill="#2c4a6b" opacity=".9"/>
+    <polygon points="980,470 1160,382 1360,470" fill="#24405e" opacity=".9"/>
+    <polygon points="1160,382 1360,470 1250,470" fill="#2c4a6b" opacity=".9"/>
+    <rect y="470" width="1440" height="150" fill="url(#icefloor)"/>
+    <polygon points="0,470 380,470 190,540" fill="#e8f0f8" opacity=".04"/>
+    <polygon points="620,470 1010,470 830,555" fill="#e8f0f8" opacity=".05"/>
+    <polygon points="1100,470 1440,470 1300,545" fill="#e8f0f8" opacity=".04"/>
+    <circle cx="720" cy="440" r="190" fill="url(#glow)"/>
+    <circle cx="720" cy="450" r="90" fill="url(#glow)"/>
+    <g>
+      <polygon points="356,470 404,470 380,424" fill="#1d3a4a"/><polygon points="362,446 398,446 380,410" fill="#234656"/>
+      <polygon points="300,470 336,470 318,436" fill="#1d3a4a"/>
+      <polygon points="1052,470 1096,470 1074,428" fill="#1d3a4a"/><polygon points="1058,448 1090,448 1074,414" fill="#234656"/>
+    </g>
+    <g>
+      <polygon points="472,470 500,432 500,470" fill="#3f5875"/><polygon points="500,470 500,432 528,470" fill="#2c415c"/>
+      <polygon points="494,470 506,470 500,452" fill="#ffb057"/>
+      <polygon points="560,470 584,438 584,470" fill="#3f5875"/><polygon points="584,470 584,438 608,470" fill="#2c415c"/>
+      <polygon points="579,470 589,470 584,455" fill="#ffb057"/>
+      <polygon points="826,470 852,436 852,470" fill="#3f5875"/><polygon points="852,470 852,436 878,470" fill="#2c415c"/>
+      <polygon points="846,470 858,470 852,453" fill="#ffb057"/>
+      <polygon points="896,470 918,442 918,470" fill="#3f5875"/><polygon points="918,470 918,442 940,470" fill="#2c415c"/>
+      <polygon points="913,470 923,470 918,456" fill="#ffb057"/>
+    </g>
+    <g>
+      <polygon points="960,470 1022,470 1022,440 960,440" fill="#33506d"/>
+      <polygon points="954,440 1028,440 991,414" fill="#46688a"/>
+      <polygon points="954,440 991,414 991,427 960,440" fill="#cfe4f4" opacity=".55"/>
+      <polygon points="984,470 998,470 998,452 984,452" fill="#ffb057"/>
+    </g>
+    <g>
+      <polygon points="688,470 752,470 744,378 696,378" fill="#5a3126"/>
+      <polygon points="688,470 696,378 704,378 700,470" fill="#7c4634"/>
+      <polygon points="696,378 744,378 738,348 702,348" fill="#6d3a2a"/>
+      <polygon points="702,348 738,348 720,296" fill="#3a2018"/>
+      <g class="flame-pulse">
+        <polygon points="706,348 734,348 720,306" fill="#ff8a3d"/>
+        <polygon points="712,348 728,348 720,318" fill="#ffb057"/>
+        <polygon points="716,348 724,348 720,330" fill="#ffe29a"/>
+        <polygon points="722,300 728,288 731,302" fill="#ffb057" opacity=".85"/>
+        <polygon points="710,296 705,284 714,292" fill="#ff8a3d" opacity=".7"/>
+      </g>
+      <polygon points="700,410 740,410 738,400 702,400" fill="#e8f0f8" opacity=".14"/>
+    </g>
+    <polygon points="0,620 0,548 210,566 430,532 700,560 980,526 1240,556 1440,534 1440,620" fill="#0b1626"/>
+    <polygon points="0,548 210,566 430,532 700,560 980,526 1240,556 1440,534 1440,545 980,538 700,572 430,544 210,578 0,560" fill="#1c3450" opacity=".5"/>
+    <g fill="#e8f0f8">
+      <circle cx="200" cy="300" r="1.4" opacity=".3"/><circle cx="520" cy="250" r="1.2" opacity=".28"/>
+      <circle cx="840" cy="330" r="1.4" opacity=".3"/><circle cx="1120" cy="280" r="1.2" opacity=".26"/>
+      <circle cx="660" cy="180" r="1.2" opacity=".3"/><circle cx="380" cy="350" r="1" opacity=".2"/>
+    </g>
+  </svg>
+  <div class="wrap">
+    <span class="cover-tag" data-i18n="c.tag">game.twelfth.uz — hozir jonli</span>
+    <div class="eyebrow" data-i18n="c.eyebrow">Investor pitch</div>
+    <h1>FROZEN CITY</h1>
+    <p class="lead" data-i18n="c.lead">Abadiy qishda birgalikda omon qolish shahar-qurish o'yini. Bitta Rust kod bazasi — desktop, brauzer va telefonda.</p>
+    <div class="meta-row">
+      <span data-i18n="c.m1">Janr — <b>Kooperativ survival city-builder</b></span>
+      <span data-i18n="c.m2">Texnologiya — <b>Rust + Bevy</b></span>
+      <span data-i18n="c.m3">Holat — <b>Jonli, o'ynash mumkin</b></span>
+    </div>
+  </div>
+</section>
+
+<!-- 2 PROBLEM -->
+<section class="sl alt">
+  <div class="wrap">
+    <div class="eyebrow" data-i18n="s2.eyebrow">Muammo</div>
+    <h2 data-i18n="s2.h2">Janr talabni isbotladi — keyin uni uchga bo'lib yubordi.</h2>
+    <div class="cards3">
+      <div class="card"><svg width="54" height="54" viewBox="0 0 54 54" aria-hidden="true">
+          <polygon points="6,10 48,10 48,36 6,36" fill="#1b3352"/><polygon points="10,14 44,14 44,32 10,32" fill="#0d1b2e"/>
+          <polygon points="22,36 32,36 34,42 20,42" fill="#24405e"/><polygon points="16,42 38,42 38,46 16,46" fill="#33506d"/>
+          <polygon points="12,32 24,18 34,32" fill="#182f4a"/>
+        </svg><h3 data-i18n="s2.c1.t">Desktop klassikalar</h3><p data-i18n="s2.c1.d">Frostpunk, Banished — chuqur, lekin yakka va o'rnatish shart.</p></div>
+      <div class="card"><svg width="54" height="54" viewBox="0 0 54 54" aria-hidden="true">
+          <polygon points="16,4 38,4 38,50 16,50" fill="#1b3352"/><polygon points="19,9 35,9 35,45 19,45" fill="#0d1b2e"/>
+          <polygon points="24,6 30,6 30,8 24,8" fill="#33506d"/>
+          <polygon points="19,45 27,30 35,45" fill="#182f4a"/>
+        </svg><h3 data-i18n="s2.c2.t">Mobil klonlar</h3><p data-i18n="s2.c2.d">Ulkan auditoriya, lekin sayoz yakka idle-tsikllar.</p></div>
+      <div class="card hole"><svg width="54" height="54" viewBox="0 0 54 54" aria-hidden="true">
+          <polygon points="6,22 20,14 20,30" fill="#ff8a3d"/><polygon points="48,22 34,14 34,30" fill="#ff8a3d"/>
+          <polygon points="20,19 34,19 34,25 20,25" fill="#ffb057"/>
+          <circle cx="27" cy="42" r="3" fill="#5adfcf"/><circle cx="13" cy="42" r="3" fill="#5adfcf" opacity=".55"/><circle cx="41" cy="42" r="3" fill="#5adfcf" opacity=".55"/>
+        </svg><h3 data-i18n="s2.c3.t">Bo'shliq</h3><p data-i18n="s2.c3.d">Havola bosib, o'sha shaharni birga qurish — janrda deyarli yo'q.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 3 SOLUTION -->
+<section class="sl">
+  <div class="wrap cols2">
+    <div>
+      <div class="eyebrow" data-i18n="s3.eyebrow">Yechim</div>
+      <h2 data-i18n="s3.h2">Bitta simulyatsiya — har platformada.</h2>
+      <ul class="bullets">
+        <li><b data-i18n="s3.b1.t">1 kod bazasi</b><span data-i18n="s3.b1.d">Desktop nativ · brauzer (WebGPU/WebGL2) · mobil brauzer</span></li>
+        <li><b data-i18n="s3.b2.t">Server-nazoratli yagona dunyo</b><span data-i18n="s3.b2.d">Hech bir qurilma progressni soxtalashtira olmaydi</span></li>
+        <li><b data-i18n="s3.b3.t">Havola — va o'yinda</b><span data-i18n="s3.b3.d">O'rnatishsiz, do'stingiz shu shaharga real vaqtda qo'shiladi</span></li>
+      </ul>
+    </div>
+    <div class="art-side art-frame"><svg class="art" viewBox="0 0 640 360" aria-hidden="true">
+          <g>
+            <polygon points="50,60 268,60 268,196 50,196" fill="#1b3352"/>
+            <polygon points="58,68 260,68 260,188 58,188" fill="#0d1b2e"/>
+            <polygon points="138,196 180,196 188,226 130,226" fill="#24405e"/>
+            <polygon points="112,226 206,226 206,236 112,236" fill="#33506d"/>
+            <polygon points="70,188 130,120 170,188" fill="#24405e"/>
+            <polygon points="150,188 210,104 260,188" fill="#182f4a"/>
+            <polygon points="150,164 166,142 166,164" fill="#3f5875"/><polygon points="166,164 166,142 182,164" fill="#2c415c"/>
+            <polygon points="196,164 210,164 208,132 198,132" fill="#5a3126"/>
+            <polygon points="200,132 206,132 203,118" fill="#ffb057"/>
+            <circle cx="203" cy="140" r="26" fill="#ff8a3d" opacity=".18"/>
+          </g>
+          <g>
+            <polygon points="300,46 540,46 540,200 300,200" fill="#1b3352"/>
+            <polygon points="300,46 540,46 540,70 300,70" fill="#24405e"/>
+            <circle cx="316" cy="58" r="4" fill="#ff8a3d"/><circle cx="332" cy="58" r="4" fill="#ffb057"/><circle cx="348" cy="58" r="4" fill="#5adfcf"/>
+            <polygon points="300,200 540,200 540,70 300,70" fill="#0d1b2e"/>
+            <polygon points="312,200 392,108 452,200" fill="#182f4a"/>
+            <polygon points="430,200 500,120 540,200" fill="#24405e"/>
+            <polygon points="330,200 348,176 348,200" fill="#3f5875"/><polygon points="348,200 348,176 366,200" fill="#2c415c"/>
+            <polygon points="470,200 486,200 484,160 472,160" fill="#5a3126"/>
+            <polygon points="474,160 482,160 478,144" fill="#ffb057"/>
+            <circle cx="478" cy="170" r="30" fill="#ff8a3d" opacity=".18"/>
+          </g>
+          <g>
+            <polygon points="560,110 626,110 626,282 560,282" fill="#1b3352"/>
+            <polygon points="566,124 620,124 620,268 566,268" fill="#0d1b2e"/>
+            <polygon points="583,116 603,116 603,120 583,120" fill="#33506d"/>
+            <polygon points="566,268 596,214 620,268" fill="#182f4a"/>
+            <polygon points="572,268 584,252 584,268" fill="#3f5875"/>
+            <polygon points="600,268 610,268 608,236 602,236" fill="#5a3126"/>
+            <polygon points="603,236 607,236 605,226" fill="#ffb057"/>
+            <circle cx="605" cy="244" r="18" fill="#ff8a3d" opacity=".2"/>
+          </g>
+          <g>
+            <polygon points="322,296 344,284 366,296 366,322 344,334 322,322" fill="#134238"/>
+            <polygon points="322,296 344,284 344,334 322,322" fill="#1a5b4d"/>
+            <polygon points="344,284 366,296 344,310" fill="#5adfcf"/>
+            <g stroke="#5adfcf" stroke-dasharray="5 6" stroke-width="1.5" opacity=".6" fill="none">
+              <path d="M160 236 C 200 290, 270 305, 320 308"/>
+              <path d="M420 200 C 410 250, 380 285, 358 292"/>
+              <path d="M592 282 C 540 320, 430 322, 370 312"/>
+            </g>
+          </g>
+        </svg></div>
+  </div>
+</section>
+
+<!-- 4 PRODUCT -->
+<section class="sl alt">
+  <div class="wrap cols2">
+    <div>
+      <div class="eyebrow" data-i18n="s4.eyebrow">Mahsulot</div>
+      <h2 data-i18n="s4.h2">Bitta Pechka. Shahar birga omon qoladi — yoki birga halok bo'ladi.</h2>
+      <div class="loop">
+        <div class="step"><b data-i18n="s4.l1.t">To'plash</b><span data-i18n="s4.l1.d">O'tin, ko'mir, oziq-ovqat</span></div>
+        <div class="step"><b data-i18n="s4.l2.t">Qurish</b><span data-i18n="s4.l2.d">Chodirdan gospitalgacha — har birida xodim</span></div>
+        <div class="step"><b data-i18n="s4.l3.t">Pechkani yoqish</b><span data-i18n="s4.l3.d">Darajasi issiqlik radiusini beradi</span></div>
+        <div class="step"><b data-i18n="s4.l4.t">Tunni o'tkazish</b><span data-i18n="s4.l4.d">Bo'ronlar, kasallik, og'ir qarorlar</span></div>
+      </div>
+      <div class="content-row">
+        <span><b>10</b> <span data-i18n="s4.n1">bino turi</span></span>
+        <span><b>6</b> <span data-i18n="s4.n2">kasb</span></span>
+        <span><b>5</b> <span data-i18n="s4.n3">tex-tarmoq</span></span>
+        <span><b>Tunnel</b> <span data-i18n="s4.n4">megaloyiha</span></span>
+      </div>
+    </div>
+    <div class="art-side art-frame"><svg class="art" viewBox="0 0 360 340" aria-hidden="true">
+          <defs>
+            <linearGradient id="chsky" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#cfe3f2"/><stop offset="1" stop-color="#eaf4fb"/>
+            </linearGradient>
+            <radialGradient id="chglow" cx=".5" cy=".5" r=".5">
+              <stop offset="0" stop-color="#ff8a3d" stop-opacity=".16"/><stop offset="1" stop-color="#ff8a3d" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <rect width="360" height="340" fill="url(#chsky)"/>
+          <!-- backdrop: soft low-poly ridges -->
+          <polygon points="-20,250 70,140 170,250" fill="#b9d2e4"/>
+          <polygon points="70,140 46,176 96,176" fill="#f2f8fc"/>
+          <polygon points="120,250 230,120 350,250" fill="#a5c4da"/>
+          <polygon points="230,120 202,162 260,162" fill="#f2f8fc"/>
+          <polygon points="260,250 330,170 400,250" fill="#b9d2e4"/>
+          <rect y="248" width="360" height="92" fill="#eef6fc"/>
+          <polygon points="0,248 150,248 70,300" fill="#1b3352" opacity=".04"/>
+          <polygon points="210,248 360,248 290,306" fill="#1b3352" opacity=".05"/>
+          <circle cx="180" cy="290" r="150" fill="url(#chglow)"/>
+          <!-- ground shadows -->
+          <ellipse cx="75" cy="314" rx="38" ry="8" fill="#a9c2d6" opacity=".55"/>
+          <ellipse cx="180" cy="316" rx="42" ry="8" fill="#a9c2d6" opacity=".55"/>
+          <ellipse cx="285" cy="314" rx="38" ry="8" fill="#a9c2d6" opacity=".55"/>
+
+          <!-- ============ C1 HUNTER: fur hat, tan parka, spear ============ -->
+          <g transform="translate(75,144)">
+            <!-- spear -->
+            <line x1="-32" y1="-18" x2="-32" y2="168" stroke="#7a5a3a" stroke-width="4.5" stroke-linecap="round"/>
+            <polygon points="-37,-16 -27,-16 -32,-40" fill="#b9c7d4"/>
+            <polygon points="-32,-40 -27,-16 -32,-20" fill="#93a6b8"/>
+            <!-- boots -->
+            <rect x="-19" y="156" width="18" height="15" rx="6" fill="#23272e"/>
+            <rect x="2" y="156" width="18" height="15" rx="6" fill="#23272e"/>
+            <!-- pants -->
+            <rect x="-16" y="122" width="14" height="38" rx="5" fill="#4a5462"/>
+            <rect x="3" y="122" width="14" height="38" rx="5" fill="#4a5462"/>
+            <rect x="7" y="122" width="10" height="38" rx="5" fill="#3f4854" opacity=".7"/>
+            <!-- torso parka -->
+            <path d="M-25,62 Q-30,66 -28,118 Q-14,126 0,126 Q14,126 28,118 Q30,66 25,62 Q12,55 0,55 Q-12,55 -25,62 Z" fill="#c39a66"/>
+            <path d="M7,57 Q27,63 27,118 Q15,124 7,125 Z" fill="#a8814f" opacity=".85"/>
+            <rect x="-2" y="62" width="4" height="60" rx="2" fill="#8f6c40"/>
+            <rect x="-22" y="98" width="14" height="12" rx="3" fill="#a8814f"/>
+            <rect x="9" y="98" width="14" height="12" rx="3" fill="#96713f"/>
+            <!-- arms -->
+            <rect x="-38" y="64" width="13" height="42" rx="6" fill="#c39a66"/>
+            <rect x="25" y="64" width="13" height="42" rx="6" fill="#a8814f"/>
+            <circle cx="-31" cy="112" r="8" fill="#23272e"/>
+            <circle cx="32" cy="112" r="8" fill="#23272e"/>
+            <!-- fur collar -->
+            <ellipse cx="0" cy="58" rx="25" ry="9" fill="#f4f1ea"/>
+            <!-- head -->
+            <rect x="-20" y="12" width="40" height="42" rx="13" fill="#f2c49b"/>
+            <path d="M8,14 Q20,20 19,40 Q19,52 8,53 Z" fill="#d9a374" opacity=".5"/>
+            <!-- grey-flecked beard -->
+            <path d="M-15,36 Q-16,52 0,54 Q16,52 15,36 Q8,46 0,46 Q-8,46 -15,36 Z" fill="#4a4740"/>
+            <rect x="-4" y="43" width="8" height="3" rx="1.5" fill="#b97b5e"/>
+            <!-- eyes & brows -->
+            <circle cx="-8" cy="30" r="2.3" fill="#262b33"/><circle cx="8" cy="30" r="2.3" fill="#262b33"/>
+            <rect x="-11" y="23" width="7" height="2.5" rx="1.2" fill="#4a4740"/>
+            <rect x="4" y="23" width="7" height="2.5" rx="1.2" fill="#4a4740"/>
+            <!-- fur hat -->
+            <path d="M-20,16 Q-18,-4 0,-4 Q18,-4 20,16 Z" fill="#6e553c"/>
+            <ellipse cx="0" cy="14" rx="22" ry="8" fill="#f4f1ea"/>
+            <path d="M-22,10 Q-24,22 -19,30 Q-15,22 -16,12 Z" fill="#efece2"/>
+            <path d="M22,10 Q24,22 19,30 Q15,22 16,12 Z" fill="#e2ded2"/>
+          </g>
+
+          <!-- ============ C2 WORKER: blue parka, axe, lantern ============ -->
+          <g transform="translate(180,132)">
+            <!-- axe behind shoulder -->
+            <line x1="16" y1="116" x2="47" y2="30" stroke="#8a5f38" stroke-width="5" stroke-linecap="round"/>
+            <polygon points="38,20 60,30 46,46 33,36" fill="#4a525e"/>
+            <polygon points="60,30 46,46 51,33" fill="#6a7686"/>
+            <!-- boots -->
+            <rect x="-20" y="158" width="19" height="15" rx="6" fill="#2a2f38"/>
+            <rect x="2" y="158" width="19" height="15" rx="6" fill="#2a2f38"/>
+            <!-- pants -->
+            <rect x="-16" y="124" width="14" height="38" rx="5" fill="#565f6e"/>
+            <rect x="3" y="124" width="14" height="38" rx="5" fill="#565f6e"/>
+            <rect x="7" y="124" width="10" height="38" rx="5" fill="#49515f" opacity=".7"/>
+            <!-- torso parka -->
+            <path d="M-26,62 Q-31,66 -29,120 Q-14,128 0,128 Q14,128 29,120 Q31,66 26,62 Q12,55 0,55 Q-12,55 -26,62 Z" fill="#3e6fb2"/>
+            <path d="M7,57 Q28,63 28,120 Q15,126 7,127 Z" fill="#35619e" opacity=".9"/>
+            <rect x="-2" y="62" width="4" height="62" rx="2" fill="#2c5288"/>
+            <rect x="-23" y="100" width="14" height="12" rx="3" fill="#35619e"/>
+            <rect x="10" y="100" width="14" height="12" rx="3" fill="#2c5288"/>
+            <!-- arms -->
+            <rect x="-39" y="64" width="13" height="44" rx="6" fill="#3e6fb2"/>
+            <rect x="26" y="64" width="13" height="44" rx="6" fill="#35619e"/>
+            <circle cx="-32" cy="114" r="8" fill="#23272e"/>
+            <circle cx="19" cy="114" r="8" fill="#23272e"/>
+            <!-- lantern -->
+            <line x1="-32" y1="120" x2="-32" y2="132" stroke="#2b303a" stroke-width="2.5"/>
+            <rect x="-38" y="130" width="12" height="4" rx="2" fill="#2b303a"/>
+            <rect x="-40" y="133" width="16" height="20" rx="3" fill="#2b303a"/>
+            <rect x="-37" y="137" width="10" height="12" rx="2" fill="#ffb057"/>
+            <circle cx="-32" cy="143" r="12" fill="#ff8a3d" opacity=".3"/>
+            <!-- fur collar -->
+            <ellipse cx="0" cy="59" rx="26" ry="9" fill="#f4f1ea"/>
+            <!-- head -->
+            <rect x="-21" y="10" width="42" height="44" rx="13" fill="#f0bf96"/>
+            <path d="M9,12 Q21,18 20,40 Q20,52 9,54 Z" fill="#d9a374" opacity=".5"/>
+            <!-- beard -->
+            <path d="M-16,36 Q-17,54 0,56 Q17,54 16,36 Q8,47 0,47 Q-8,47 -16,36 Z" fill="#2a2f38"/>
+            <rect x="-4" y="45" width="8" height="3" rx="1.5" fill="#b97b5e"/>
+            <!-- eyes & brows -->
+            <circle cx="-8" cy="30" r="2.4" fill="#262b33"/><circle cx="8" cy="30" r="2.4" fill="#262b33"/>
+            <rect x="-12" y="22" width="8" height="2.6" rx="1.3" fill="#23272e"/>
+            <rect x="4" y="22" width="8" height="2.6" rx="1.3" fill="#23272e"/>
+            <!-- hair -->
+            <path d="M-21,24 Q-23,2 0,0 Q23,2 21,24 Q21,14 12,10 Q2,6 -10,10 Q-19,14 -21,24 Z" fill="#23272e"/>
+          </g>
+
+          <!-- ============ C3 WOMAN: red hood, firewood pack ============ -->
+          <g transform="translate(285,144)">
+            <!-- firewood on back -->
+            <g>
+              <rect x="-38" y="26" width="12" height="46" rx="5" fill="#8a5f38" transform="rotate(-12 -32 49)"/>
+              <rect x="26" y="26" width="12" height="46" rx="5" fill="#8a5f38" transform="rotate(12 32 49)"/>
+              <rect x="-8" y="18" width="12" height="42" rx="5" fill="#7a5230" transform="rotate(3 -2 39)"/>
+              <circle cx="-36" cy="30" r="5" fill="#caa06b"/>
+              <circle cx="36" cy="30" r="5" fill="#caa06b"/>
+              <circle cx="-1" cy="21" r="5" fill="#b98f58"/>
+            </g>
+            <!-- boots -->
+            <rect x="-18" y="156" width="17" height="15" rx="6" fill="#8e3630"/>
+            <rect x="2" y="156" width="17" height="15" rx="6" fill="#8e3630"/>
+            <!-- pants -->
+            <rect x="-15" y="122" width="13" height="38" rx="5" fill="#3d4350"/>
+            <rect x="3" y="122" width="13" height="38" rx="5" fill="#3d4350"/>
+            <!-- torso parka -->
+            <path d="M-24,62 Q-29,66 -27,118 Q-13,126 0,126 Q13,126 27,118 Q29,66 24,62 Q12,55 0,55 Q-12,55 -24,62 Z" fill="#d95245"/>
+            <path d="M6,57 Q26,63 26,118 Q14,124 6,125 Z" fill="#b8433a" opacity=".9"/>
+            <rect x="-2" y="62" width="4" height="60" rx="2" fill="#f4f1ea"/>
+            <!-- straps -->
+            <path d="M-16,60 L-8,122" stroke="#7a3d35" stroke-width="4" fill="none"/>
+            <path d="M16,60 L8,122" stroke="#7a3d35" stroke-width="4" fill="none"/>
+            <!-- arms -->
+            <rect x="-36" y="64" width="12" height="42" rx="6" fill="#d95245"/>
+            <rect x="24" y="64" width="12" height="42" rx="6" fill="#b8433a"/>
+            <circle cx="-30" cy="110" r="7.5" fill="#23272e"/>
+            <circle cx="30" cy="110" r="7.5" fill="#23272e"/>
+            <!-- hood -->
+            <rect x="-27" y="0" width="54" height="56" rx="20" fill="#d95245"/>
+            <path d="M10,2 Q27,8 27,34 Q27,52 12,56 Z" fill="#b8433a" opacity=".6"/>
+            <ellipse cx="0" cy="30" rx="21" ry="24" fill="#f4f1ea"/>
+            <!-- face -->
+            <rect x="-16" y="14" width="32" height="34" rx="11" fill="#f2c49b"/>
+            <path d="M7,16 Q16,20 15,34 Q15,46 7,47 Z" fill="#d9a374" opacity=".45"/>
+            <!-- blonde fringe -->
+            <path d="M-16,24 Q-16,12 0,11 Q16,12 16,24 Q16,18 8,16 Q0,14 -8,16 Q-16,18 -16,24 Z" fill="#e8c25a"/>
+            <!-- eyes & smile -->
+            <circle cx="-7" cy="31" r="2.2" fill="#262b33"/><circle cx="7" cy="31" r="2.2" fill="#262b33"/>
+            <path d="M-4,40 Q0,44 4,40" stroke="#b97b5e" stroke-width="2" fill="none" stroke-linecap="round"/>
+            <path d="M-11,26 Q-8,24 -5,26" stroke="#8a6a3a" stroke-width="1.6" fill="none"/>
+            <path d="M5,26 Q8,24 11,26" stroke="#8a6a3a" stroke-width="1.6" fill="none"/>
+          </g>
+
+          <!-- light snowfall -->
+          <g fill="#ffffff">
+            <circle cx="40" cy="60" r="2" opacity=".8"/><circle cx="120" cy="30" r="1.6" opacity=".7"/>
+            <circle cx="210" cy="70" r="2" opacity=".8"/><circle cx="300" cy="40" r="1.6" opacity=".7"/>
+            <circle cx="340" cy="110" r="1.8" opacity=".7"/><circle cx="20" cy="150" r="1.6" opacity=".6"/>
+            <circle cx="160" cy="110" r="1.4" opacity=".6"/><circle cx="255" cy="140" r="1.6" opacity=".6"/>
+            <circle cx="90" cy="210" r="1.6" opacity=".5"/><circle cx="310" cy="200" r="1.4" opacity=".5"/>
+          </g>
+        </svg></div>
+  </div>
+</section>
+
+<!-- 5 DIFFERENTIATION -->
+<section class="sl">
+  <div class="wrap">
+    <div class="eyebrow" data-i18n="s5.eyebrow">Farqlanish</div>
+    <h2 data-i18n="s5.h2">Janrda hech kim bu kombinatsiyani bermaydi.</h2>
+    <div class="tbl-scroll">
+      <table class="cmp">
+        <thead><tr>
+          <th data-i18n="s5.th0">Xususiyat</th><th class="fc">Frozen City</th><th data-i18n="s5.th1">Desktop klassikalar</th><th data-i18n="s5.th2">Mobil klonlar</th>
+        </tr></thead>
+        <tbody>
+          <tr><td data-i18n="s5.r1">Real-vaqt kooperativ</td><td class="fc yes">✓</td><td class="no-x">—</td><td class="no-x">—</td></tr>
+          <tr><td data-i18n="s5.r2">1 kod bazasidan 3 platforma</td><td class="fc yes">✓</td><td class="no-x">—</td><td class="no-x">—</td></tr>
+          <tr><td data-i18n="s5.r3">Havola orqali bir zumda o'ynash</td><td class="fc yes">✓</td><td class="no-x">—</td><td class="part" data-i18n="s5.part">qisman</td></tr>
+          <tr><td data-i18n="s5.r4">Simulyatsiya chuqurligi</td><td class="fc yes">✓</td><td class="yes">✓</td><td class="no-x">—</td></tr>
+          <tr><td data-i18n="s5.r5">Server-nazoratli yagona dunyo</td><td class="fc yes">✓</td><td class="no-x">—</td><td class="no-x">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- 6 TRACTION -->
+<section class="sl alt">
+  <div class="wrap">
+    <div class="eyebrow" data-i18n="s6.eyebrow">Bugungi holat</div>
+    <h2 data-i18n="s6.h2">Bu reja emas — ishlab turgan tizim.</h2>
+    <div class="stats">
+      <div class="stat"><div class="v">100</div><p data-i18n="s6.s1">parallel o'yinchi — yuklama testi</p></div>
+      <div class="stat"><div class="v">39</div><p data-i18n="s6.s2">test fayli — deploy darvozasi</p></div>
+      <div class="stat"><div class="v">12<small> MB</small></div><p data-i18n="s6.s3">web-yuklama (gzip)</p></div>
+      <div class="stat"><div class="v">3</div><p data-i18n="s6.s4">til — to'liq lokalizatsiya</p></div>
+    </div>
+    <p class="lead" style="margin-top:1.6rem" data-i18n="s6.note">Akkauntlar, saqlanadigan dunyolar, avtomatik deploy-quvur, jonli iqtisod — hammasi ishlab chiqarishda.</p>
+  </div>
+</section>
+
+<!-- 7 TECH MOAT -->
+<section class="sl">
+  <div class="wrap">
+    <div class="eyebrow" data-i18n="s7.eyebrow">Texnologik poydevor</div>
+    <h2 data-i18n="s7.h2">Nusxa ko'chirish qiyin bo'lgan asos.</h2>
+    <div class="chips">
+      <div class="chip"><b data-i18n="s7.c1.t">Rust + Bevy</b><span data-i18n="s7.c1.d">Bitta kod bazasi uch platformaga nativ tezlikda kompilyatsiya bo'ladi</span></div>
+      <div class="chip"><b data-i18n="s7.c2.t">Deterministik yadro</b><span data-i18n="s7.c2.d">Bir xil kirish — bir xil natija: serverda, brauzerda, oflaynda birdek</span></div>
+      <div class="chip"><b data-i18n="s7.c3.t">Delta-snapshot protokoli</b><span data-i18n="s7.c3.d">Faqat o'zgargan qism uzatiladi — mobil tarmoqda ham yengil</span></div>
+      <div class="chip"><b data-i18n="s7.c4.t">Protsedural grafika</b><span data-i18n="s7.c4.d">Rassom xarajatisiz — butun ko'rinish kod bilan chiziladi</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 8 VISION -->
+<section class="sl alt">
+  <div class="wrap">
+    <div class="eyebrow" data-i18n="s8.eyebrow">Vizyon</div>
+    <h2 data-i18n="s8.h2">Bitta gulxandan zamonaviy davlatgacha.</h2>
+    <div class="eras">
+      <div class="era"><span class="badge live" data-i18n="badge.live">Bugun jonli</span><svg width="84" height="84" viewBox="0 0 84 84" aria-hidden="true">
+          <polygon points="24,66 60,58 64,64 28,72" fill="#6d4a30"/><polygon points="60,66 24,58 20,64 56,72" fill="#5a3c26"/>
+          <polygon points="30,58 54,58 42,20" fill="#ff8a3d"/><polygon points="35,58 49,58 42,32" fill="#ffb057"/>
+          <polygon points="39,58 45,58 42,44" fill="#ffe29a"/>
+          <polygon points="48,24 53,14 56,26" fill="#ffb057" opacity=".8"/>
+        </svg><h3 data-i18n="s8.e1.t">Ibtidoiy qabila</h3><div class="res" data-i18n="s8.e1.r">Olov · yog'och · tosh</div></div>
+      <div class="era"><span class="badge plan" data-i18n="badge.plan">Rejada</span><svg width="84" height="84" viewBox="0 0 84 84" aria-hidden="true">
+          <polygon points="18,66 66,66 66,42 18,42" fill="#3f5875"/><polygon points="18,66 18,42 30,42 30,66" fill="#4c6989"/>
+          <polygon points="12,42 72,42 42,18" fill="#8fb2cc"/><polygon points="12,42 42,18 42,26 20,42" fill="#cfe4f4"/>
+          <polygon points="37,66 47,66 47,52 37,52" fill="#ffb057"/>
+          <polygon points="54,60 62,60 62,50 54,50" fill="#5adfcf" opacity=".7"/>
+        </svg><h3 data-i18n="s8.e2.t">Qishloq</h3><div class="res" data-i18n="s8.e2.r">G'isht · ruda · chorva</div></div>
+      <div class="era"><span class="badge plan" data-i18n="badge.plan">Rejada</span><svg width="84" height="84" viewBox="0 0 84 84" aria-hidden="true">
+          <polygon points="14,68 70,68 70,40 14,40" fill="#33506d"/>
+          <polygon points="14,40 28,28 28,40" fill="#46688a"/><polygon points="28,40 42,28 42,40" fill="#46688a"/><polygon points="42,40 56,28 56,40" fill="#46688a"/>
+          <polygon points="58,40 66,40 66,16 58,16" fill="#2c415c"/>
+          <polygon points="59,14 65,10 68,14 62,18" fill="#5d7288" opacity=".7"/><polygon points="64,8 70,4 74,9 68,13" fill="#5d7288" opacity=".45"/>
+          <polygon points="22,68 30,68 30,54 22,54" fill="#ffb057"/><polygon points="38,68 46,68 46,54 38,54" fill="#ffb057" opacity=".7"/>
+        </svg><h3 data-i18n="s8.e3.t">Sanoat shahri</h3><div class="res" data-i18n="s8.e3.r">Ko'mir · metall · elektr</div></div>
+      <div class="era"><span class="badge plan" data-i18n="badge.plan">Rejada</span><svg width="84" height="84" viewBox="0 0 84 84" aria-hidden="true">
+          <polygon points="16,70 30,70 30,30 16,30" fill="#3f5875"/><polygon points="16,30 30,30 23,20" fill="#4c6989"/>
+          <polygon points="36,70 52,70 52,14 36,14" fill="#2c415c"/><polygon points="36,14 52,14 44,4" fill="#3f5875"/>
+          <polygon points="58,70 70,70 70,40 58,40" fill="#33506d"/>
+          <g fill="#5adfcf"><circle cx="23" cy="40" r="1.8"/><circle cx="23" cy="52" r="1.8"/><circle cx="44" cy="26" r="1.8"/><circle cx="44" cy="40" r="1.8"/><circle cx="44" cy="54" r="1.8"/><circle cx="64" cy="50" r="1.8"/><circle cx="64" cy="60" r="1.8"/></g>
+        </svg><h3 data-i18n="s8.e4.t">Megapolis</h3><div class="res" data-i18n="s8.e4.r">Hi-tech · moliya</div></div>
+    </div>
+    <div class="climate">
+      <div class="c"><svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
+          <g fill="#8fd8f0">
+            <polygon points="22,4 25,20 22,24 19,20"/><polygon points="22,40 25,24 22,20 19,24"/>
+            <polygon points="4,13 19,19 24,22 18,24"/><polygon points="40,31 25,25 20,22 26,20"/>
+            <polygon points="40,13 25,19 20,22 26,24"/><polygon points="4,31 19,25 24,22 18,20"/>
+          </g><circle cx="22" cy="22" r="3.4" fill="#cfe4f4"/>
+        </svg><b data-i18n="s8.cl1">Muz</b></div>
+      <div class="c"><svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
+          <polygon points="22,12 31,17 31,27 22,32 13,27 13,17" fill="#ffb057"/>
+          <g fill="#ff8a3d"><polygon points="22,2 25,10 19,10"/><polygon points="22,42 25,34 19,34"/><polygon points="2,22 10,19 10,25"/><polygon points="42,22 34,19 34,25"/>
+          <polygon points="8,8 15,11 11,15"/><polygon points="36,8 33,15 29,11"/><polygon points="8,36 11,29 15,33"/><polygon points="36,36 29,33 33,29"/></g>
+        </svg><b data-i18n="s8.cl2">Jazirama</b></div>
+      <div class="c"><svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
+          <polygon points="2,18 10,10 18,18 26,10 34,18 42,10 42,16 34,24 26,16 18,24 10,16 2,24" fill="#5adfcf"/>
+          <polygon points="2,28 10,20 18,28 26,20 34,28 42,20 42,26 34,34 26,26 18,34 10,26 2,34" fill="#37b8a8" opacity=".8"/>
+          <polygon points="2,38 10,30 18,38 26,30 34,38 42,30 42,36 34,44 26,36 18,44 10,36 2,44" fill="#25917f" opacity=".6"/>
+        </svg><b data-i18n="s8.cl3">Toshqin</b></div>
+      <span data-i18n="s8.clnote">— bitta kampaniyada uch iqlim inqirozi, har biri o'z infratuzilmasini talab qiladi</span>
+    </div>
+  </div>
+</section>
+
+<!-- 9 ROADMAP -->
+<section class="sl">
+  <div class="wrap">
+    <div class="eyebrow" data-i18n="s9.eyebrow">Yo'l xaritasi</div>
+    <h2 data-i18n="s9.h2">Keyingi investitsiya nimani sotib oladi.</h2>
+    <div class="road">
+      <div class="col"><div class="k" data-i18n="s9.c1.k">Yaqin muddat</div><h3 data-i18n="s9.c1.t">Relizga tayyorlik</h3>
+        <ul><li data-i18n="s9.c1.i1">CI/CD — beshta platforma artefakti</li><li data-i18n="s9.c1.i2">WASM hajmini qisqartirish</li></ul></div>
+      <div class="col"><div class="k" data-i18n="s9.c2.k">O'rta muddat</div><h3 data-i18n="s9.c2.t">Tarqatish</h3>
+        <ul><li data-i18n="s9.c2.i1">Vitrina, treyler, marketing kanali</li><li data-i18n="s9.c2.i2">Hissa-reyestri ustida marketplace</li></ul></div>
+      <div class="col"><div class="k" data-i18n="s9.c3.k">Masshtab</div><h3 data-i18n="s9.c3.t">O'sish zaxirasi</h3>
+        <ul><li data-i18n="s9.c3.i1">1 000+ parallel uchun sharding</li><li data-i18n="s9.c3.i2">Ko'p mintaqali dunyo-menejeri</li></ul></div>
+    </div>
+  </div>
+</section>
+
+<!-- 10 ASK -->
+<section class="sl alt">
+  <div class="wrap">
+    <div class="eyebrow" data-i18n="s10.eyebrow">Taklif</div>
+    <h2 data-i18n="s10.h2">Keyingi qadam — suhbat.</h2>
+    <p class="lead" data-i18n="s10.big">Shartlar uchrashuvda kelishiladi. Mahsulot esa allaqachon jonli — hoziroq ochib, o'ynab ko'ring.</p>
+    <div class="ask-ctas">
+      <a class="btn primary" href="/" data-i18n="s10.cta1">O'yinni ochish</a>
+      <a class="btn ghost" href="https://twelfth.uz" data-i18n="s10.cta2">Bog'lanish — twelfth.uz</a>
+      <a class="btn ghost" href="/investors.html" data-i18n="s10.cta3">To'liq brifing</a>
+    </div>
+    <p class="ask-note">game.twelfth.uz/pitch · 2026</p>
+  </div>
+</section>
+
+</main>
+<script src="pitch.js" defer></script>
+</body>
+</html>
