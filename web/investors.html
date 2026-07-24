@@ -137,6 +137,21 @@
   footer{padding:2.2rem 0 5.5rem;font-family:var(--font-m);font-size:.72rem;color:var(--faint);letter-spacing:.06em}
   footer .wrap{display:flex;flex-wrap:wrap;gap:.6rem 2rem;justify-content:space-between}
   @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.play-fab .dot,.flame-pulse{animation:none}}
+
+  /* roadmap timeline + scene-art upgrades */
+  .tline{display:grid;grid-template-columns:repeat(4,1fr);gap:.8rem;margin-bottom:1.8rem;position:relative}
+  .tline::before{content:"";position:absolute;top:5px;left:1.5%;right:1.5%;height:2px;background:linear-gradient(90deg,var(--accent),var(--teal) 45%,var(--faint))}
+  .tn{position:relative;padding-top:1.1rem;color:var(--dim)}
+  .tn .tdot{position:absolute;top:0;left:0;width:12px;height:12px;border-radius:50%;background:var(--faint);border:2px solid var(--bg)}
+  .tn.done .tdot{background:var(--accent)}
+  .tn b{font-family:var(--font-m);font-weight:400;font-size:.7rem;letter-spacing:.05em;color:var(--ink)}
+  @media (max-width:700px){.tline{grid-template-columns:repeat(2,1fr)}.tline::before{display:none}.tn{padding-top:0;padding-left:1.2rem}.tn .tdot{top:.2rem}}
+  .era > svg{width:100%;height:auto;display:block;margin:0 0 .8rem;border:1px solid var(--line-soft)}
+  .climate2{margin-top:2rem;display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:1rem}
+  .clim-card{background:var(--sunken);border:1px solid var(--line-soft);padding:1rem}
+  .clim-card svg{width:100%;height:auto;display:block;margin-bottom:.7rem;border:1px solid var(--line-soft)}
+  .clim-card b{font-family:var(--font-d);display:block;margin-bottom:.25rem}
+  .clim-card span{color:var(--dim);font-size:.88rem}
 </style>
 </head>
 <body>
@@ -597,66 +612,154 @@
       <p class="lead" data-i18n="s6.lead">Bugungi qishki omon qolish — birinchi bob xolos. Reja: o'sha shahar, o'sha tekshirilgan simulyatsiya ustida to'rt sivilizatsiya davridan o'tadi.</p></div>
     <div class="eras">
       <div class="era"><span class="badge live" data-i18n="badge.live">Bugun jonli</span>
-        <svg width="84" height="84" viewBox="0 0 84 84" aria-hidden="true">
-          <polygon points="24,66 60,58 64,64 28,72" fill="#6d4a30"/><polygon points="60,66 24,58 20,64 56,72" fill="#5a3c26"/>
-          <polygon points="30,58 54,58 42,20" fill="#ff8a3d"/><polygon points="35,58 49,58 42,32" fill="#ffb057"/>
-          <polygon points="39,58 45,58 42,44" fill="#ffe29a"/>
-          <polygon points="48,24 53,14 56,26" fill="#ffb057" opacity=".8"/>
-        </svg>
+        <svg viewBox="0 0 220 130" aria-hidden="true">
+  <rect width="220" height="130" fill="#0e1c30"/>
+  <circle cx="30" cy="20" r="1.2" fill="#e8f0f8" opacity=".7"/><circle cx="180" cy="14" r="1" fill="#e8f0f8" opacity=".6"/>
+  <circle cx="120" cy="26" r="1.1" fill="#e8f0f8" opacity=".5"/><circle cx="70" cy="12" r="1" fill="#e8f0f8" opacity=".5"/>
+  <polygon points="0,100 42,42 92,100" fill="#182f4a"/><polygon points="42,42 32,58 54,58" fill="#8fb2cc" opacity=".8"/>
+  <polygon points="66,100 132,28 196,100" fill="#12233a"/><polygon points="132,28 120,48 145,48" fill="#cfe4f4" opacity=".85"/>
+  <rect y="100" width="220" height="30" fill="#223c58"/>
+  <circle cx="120" cy="98" r="42" fill="#ff8a3d" opacity=".16"/><circle cx="120" cy="98" r="20" fill="#ff8a3d" opacity=".2"/>
+  <polygon points="112,100 128,100 125,62 115,62" fill="#5a3126"/>
+  <polygon points="115,62 125,62 120,48" fill="#3a2018"/>
+  <polygon points="116,62 124,62 120,50" fill="#ff8a3d"/><polygon points="118,62 122,62 120,55" fill="#ffb057"/>
+  <polygon points="50,100 62,83 62,100" fill="#3f5875"/><polygon points="62,100 62,83 74,100" fill="#2c415c"/>
+  <polygon points="59,100 65,100 62,92" fill="#ffb057"/>
+  <polygon points="154,100 164,87 164,100" fill="#3f5875"/><polygon points="164,100 164,87 174,100" fill="#2c415c"/>
+  <polygon points="161,100 167,100 164,93" fill="#ffb057"/>
+  <polygon points="188,100 208,100 198,78" fill="#1d3a4a"/><polygon points="191,88 205,88 198,72" fill="#234656"/>
+  <circle cx="90" cy="60" r="1.2" fill="#e8f0f8" opacity=".35"/><circle cx="160" cy="52" r="1.1" fill="#e8f0f8" opacity=".3"/>
+</svg>
         <h3 data-i18n="s6.e1.t">Ibtidoiy qabila</h3><div class="res" data-i18n="s6.e1.r">Olov · yog'och · tosh</div><p data-i18n="s6.e1.d">Valyuta yo'q — hamma narsa umumiy omborda. Aynan bugun ishlab turgan bosqich.</p></div>
       <div class="era"><span class="badge plan" data-i18n="badge.plan">Rejada</span>
-        <svg width="84" height="84" viewBox="0 0 84 84" aria-hidden="true">
-          <polygon points="18,66 66,66 66,42 18,42" fill="#3f5875"/><polygon points="18,66 18,42 30,42 30,66" fill="#4c6989"/>
-          <polygon points="12,42 72,42 42,18" fill="#8fb2cc"/><polygon points="12,42 42,18 42,26 20,42" fill="#cfe4f4"/>
-          <polygon points="37,66 47,66 47,52 37,52" fill="#ffb057"/>
-          <polygon points="54,60 62,60 62,50 54,50" fill="#5adfcf" opacity=".7"/>
-        </svg>
+        <svg viewBox="0 0 220 130" aria-hidden="true">
+  <rect width="220" height="130" fill="#33566f"/>
+  <circle cx="36" cy="94" r="30" fill="#ffb057" opacity=".22"/><circle cx="36" cy="94" r="12" fill="#ffd88a"/>
+  <polygon points="0,100 62,62 132,100" fill="#3f5e4a"/><polygon points="98,100 160,68 220,100" fill="#46684f"/>
+  <rect y="100" width="220" height="30" fill="#4a6b52"/>
+  <rect x="70" y="72" width="32" height="28" fill="#8a5a44"/>
+  <polygon points="66,72 106,72 86,56" fill="#6e553c"/>
+  <rect x="78" y="80" width="8" height="9" fill="#ffb057"/>
+  <rect x="94" y="58" width="6" height="11" fill="#5a4636"/>
+  <circle cx="97" cy="52" r="3" fill="#cfd8de" opacity=".7"/><circle cx="100" cy="45" r="2.4" fill="#cfd8de" opacity=".5"/>
+  <rect x="118" y="82" width="30" height="18" fill="#9fd0d8" opacity=".55"/>
+  <polygon points="116,82 150,82 133,68" fill="#9fd0d8" opacity=".45"/>
+  <rect x="118" y="82" width="30" height="18" fill="none" stroke="#46688a" stroke-width="1.4"/>
+  <line x1="133" y1="82" x2="133" y2="100" stroke="#46688a" stroke-width="1.2"/>
+  <rect x="166" y="88" width="14" height="12" fill="#7a8794"/>
+  <polygon points="163,88 183,88 173,77" fill="#6e553c"/>
+  <rect x="8" y="104" width="44" height="4" fill="#c9a95e"/><rect x="8" y="112" width="44" height="4" fill="#c9a95e" opacity=".85"/>
+  <rect x="8" y="120" width="44" height="4" fill="#c9a95e" opacity=".7"/>
+  <rect x="58" y="104" width="3" height="9" fill="#6e553c"/><rect x="68" y="104" width="3" height="9" fill="#6e553c"/>
+  <rect x="78" y="104" width="3" height="9" fill="#6e553c"/><rect x="56" y="106" width="27" height="2" fill="#6e553c"/>
+  <circle cx="196" cy="108" r="5" fill="#e8e2d4"/><ellipse cx="199" cy="114" rx="8" ry="5" fill="#e8e2d4"/>
+</svg>
         <h3 data-i18n="s6.e2.t">Qishloq</h3><div class="res" data-i18n="s6.e2.r">G'isht · ruda · bug'doy · chorva</div><p data-i18n="s6.e2.d">Doimiy uy-joy, teplitsalar, quduqlar. Dehqon, chorvador, konchi kasblari.</p></div>
       <div class="era"><span class="badge plan" data-i18n="badge.plan">Rejada</span>
-        <svg width="84" height="84" viewBox="0 0 84 84" aria-hidden="true">
-          <polygon points="14,68 70,68 70,40 14,40" fill="#33506d"/>
-          <polygon points="14,40 28,28 28,40" fill="#46688a"/><polygon points="28,40 42,28 42,40" fill="#46688a"/><polygon points="42,40 56,28 56,40" fill="#46688a"/>
-          <polygon points="58,40 66,40 66,16 58,16" fill="#2c415c"/>
-          <polygon points="59,14 65,10 68,14 62,18" fill="#5d7288" opacity=".7"/><polygon points="64,8 70,4 74,9 68,13" fill="#5d7288" opacity=".45"/>
-          <polygon points="22,68 30,68 30,54 22,54" fill="#ffb057"/><polygon points="38,68 46,68 46,54 38,54" fill="#ffb057" opacity=".7"/>
-        </svg>
+        <svg viewBox="0 0 220 130" aria-hidden="true">
+  <rect width="220" height="130" fill="#26303c"/>
+  <rect y="26" width="220" height="18" fill="#303c4a" opacity=".6"/>
+  <rect x="46" y="64" width="80" height="36" fill="#33506d"/>
+  <polygon points="46,64 66,48 66,64" fill="#3f5875"/><polygon points="66,64 86,48 86,64" fill="#3f5875"/><polygon points="86,64 106,48 106,64" fill="#3f5875"/>
+  <rect x="52" y="78" width="10" height="9" fill="#ffb057"/><rect x="68" y="78" width="10" height="9" fill="#ffb057" opacity=".75"/>
+  <rect x="84" y="78" width="10" height="9" fill="#ffb057"/><rect x="100" y="78" width="10" height="9" fill="#ffb057" opacity=".6"/>
+  <rect x="132" y="34" width="12" height="66" fill="#4a525e"/><rect x="132" y="34" width="12" height="4" fill="#5d6a78"/>
+  <circle cx="139" cy="26" r="5" fill="#7a8794" opacity=".55"/><circle cx="144" cy="17" r="6.5" fill="#7a8794" opacity=".45"/>
+  <circle cx="151" cy="8" r="8" fill="#7a8794" opacity=".3"/>
+  <line x1="190" y1="58" x2="190" y2="100" stroke="#23272e" stroke-width="3"/>
+  <line x1="178" y1="64" x2="202" y2="64" stroke="#23272e" stroke-width="2.5"/>
+  <path d="M178,66 Q150,80 126,70" stroke="#23272e" stroke-width="1.2" fill="none" opacity=".8"/>
+  <path d="M202,66 Q214,78 220,74" stroke="#23272e" stroke-width="1.2" fill="none" opacity=".8"/>
+  <polygon points="152,100 168,84 184,100" fill="#23272e"/><polygon points="166,100 178,90 190,100" fill="#2f333b"/>
+  <rect y="100" width="220" height="30" fill="#2f3b48"/>
+</svg>
         <h3 data-i18n="s6.e3.t">Sanoat shahri</h3><div class="res" data-i18n="s6.e3.r">Ko'mir · neft · metall · elektr</div><p data-i18n="s6.e3.d">Valyuta paydo bo'ladi: maosh va savdo. Fabrikalar, kasalxonalar.</p></div>
       <div class="era"><span class="badge plan" data-i18n="badge.plan">Rejada</span>
-        <svg width="84" height="84" viewBox="0 0 84 84" aria-hidden="true">
-          <polygon points="16,70 30,70 30,30 16,30" fill="#3f5875"/><polygon points="16,30 30,30 23,20" fill="#4c6989"/>
-          <polygon points="36,70 52,70 52,14 36,14" fill="#2c415c"/><polygon points="36,14 52,14 44,4" fill="#3f5875"/>
-          <polygon points="58,70 70,70 70,40 58,40" fill="#33506d"/>
-          <g fill="#5adfcf"><circle cx="23" cy="40" r="1.8"/><circle cx="23" cy="52" r="1.8"/><circle cx="44" cy="26" r="1.8"/><circle cx="44" cy="40" r="1.8"/><circle cx="44" cy="54" r="1.8"/><circle cx="64" cy="50" r="1.8"/><circle cx="64" cy="60" r="1.8"/></g>
-        </svg>
+        <svg viewBox="0 0 220 130" aria-hidden="true">
+  <rect width="220" height="130" fill="#070d18"/>
+  <polygon points="20,0 60,0 40,60" fill="#37e0c8" opacity=".05"/><polygon points="150,0 190,0 175,50" fill="#5adfcf" opacity=".04"/>
+  <circle cx="16" cy="16" r="1.1" fill="#e8f0f8" opacity=".6"/><circle cx="205" cy="50" r="1" fill="#e8f0f8" opacity=".5"/>
+  <circle cx="120" cy="10" r="1.2" fill="#e8f0f8" opacity=".6"/>
+  <rect x="30" y="44" width="24" height="56" fill="#2c415c"/>
+  <rect x="64" y="28" width="28" height="72" fill="#3f5875"/><line x1="78" y1="28" x2="78" y2="18" stroke="#5d7288" stroke-width="2"/>
+  <rect x="102" y="52" width="22" height="48" fill="#33506d"/>
+  <rect x="134" y="38" width="26" height="62" fill="#2c415c"/>
+  <rect x="170" y="60" width="18" height="40" fill="#26394f"/>
+  <g fill="#5adfcf" opacity=".9">
+    <rect x="35" y="52" width="3" height="4"/><rect x="44" y="62" width="3" height="4"/><rect x="35" y="76" width="3" height="4"/>
+    <rect x="69" y="36" width="3" height="4"/><rect x="78" y="48" width="3" height="4"/><rect x="86" y="60" width="3" height="4"/>
+    <rect x="69" y="72" width="3" height="4"/><rect x="107" y="60" width="3" height="4"/><rect x="116" y="76" width="3" height="4"/>
+    <rect x="139" y="46" width="3" height="4"/><rect x="150" y="58" width="3" height="4"/><rect x="175" y="68" width="3" height="4"/>
+  </g>
+  <g fill="#ffb057" opacity=".85">
+    <rect x="44" y="86" width="3" height="4"/><rect x="78" y="82" width="3" height="4"/><rect x="86" y="38" width="3" height="4"/>
+    <rect x="107" y="84" width="3" height="4"/><rect x="150" y="80" width="3" height="4"/><rect x="139" y="90" width="3" height="4"/>
+  </g>
+  <line x1="0" y1="86" x2="220" y2="86" stroke="#46688a" stroke-width="2.5"/>
+  <rect x="20" y="86" width="4" height="14" fill="#33506d"/><rect x="96" y="86" width="4" height="14" fill="#33506d"/><rect x="164" y="86" width="4" height="14" fill="#33506d"/>
+  <ellipse cx="190" cy="24" rx="20" ry="6" fill="#46688a"/>
+  <rect x="185" y="10" width="10" height="14" fill="#3f5875"/>
+  <ellipse cx="190" cy="32" rx="13" ry="3" fill="#5adfcf" opacity=".35"/>
+  <rect y="100" width="220" height="30" fill="#0b1626"/>
+</svg>
         <h3 data-i18n="s6.e4.t">Zamonaviy megapolis</h3><div class="res" data-i18n="s6.e4.r">Yuqori texnologiya · AES/GES · moliya</div><p data-i18n="s6.e4.d">To'liq soliq-byudjet tizimi, aqlli binolar, suzuvchi megastrukturalar.</p></div>
     </div>
-    <div class="climate">
-      <div class="clim">
-        <svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
-          <g fill="#8fd8f0">
-            <polygon points="22,4 25,20 22,24 19,20"/><polygon points="22,40 25,24 22,20 19,24"/>
-            <polygon points="4,13 19,19 24,22 18,24"/><polygon points="40,31 25,25 20,22 26,20"/>
-            <polygon points="40,13 25,19 20,22 26,24"/><polygon points="4,31 19,25 24,22 18,20"/>
-          </g><circle cx="22" cy="22" r="3.4" fill="#cfe4f4"/>
-        </svg>
-        <div><b data-i18n="s6.cl1.t">Sovuq fasl — Muz</b><span data-i18n="s6.cl1.d">Sovuq urishi va ochlik; pechka, teplitsa, issiq kiyim ishlab chiqarishni talab qiladi.</span></div>
-      </div>
-      <div class="clim">
-        <svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
-          <polygon points="22,12 31,17 31,27 22,32 13,27 13,17" fill="#ffb057"/>
-          <g fill="#ff8a3d"><polygon points="22,2 25,10 19,10"/><polygon points="22,42 25,34 19,34"/><polygon points="2,22 10,19 10,25"/><polygon points="42,22 34,19 34,25"/>
-          <polygon points="8,8 15,11 11,15"/><polygon points="36,8 33,15 29,11"/><polygon points="8,36 11,29 15,33"/><polygon points="36,36 29,33 33,29"/></g>
-        </svg>
-        <div><b data-i18n="s6.cl2.t">Issiq fasl — Jazirama</b><span data-i18n="s6.cl2.d">Suv taqchilligi, yong'inlar; suv zaxiralari, irrigatsiya va sovutish inshootlari kerak.</span></div>
-      </div>
-      <div class="clim">
-        <svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
-          <polygon points="2,18 10,10 18,18 26,10 34,18 42,10 42,16 34,24 26,16 18,24 10,16 2,24" fill="#5adfcf"/>
-          <polygon points="2,28 10,20 18,28 26,20 34,28 42,20 42,26 34,34 26,26 18,34 10,26 2,34" fill="#37b8a8" opacity=".8"/>
-          <polygon points="2,38 10,30 18,38 26,30 34,38 42,30 42,36 34,44 26,36 18,44 10,36 2,44" fill="#25917f" opacity=".6"/>
-        </svg>
-        <div><b data-i18n="s6.cl3.t">Toshqin fasli — Suv</b><span data-i18n="s6.cl3.d">Yerlar suv ostida qoladi; balandlikka ko'chish, suzuvchi platformalar, gidroponika.</span></div>
-      </div>
+    <div class="climate2">
+      <div class="clim-card"><svg viewBox="0 0 220 130" aria-hidden="true">
+  <rect width="220" height="130" fill="#0d1b2e"/>
+  <g stroke="#e8f0f8" stroke-width="1.6" opacity=".25">
+    <line x1="34" y1="8" x2="14" y2="44"/><line x1="80" y1="4" x2="60" y2="40"/><line x1="130" y1="10" x2="110" y2="46"/>
+    <line x1="180" y1="6" x2="160" y2="42"/><line x1="210" y1="20" x2="190" y2="56"/><line x1="56" y1="30" x2="40" y2="60"/>
+  </g>
+  <ellipse cx="42" cy="106" rx="48" ry="14" fill="#8fb2cc" opacity=".45"/>
+  <ellipse cx="152" cy="110" rx="62" ry="16" fill="#a9c2d6" opacity=".35"/>
+  <rect y="102" width="220" height="28" fill="#223c58"/>
+  <polygon points="176,102 185,62 194,102" fill="#8fd8f0" opacity=".8"/>
+  <polygon points="190,102 197,76 204,102" fill="#6fc2e0" opacity=".8"/>
+  <circle cx="86" cy="98" r="26" fill="#ff8a3d" opacity=".18"/>
+  <polygon points="72,102 86,82 86,102" fill="#3f5875"/><polygon points="86,102 86,82 100,102" fill="#2c415c"/>
+  <polygon points="82,102 90,102 86,92" fill="#ffb057"/>
+  <circle cx="120" cy="70" r="1.4" fill="#e8f0f8" opacity=".5"/><circle cx="40" cy="76" r="1.2" fill="#e8f0f8" opacity=".4"/>
+</svg><b data-i18n="s6.cl1.t">Sovuq fasl — Muz</b><span data-i18n="s6.cl1.d">Sovuq urishi va ochlik; pechka, teplitsa, issiq kiyim ishlab chiqarishni talab qiladi.</span></div>
+      <div class="clim-card"><svg viewBox="0 0 220 130" aria-hidden="true">
+  <rect width="220" height="130" fill="#c96a35"/>
+  <rect width="220" height="52" fill="#d97b3d"/>
+  <circle cx="44" cy="34" r="14" fill="#ffe29a"/>
+  <g fill="#ffd88a">
+    <polygon points="44,10 47,18 41,18"/><polygon points="44,58 47,50 41,50"/><polygon points="20,34 28,31 28,37"/>
+    <polygon points="68,34 60,31 60,37"/><polygon points="27,17 33,22 28,26"/><polygon points="61,17 55,22 60,26"/>
+    <polygon points="27,51 32,45 36,50"/><polygon points="61,51 56,45 52,50"/>
+  </g>
+  <path d="M96,44 Q102,38 108,44 Q114,50 120,44" stroke="#ffe29a" stroke-width="2" fill="none" opacity=".4"/>
+  <path d="M130,30 Q136,24 142,30 Q148,36 154,30" stroke="#ffe29a" stroke-width="2" fill="none" opacity=".3"/>
+  <rect y="88" width="220" height="42" fill="#b8834a"/>
+  <path d="M28,98 l16,7 l-5,10" stroke="#8a5f38" stroke-width="1.6" fill="none"/>
+  <path d="M118,94 l-11,12 M118,94 l9,10" stroke="#8a5f38" stroke-width="1.6" fill="none"/>
+  <path d="M64,110 l14,6 M160,100 l14,9 l-6,8" stroke="#8a5f38" stroke-width="1.6" fill="none"/>
+  <line x1="188" y1="100" x2="192" y2="76" stroke="#6e553c" stroke-width="2.5"/>
+  <line x1="208" y1="100" x2="204" y2="76" stroke="#6e553c" stroke-width="2.5"/>
+  <rect x="184" y="60" width="28" height="17" rx="3" fill="#46688a"/>
+  <polygon points="184,60 212,60 198,52" fill="#3a5a78"/>
+  <path d="M84,100 L84,76 M84,84 L73,73 M84,80 L95,71" stroke="#5a4636" stroke-width="3" fill="none" stroke-linecap="round"/>
+</svg><b data-i18n="s6.cl2.t">Issiq fasl — Jazirama</b><span data-i18n="s6.cl2.d">Suv taqchilligi, yong'inlar; suv zaxiralari, irrigatsiya va sovutish inshootlari kerak.</span></div>
+      <div class="clim-card"><svg viewBox="0 0 220 130" aria-hidden="true">
+  <rect width="220" height="130" fill="#33566f"/>
+  <g stroke="#9fc4d8" stroke-width="1.4" opacity=".5">
+    <line x1="30" y1="10" x2="24" y2="26"/><line x1="70" y1="4" x2="64" y2="20"/><line x1="112" y1="12" x2="106" y2="28"/>
+    <line x1="150" y1="6" x2="144" y2="22"/><line x1="190" y1="14" x2="184" y2="30"/><line x1="50" y1="34" x2="44" y2="50"/>
+    <line x1="132" y1="38" x2="126" y2="54"/><line x1="174" y1="44" x2="168" y2="60"/>
+  </g>
+  <rect y="78" width="220" height="52" fill="#2a7d8f"/>
+  <polygon points="0,78 12,72 24,78 36,72 48,78 60,72 72,78 84,72 96,78 108,72 120,78 132,72 144,78 156,72 168,78 180,72 192,78 204,72 216,78 220,78 220,84 0,84" fill="#37b8a8" opacity=".55"/>
+  <polygon points="0,94 14,89 28,94 42,89 56,94 70,89 84,94 98,89 112,94 126,89 140,94 154,89 168,94 182,89 196,94 210,89 220,92 220,98 0,98" fill="#37b8a8" opacity=".3"/>
+  <polygon points="54,78 88,78 71,56" fill="#6e553c"/>
+  <rect x="78" y="60" width="6" height="12" fill="#5a4636"/>
+  <rect x="118" y="72" width="38" height="7" rx="3.5" fill="#8a5f38"/>
+  <line x1="122" y1="72" x2="122" y2="79" stroke="#6e4a2c" stroke-width="1.5"/><line x1="136" y1="72" x2="136" y2="79" stroke="#6e4a2c" stroke-width="1.5"/><line x1="150" y1="72" x2="150" y2="79" stroke="#6e4a2c" stroke-width="1.5"/>
+  <polygon points="128,72 137,60 146,72" fill="#3f5875"/><polygon points="134,72 140,72 137,65" fill="#ffb057"/>
+  <polygon points="176,80 208,80 200,90 184,90" fill="#6e553c"/>
+  <polygon points="178,81 206,81 199,88 185,88" fill="#8a6f48"/>
+</svg><b data-i18n="s6.cl3.t">Toshqin fasli — Suv</b><span data-i18n="s6.cl3.d">Yerlar suv ostida qoladi; balandlikka ko'chish, suzuvchi platformalar, gidroponika.</span></div>
     </div>
     <p class="bridge" data-i18n="s6.bridge">Bularning bari qayta yozish emas — o'sha tekshirilgan deterministik yadro ustiga qo'shimcha kontent sifatida, V0.2–V0.7 ni chiqargan intizom bilan bosqichma-bosqich qo'shiladi.</p>
   </div>
@@ -667,6 +770,12 @@
   <div class="wrap">
     <div class="slide-head"><span class="no">07</span>
       <div class="eyebrow" data-i18n="s7.eyebrow">Yo'l xaritasi</div><h2 data-i18n="s7.h2">Keyingi investitsiya nimani sotib oladi.</h2></div>
+    <div class="tline">
+      <div class="tn done"><span class="tdot"></span><b data-i18n="tl.1">Bugun — V0.16 jonli</b></div>
+      <div class="tn"><span class="tdot"></span><b data-i18n="tl.2">Reliz — CI/CD, 5 platforma</b></div>
+      <div class="tn"><span class="tdot"></span><b data-i18n="tl.3">O'sish — vitrina, marketing, marketplace</b></div>
+      <div class="tn"><span class="tdot"></span><b data-i18n="tl.4">Masshtab — 1 000+ o'yinchi, ko'p mintaqa</b></div>
+    </div>
     <div class="road">
       <div class="col"><div class="k" data-i18n="s7.c1.k">Yaqin muddat</div><h3 data-i18n="s7.c1.t">Relizga tayyorlik</h3>
         <ul><li data-i18n="s7.c1.i1">CI/CD — bitta teg, beshta platforma artefakti</li><li data-i18n="s7.c1.i2">WASM hajmini yana qisqartirish bosqichi</li><li data-i18n="s7.c1.i3">Oxirgi lokalizatsiya qilinmagan qatlam: server matnlari</li></ul></div>
