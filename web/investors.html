@@ -1,1091 +1,800 @@
-<title>Frozen City — Investor Briefing</title>
-<meta name="description" content="Detailed investor briefing in Uzbek, English and Russian: problem, product, competitive position, architecture, traction, risks and roadmap." />
-
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Frozen City — Investor Taqdimoti</title>
+<meta name="description" content="Frozen City — kooperativ survival city-builder. Investorlar uchun qisqa taqdimot (uz/en/ru)." />
 <style>
   :root{
-    --bg: #eef3f7; --bg-elevated: #ffffff; --bg-sunken: #e2ebf2;
-    --ink: #0b1420; --ink-dim: #46596b; --ink-faint: #7c8ea0;
-    --accent: #cc4e0e; --accent-ink: #ffffff; --accent-2: #0f8478;
-    --line: rgba(11,20,32,0.14); --line-soft: rgba(11,20,32,0.08);
-    --todo-bg: #fff4e9; --todo-border: #cc4e0e;
-    --font-display: 'Bahnschrift', 'SF Compact Condensed', 'Arial Narrow', 'Helvetica Neue', sans-serif;
-    --font-body: Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', serif;
-    --font-mono: 'Cascadia Mono', 'Cascadia Code', Consolas, 'SF Mono', Menlo, 'Ubuntu Mono', monospace;
-    --space-1: .5rem; --space-2: 1rem; --space-3: 1.5rem; --space-4: 2rem;
-    --space-6: 3rem; --space-8: 4rem; --space-12: 6rem; --space-16: 8rem;
-    --fs-eyebrow: .75rem;
-    --fs-h1: clamp(2.4rem, 4.6vw + 1rem, 5.4rem);
-    --fs-h2: clamp(1.8rem, 2.4vw + 1rem, 2.9rem);
-    --fs-body: clamp(1rem, .25vw + .95rem, 1.125rem);
-    --fs-lead: clamp(1.1rem, .5vw + 1rem, 1.35rem);
-    --fs-stat: clamp(2.1rem, 2.6vw, 3.1rem);
+    --bg:#0a1220; --bg2:#0e1828; --card:#111d30; --sunken:#070d18;
+    --ink:#e8f0f8; --dim:#9db0c4; --faint:#5d7288;
+    --accent:#ff8a3d; --accent-soft:rgba(255,138,61,.14); --teal:#5adfcf;
+    --line:rgba(232,240,248,.12); --line-soft:rgba(232,240,248,.06);
+    --font-d:'Bahnschrift','Arial Narrow Bold','Segoe UI Semibold','Helvetica Neue',Arial,sans-serif;
+    --font-b:'Segoe UI',system-ui,-apple-system,'Helvetica Neue',Arial,sans-serif;
+    --font-m:'Cascadia Mono',Consolas,'SF Mono',Menlo,'Ubuntu Mono',monospace;
+    --fs-h1:clamp(2.6rem,5.2vw + 1rem,5.6rem);
+    --fs-h2:clamp(1.6rem,2.2vw + .9rem,2.5rem);
+    --fs-lead:clamp(1.05rem,.5vw + .95rem,1.3rem);
   }
-  @media (prefers-color-scheme: dark){
-    :root{ --bg:#070b12; --bg-elevated:#0e1520; --bg-sunken:#050810; --ink:#dfe9f2; --ink-dim:#93a6b9; --ink-faint:#56697c;
-      --accent:#ff7a33; --accent-ink:#1a0900; --accent-2:#55d9c9; --line:rgba(223,233,242,0.14); --line-soft:rgba(223,233,242,0.07);
-      --todo-bg:rgba(255,122,51,0.07); --todo-border:#ff7a33; }
+  *{box-sizing:border-box}
+  html{background:var(--bg);scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-b);font-size:1rem;line-height:1.65;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  h1,h2,h3{font-family:var(--font-d);font-weight:700;margin:0;letter-spacing:.01em;text-wrap:balance}
+  p{margin:0}
+  a{color:var(--accent)}
+  a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  ::selection{background:var(--accent);color:#1a0900}
+  .wrap{max-width:1080px;margin:0 auto;padding-inline:clamp(1.25rem,4vw,3rem)}
+  .eyebrow{font-family:var(--font-m);font-size:.72rem;text-transform:uppercase;letter-spacing:.18em;color:var(--accent)}
+  .no{font-family:var(--font-m);font-size:.7rem;color:var(--faint);letter-spacing:.1em}
+  .slide{padding-block:clamp(3.5rem,8vw,6.5rem);border-bottom:1px solid var(--line-soft)}
+  .slide.alt{background:var(--bg2)}
+  .slide-head{max-width:44rem;margin-bottom:clamp(2rem,5vw,3.5rem)}
+  .slide-head h2{margin-top:.55rem;font-size:var(--fs-h2)}
+  .slide-head .lead{margin-top:1rem;font-size:var(--fs-lead);color:var(--dim)}
+  .brandmark{position:fixed;top:1.1rem;left:1.2rem;z-index:50;font-family:var(--font-m);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);text-decoration:none;background:rgba(10,18,32,.72);border:1px solid var(--line);padding:.45rem .7rem;backdrop-filter:blur(6px)}
+  .brandmark:hover{color:var(--accent)}
+  .lang-switch{position:fixed;top:1.1rem;right:1.2rem;z-index:50;display:flex;font-family:var(--font-m);font-size:.72rem;letter-spacing:.06em;background:rgba(10,18,32,.72);border:1px solid var(--line);backdrop-filter:blur(6px)}
+  .lang-switch button{appearance:none;border:0;background:transparent;color:var(--faint);padding:.5rem .68rem;cursor:pointer;font:inherit;letter-spacing:inherit}
+  .lang-switch button + button{border-left:1px solid var(--line)}
+  .lang-switch button.active{color:#1a0900;background:var(--accent)}
+  .lang-switch button:hover:not(.active){color:var(--ink)}
+  .play-fab{position:fixed;bottom:1.15rem;right:1.2rem;z-index:50;display:inline-flex;align-items:center;gap:.55rem;background:var(--accent);color:#1a0900;text-decoration:none;font-family:var(--font-m);font-size:.78rem;letter-spacing:.05em;padding:.75rem 1.05rem;border:1px solid var(--accent);box-shadow:0 8px 28px rgba(255,138,61,.3)}
+  .play-fab:hover{filter:brightness(1.07)}
+  .play-fab .dot{width:6px;height:6px;border-radius:50%;background:#1a0900;flex:none}
+  @media (prefers-reduced-motion:no-preference){
+    .play-fab .dot{animation:pulse 1.8s ease-in-out infinite}
+    .flame-pulse{animation:flame 2.6s ease-in-out infinite}
   }
-  :root[data-theme="dark"]{ --bg:#070b12; --bg-elevated:#0e1520; --bg-sunken:#050810; --ink:#dfe9f2; --ink-dim:#93a6b9; --ink-faint:#56697c;
-    --accent:#ff7a33; --accent-ink:#1a0900; --accent-2:#55d9c9; --line:rgba(223,233,242,0.14); --line-soft:rgba(223,233,242,0.07);
-    --todo-bg:rgba(255,122,51,0.07); --todo-border:#ff7a33; }
-  :root[data-theme="light"]{ --bg:#eef3f7; --bg-elevated:#ffffff; --bg-sunken:#e2ebf2; --ink:#0b1420; --ink-dim:#46596b; --ink-faint:#7c8ea0;
-    --accent:#cc4e0e; --accent-ink:#ffffff; --accent-2:#0f8478; --line:rgba(11,20,32,0.14); --line-soft:rgba(11,20,32,0.08);
-    --todo-bg:#fff4e9; --todo-border:#cc4e0e; }
-
-  *{ box-sizing: border-box; }
-  html{ background: var(--bg); scroll-behavior: smooth; }
-  body{ margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-body); font-size:var(--fs-body); line-height:1.6; -webkit-font-smoothing:antialiased; overflow-x:hidden; }
-  h1,h2,h3{ font-family:var(--font-display); font-weight:700; margin:0; text-wrap:balance; letter-spacing:.01em; }
-  p{ margin:0; } a{ color:var(--accent); }
-  a:focus-visible, button:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
-  ::selection{ background:var(--accent); color:var(--accent-ink); }
-  .wrap{ max-width:1120px; margin:0 auto; padding-inline:clamp(1.25rem,4vw,3rem); }
-  .eyebrow{ font-family:var(--font-mono); font-size:var(--fs-eyebrow); text-transform:uppercase; letter-spacing:.16em; color:var(--accent); }
-  .slide{ position:relative; padding-block:var(--space-16); border-bottom:1px solid var(--line-soft); scroll-margin-top:1rem; }
-  .slide.alt{ background:var(--bg-elevated); }
-  .no{ font-family:var(--font-mono); font-size:.72rem; color:var(--ink-faint); }
-
-  /* fixed chrome: 4 corners + right-center nav */
-  .lang-switch{ position:fixed; top:1.1rem; right:1.1rem; z-index:50; display:flex; gap:0; font-family:var(--font-mono); font-size:.72rem; letter-spacing:.06em;
-    background:var(--bg-elevated); border:1px solid var(--line); }
-  .lang-switch button{ appearance:none; border:0; background:transparent; color:var(--ink-faint); padding:.5rem .65rem; cursor:pointer; font:inherit; letter-spacing:inherit; }
-  .lang-switch button + button{ border-left:1px solid var(--line); }
-  .lang-switch button.active{ color:var(--accent-ink); background:var(--accent); }
-  .lang-switch button:hover:not(.active){ color:var(--ink); }
-
-  .play-fab{ position:fixed; bottom:1.1rem; right:1.1rem; z-index:50; display:inline-flex; align-items:center; gap:.5rem;
-    background:var(--accent); color:var(--accent-ink); text-decoration:none; font-family:var(--font-mono); font-size:.78rem; letter-spacing:.04em;
-    padding:.7rem 1rem; border:1px solid var(--accent); box-shadow:0 6px 20px rgba(204,78,14,.28); }
-  .play-fab:hover{ filter:brightness(1.06); }
-  .play-fab .dot{ width:6px; height:6px; border-radius:50%; background:var(--accent-ink); flex:none; }
-  @media (prefers-reduced-motion:no-preference){ .play-fab .dot{ animation:pulse 1.8s ease-in-out infinite; } }
-  @keyframes pulse{ 0%,100%{ opacity:1; } 50%{ opacity:.35; } }
-
-  .brandmark{ position:fixed; top:1.25rem; left:1.25rem; z-index:40; font-family:var(--font-mono); font-size:.7rem; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-faint); text-decoration:none; }
-  .brandmark:hover{ color:var(--accent); }
-  .tracker{ position:fixed; bottom:1.25rem; left:1.25rem; z-index:40; font-family:var(--font-mono); font-size:.72rem; letter-spacing:.1em; color:var(--ink-dim);
-    background:var(--bg-elevated); border:1px solid var(--line); padding:.5rem .75rem; display:flex; gap:.5rem; align-items:baseline; }
-  .tracker .tracker-temp{ color:var(--accent); font-variant-numeric:tabular-nums; }
-  @media (max-width:640px){ .brandmark{ display:none; } .play-fab span.lbl{ display:none; } .play-fab{ padding:.7rem; } }
-
-  .nav-dots{ position:fixed; right:1.15rem; top:calc(50% - 1rem); transform:translateY(-50%); z-index:40; display:flex; flex-direction:column; gap:.5rem; }
-  .nav-dots a{ width:7px; height:7px; border-radius:50%; background:var(--ink-faint); opacity:.45; display:block; transition:opacity .15s ease, transform .15s ease; }
-  .nav-dots a:hover, .nav-dots a:focus-visible{ opacity:1; transform:scale(1.35); }
-  .nav-dots a.active{ background:var(--accent); opacity:1; transform:scale(1.35); }
-  @media (max-width:980px){ .nav-dots{ display:none; } }
-  @media (prefers-reduced-motion:reduce){ .nav-dots a{ transition:none; } html{ scroll-behavior:auto; } .play-fab .dot{ animation:none; } }
-
-  .cover{ min-height:100svh; display:flex; align-items:flex-end; padding-block:var(--space-12); position:relative; isolation:isolate; color:#f2f6fa; border-bottom:none;
-    background: radial-gradient(60% 50% at 22% 30%, rgba(255,122,51,.22), transparent 60%), radial-gradient(80% 60% at 80% 0%, rgba(85,217,201,.14), transparent 55%),
-      linear-gradient(180deg, #050810 0%, #0a0f18 55%, #0d1420 100%); }
-  .cover canvas{ position:absolute; inset:0; width:100%; height:100%; z-index:0; }
-  .cover .wrap{ position:relative; z-index:2; width:100%; }
-  .cover-tag{ position:absolute; top:var(--space-4); left:clamp(1.25rem,4vw,3rem); z-index:2; font-family:var(--font-mono); font-size:.68rem; letter-spacing:.12em; text-transform:uppercase;
-    color:rgba(242,246,250,.55); border:1px solid rgba(242,246,250,.25); padding:.35rem .6rem; }
-  .cover .eyebrow{ color:#ff9a5c; }
-  .cover h1{ font-size:var(--fs-h1); color:#f7fafc; line-height:.95; margin-block:.9rem 1.1rem; text-shadow:0 2px 40px rgba(255,122,51,.15); }
-  .cover .lead{ max-width:40rem; font-size:var(--fs-lead); color:rgba(242,246,250,.82); }
-  .cover .meta-row{ margin-top:var(--space-6); display:flex; flex-wrap:wrap; gap:var(--space-4) var(--space-8); font-family:var(--font-mono); font-size:.82rem; color:rgba(242,246,250,.65); }
-  .cover .meta-row b{ color:#f7fafc; font-weight:400; }
-  .cover .meta-row .dot{ color:var(--accent); }
-  .cover-cta{ display:inline-flex; align-items:center; gap:.6rem; margin-top:var(--space-6); background:var(--accent); color:var(--accent-ink); text-decoration:none;
-    font-family:var(--font-mono); font-size:.85rem; letter-spacing:.04em; padding:.85rem 1.3rem; border:1px solid var(--accent); }
-  .cover-cta:hover{ filter:brightness(1.06); }
-  .scroll-cue{ margin-top:var(--space-6); font-family:var(--font-mono); font-size:.72rem; letter-spacing:.1em; color:rgba(242,246,250,.5); text-transform:uppercase; }
-
-  .slide-head{ margin-bottom:var(--space-8); max-width:46rem; }
-  .slide-head h2{ margin-top:.6rem; }
-  .slide-head .lead{ margin-top:var(--space-3); font-size:var(--fs-lead); color:var(--ink-dim); max-width:42rem; }
-  .cols{ display:grid; grid-template-columns:1.1fr .9fr; gap:var(--space-8); align-items:start; }
-  @media (max-width:860px){ .cols{ grid-template-columns:1fr; } }
-  .cols.reverse{ grid-template-columns:.9fr 1.1fr; }
-  @media (max-width:860px){ .cols.reverse{ grid-template-columns:1fr; } }
-
-  .img-slot{ position:relative; border:1px dashed var(--line); overflow:hidden; display:flex; flex-direction:column; justify-content:flex-end; padding:var(--space-3); color:rgba(255,255,255,.92); }
-  .img-slot .tag{ font-family:var(--font-mono); font-size:.66rem; letter-spacing:.12em; text-transform:uppercase; color:rgba(255,255,255,.65); }
-  .img-slot .cap{ font-family:var(--font-display); font-size:1.05rem; margin-top:.25rem; }
-  .img-slot .dims{ font-family:var(--font-mono); font-size:.66rem; color:rgba(255,255,255,.55); margin-top:.4rem; }
-  .slot-1, .slot-4{ aspect-ratio:16/9; } .slot-2, .slot-3, .slot-5{ aspect-ratio:4/3; }
-  .slot-2{ background:linear-gradient(150deg,#101823 0%,#1a2534 55%,#33241a 100%); }
-  .slot-3{ background:linear-gradient(150deg,#0c1420 0%,#122032 45%,#2f3f22 78%,#4a3a12 100%); }
-  .slot-4{ background:linear-gradient(150deg,#1c2733 0%,#3a3320 55%,#5c3f22 100%); }
-  .slot-5{ background:linear-gradient(150deg,#0e1720 0%,#1c2a38 100%); }
-  .img-slot canvas.art{ position:absolute; inset:0; width:100%; height:100%; z-index:0; display:block; }
-  .img-slot::after{ content:""; position:absolute; inset:0; background:linear-gradient(180deg, transparent 35%, rgba(5,8,16,.78) 100%); z-index:1; pointer-events:none; }
-  .img-slot .cap-wrap{ position:relative; z-index:2; display:flex; flex-direction:column; }
-
-  .loop-row{ display:grid; grid-template-columns:repeat(4,1fr); gap:0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
-  .loop-row .step{ padding:var(--space-4) var(--space-3); border-left:1px solid var(--line); }
-  .loop-row .step:first-child{ border-left:none; }
-  @media (max-width:760px){ .loop-row{ grid-template-columns:1fr; } .loop-row .step{ border-left:none; border-top:1px solid var(--line); } .loop-row .step:first-child{ border-top:none; } }
-  .loop-row .n{ font-family:var(--font-mono); color:var(--accent); font-size:.78rem; }
-  .loop-row h3{ margin-top:.5rem; font-size:1.15rem; }
-  .loop-row p{ margin-top:.4rem; color:var(--ink-dim); font-size:.95rem; }
-
-  .feat-list{ display:grid; gap:var(--space-3); margin-top:var(--space-2); }
-  .feat-list .row{ display:grid; grid-template-columns:9rem 1fr; gap:var(--space-3); padding-block:var(--space-2); border-top:1px solid var(--line-soft); }
-  .feat-list .row:first-child{ border-top:none; }
-  .feat-list .label{ font-family:var(--font-mono); font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-faint); padding-top:.2rem; }
-  .feat-list .val b{ font-weight:700; } .feat-list .val{ color:var(--ink-dim); }
-  .feat-list.tight .row{ grid-template-columns:8rem 1fr; }
-  @media (max-width:560px){ .feat-list .row{ grid-template-columns:1fr; } .feat-list .label{ padding-top:0; } }
-
-  .stack{ display:grid; gap:.9rem; margin-top:var(--space-2); }
-  .stack .layer{ border:1px solid var(--line); padding:var(--space-3) var(--space-4); display:grid; grid-template-columns:10rem 1fr; gap:var(--space-3); align-items:baseline; background:var(--bg-elevated); }
-  .stack .layer .name{ font-family:var(--font-mono); font-size:.85rem; color:var(--accent-2); }
-  .stack .layer .desc{ color:var(--ink-dim); font-size:.95rem; }
-  .stack .layer .desc b{ color:var(--ink); font-weight:700; }
-  .stack .layer .plain{ display:block; margin-top:.5rem; font-family:var(--font-mono); font-size:.78rem; color:var(--ink-faint); }
-  .stack .connector{ height:1.1rem; margin-left:4.9rem; border-left:1px solid var(--line); }
-  @media (max-width:640px){ .stack .layer{ grid-template-columns:1fr; } .stack .connector{ margin-left:1.2rem; } }
-
-  .flow{ display:grid; grid-template-columns:1fr auto 1fr auto 1fr; gap:var(--space-2); align-items:center; margin-top:var(--space-4); }
-  .flow .stage{ border:1px solid var(--line); background:var(--bg-elevated); padding:var(--space-3); }
-  .flow .stage .k{ font-family:var(--font-mono); font-size:.68rem; letter-spacing:.1em; text-transform:uppercase; color:var(--accent); }
-  .flow .stage h3{ margin-top:.4rem; font-size:1.15rem; }
-  .flow .stage p{ margin-top:.4rem; font-size:.88rem; color:var(--ink-dim); }
-  .flow .arrow{ color:var(--ink-faint); font-family:var(--font-mono); font-size:1.3rem; }
-  @media (max-width:860px){ .flow{ grid-template-columns:1fr; } .flow .arrow{ transform:rotate(90deg); justify-self:start; margin-left:1rem; } }
-  .flow-note{ margin-top:var(--space-3); font-size:.92rem; color:var(--ink-dim); max-width:34rem; }
-
-  .proof-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:1px; background:var(--line); border:1px solid var(--line); margin-top:var(--space-2); }
-  .proof-grid .cell{ background:var(--bg-elevated); padding:var(--space-4) var(--space-3); }
-  .proof-grid .stat{ font-family:var(--font-mono); font-size:var(--fs-stat); color:var(--accent); font-variant-numeric:tabular-nums; line-height:1; }
-  .proof-grid .cap{ margin-top:.6rem; font-size:.88rem; color:var(--ink-dim); }
-  @media (max-width:860px){ .proof-grid{ grid-template-columns:repeat(2,1fr); } }
-
-  .gaps{ margin-top:var(--space-6); border-top:1px solid var(--line); padding-top:var(--space-4); }
-  .gaps h3{ font-size:1.05rem; }
-  .gaps ul{ list-style:none; margin:var(--space-2) 0 0; padding:0; display:grid; gap:.5rem; }
-  .gaps li{ color:var(--ink-dim); font-size:.92rem; padding-left:1rem; position:relative; }
-  .gaps li::before{ content:"—"; position:absolute; left:0; color:var(--ink-faint); }
-
-  .timeline{ margin-top:var(--space-4); border-left:1px solid var(--line); padding-left:var(--space-4); display:grid; gap:var(--space-4); }
-  .timeline .ev .date{ font-family:var(--font-mono); font-size:.74rem; color:var(--accent); letter-spacing:.06em; }
-  .timeline .ev h3{ font-size:1.05rem; margin-top:.3rem; }
-  .timeline .ev p{ margin-top:.3rem; color:var(--ink-dim); font-size:.92rem; }
-  .timeline .ev{ position:relative; }
-  .timeline .ev::before{ content:""; position:absolute; left:-1.62rem; top:.35rem; width:7px; height:7px; background:var(--accent); }
-
-  .road-cols{ display:grid; grid-template-columns:repeat(3,1fr); gap:var(--space-4); margin-top:var(--space-4); }
-  @media (max-width:800px){ .road-cols{ grid-template-columns:1fr; } }
-  .road-cols .col{ border-top:2px solid var(--accent); padding-top:var(--space-3); }
-  .road-cols .col .k{ font-family:var(--font-mono); font-size:.7rem; text-transform:uppercase; letter-spacing:.1em; color:var(--ink-faint); }
-  .road-cols .col h3{ margin-top:.4rem; font-size:1.1rem; }
-  .road-cols .col ul{ list-style:none; margin:var(--space-2) 0 0; padding:0; display:grid; gap:.55rem; }
-  .road-cols .col li{ color:var(--ink-dim); font-size:.9rem; padding-left:.9rem; position:relative; }
-  .road-cols .col li::before{ content:"—"; position:absolute; left:0; color:var(--ink-faint); }
-
-  .risk-list{ margin-top:var(--space-4); border-top:1px solid var(--line); }
-  .risk-list .item{ display:grid; grid-template-columns:1fr 1fr; gap:var(--space-4); padding-block:var(--space-3); border-bottom:1px solid var(--line); }
-  @media (max-width:700px){ .risk-list .item{ grid-template-columns:1fr; } }
-  .risk-list .k{ display:block; font-family:var(--font-mono); font-size:.68rem; text-transform:uppercase; letter-spacing:.1em; margin-bottom:.4rem; }
-  .risk-list .risk .k{ color:var(--todo-border); } .risk-list .mit .k{ color:var(--accent-2); }
-  .risk-list .risk, .risk-list .mit{ font-size:.95rem; color:var(--ink-dim); }
-
-
-  .todo{ border-left:3px solid var(--todo-border); background:var(--todo-bg); padding:var(--space-4); margin-top:var(--space-3); }
-  .todo .flag{ font-family:var(--font-mono); font-size:.7rem; letter-spacing:.12em; text-transform:uppercase; color:var(--todo-border); }
-  .todo p{ margin-top:.6rem; color:var(--ink-dim); } .todo p + p{ margin-top:.5rem; }
-  .todo .hint{ font-size:.88rem; font-style:italic; }
-  .todo-fields{ display:grid; gap:.65rem; margin-top:var(--space-2); }
-  .todo-fields .f{ display:grid; grid-template-columns:11rem 1fr; gap:.8rem; align-items:baseline; }
-  @media (max-width:600px){ .todo-fields .f{ grid-template-columns:1fr; } }
-  .todo-fields .f .k{ font-family:var(--font-mono); font-size:.76rem; color:var(--ink-dim); }
-  .todo-fields .f .v{ border-bottom:1px dashed var(--todo-border); color:var(--ink-faint); font-style:italic; padding-bottom:.2rem; }
-
-  .eras{ display:grid; grid-template-columns:repeat(4,1fr); gap:var(--space-4); margin-top:var(--space-4); }
-  @media (max-width:980px){ .eras{ grid-template-columns:repeat(2,1fr); } }
-  @media (max-width:560px){ .eras{ grid-template-columns:1fr; } }
-  .eras .era{ border-top:3px solid var(--line); padding-top:var(--space-3); }
-  .eras .era.e1{ border-top-color:#5b9bd5; } .eras .era.e2{ border-top-color:#7fae6a; }
-  .eras .era.e3{ border-top-color:#9a8b7a; } .eras .era.e4{ border-top-color:#d9a441; }
-  .eras .era h3{ margin-top:.6rem; font-size:1.1rem; }
-  .eras .era .res{ margin-top:.35rem; font-family:var(--font-mono); font-size:.72rem; color:var(--ink-faint); }
-  .eras .era p{ margin-top:.5rem; font-size:.88rem; color:var(--ink-dim); }
-  .badge{ display:inline-block; font-family:var(--font-mono); font-size:.64rem; letter-spacing:.08em; text-transform:uppercase; padding:.2rem .5rem; border:1px solid var(--line); }
-  .badge.live{ color:var(--accent-2); border-color:var(--accent-2); }
-  .badge.planned{ color:var(--ink-faint); }
-  .clim{ display:grid; grid-template-columns:repeat(3,1fr); gap:var(--space-4); margin-top:var(--space-4); }
-  @media (max-width:800px){ .clim{ grid-template-columns:1fr; } }
-  .clim .season{ border:1px solid var(--line); padding:var(--space-4); background:var(--bg-elevated); }
-  .clim .season h3{ margin-top:.6rem; font-size:1.15rem; }
-  .clim .season .risk, .clim .season .resp{ margin-top:.6rem; font-size:.88rem; color:var(--ink-dim); }
-  .clim .season .risk .k{ display:block; font-family:var(--font-mono); font-size:.66rem; text-transform:uppercase; letter-spacing:.08em; color:var(--todo-border); margin-bottom:.25rem; }
-  .clim .season .resp .k{ display:block; font-family:var(--font-mono); font-size:.66rem; text-transform:uppercase; letter-spacing:.08em; color:var(--accent-2); margin-bottom:.25rem; }
-
-  .glossary{ display:grid; grid-template-columns:1fr 1fr; gap:var(--space-3) var(--space-6); margin-top:var(--space-4); }
-  @media (max-width:760px){ .glossary{ grid-template-columns:1fr; } }
-  .glossary dt{ font-family:var(--font-mono); font-size:.85rem; color:var(--accent); }
-  .glossary dd{ margin:.3rem 0 0; color:var(--ink-dim); font-size:.92rem; }
-
-  footer{ padding-block:var(--space-8); }
-  footer .wrap{ display:flex; justify-content:space-between; flex-wrap:wrap; gap:var(--space-2); font-family:var(--font-mono); font-size:.74rem; color:var(--ink-faint); letter-spacing:.04em; }
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  @keyframes flame{0%,100%{opacity:1}50%{opacity:.72}}
+  @media (max-width:640px){.brandmark{display:none}}
+  .cover{position:relative;min-height:100svh;display:flex;align-items:flex-end;border-bottom:none;isolation:isolate;overflow:hidden}
+  .cover svg.scene{position:absolute;inset:0;width:100%;height:100%;z-index:0}
+  .cover .wrap{position:relative;z-index:2;width:100%;padding-block:clamp(3rem,7vw,5rem)}
+  .cover-tag{display:inline-block;font-family:var(--font-m);font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;color:var(--teal);border:1px solid rgba(90,223,207,.35);padding:.4rem .65rem;margin-bottom:1.2rem;background:rgba(7,13,24,.55)}
+  .cover h1{font-size:var(--fs-h1);line-height:.94;margin-block:.7rem 1.1rem;text-shadow:0 2px 50px rgba(255,138,61,.25)}
+  .cover .lead{max-width:38rem;font-size:var(--fs-lead);color:var(--dim);text-shadow:0 1px 18px rgba(7,13,24,.8)}
+  .meta-row{margin-top:2.2rem;display:flex;flex-wrap:wrap;gap:1rem 2.6rem;font-family:var(--font-m);font-size:.8rem;color:var(--faint)}
+  .meta-row b{color:var(--ink);font-weight:400}
+  .cover-cta{display:inline-flex;align-items:center;gap:.6rem;margin-top:2.2rem;background:var(--accent);color:#1a0900;text-decoration:none;font-family:var(--font-m);font-size:.85rem;letter-spacing:.04em;padding:.85rem 1.35rem}
+  .cover-cta:hover{filter:brightness(1.07)}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(225px,1fr));gap:1rem}
+  .card{background:var(--card);border:1px solid var(--line-soft);padding:1.4rem 1.3rem}
+  .card .k{font-family:var(--font-d);font-size:1.35rem;color:var(--accent)}
+  .card .k.teal{color:var(--teal)}
+  .card p{margin-top:.5rem;color:var(--dim);font-size:.93rem}
+  .cols2{display:grid;grid-template-columns:1.05fr .95fr;gap:clamp(2rem,5vw,3.5rem);align-items:center}
+  @media (max-width:860px){.cols2{grid-template-columns:1fr}}
+  .art{width:100%;height:auto;display:block}
+  .art-frame{background:var(--sunken);border:1px solid var(--line-soft);padding:1rem}
+  .art-cap{font-family:var(--font-m);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-top:.7rem}
+  .gap-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:1rem}
+  .gap-card{background:var(--card);border:1px solid var(--line-soft);padding:1.5rem 1.3rem}
+  .gap-card.hole{border:1px dashed rgba(255,138,61,.5);background:var(--accent-soft)}
+  .gap-card h3{font-size:1.05rem;margin-bottom:.55rem}
+  .gap-card p{color:var(--dim);font-size:.93rem}
+  .gap-card svg{display:block;margin-bottom:.9rem}
+  .close-line{margin-top:2rem;max-width:46rem;font-size:var(--fs-lead);color:var(--ink)}
+  .loop{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1rem;margin-top:1.6rem}
+  .loop .step{border-left:2px solid var(--accent);padding:.2rem 0 .2rem 1rem}
+  .loop .step b{font-family:var(--font-d);display:block;margin-bottom:.25rem}
+  .loop .step span{color:var(--dim);font-size:.9rem}
+  .content-row{margin-top:2.2rem;display:flex;flex-wrap:wrap;gap:1rem 2.4rem;font-family:var(--font-m);font-size:.8rem;color:var(--dim)}
+  .content-row b{color:var(--teal);font-weight:400}
+  .tbl-scroll{overflow-x:auto;border:1px solid var(--line-soft)}
+  table.cmp{border-collapse:collapse;width:100%;min-width:560px;font-size:.92rem}
+  .cmp th,.cmp td{padding:.85rem 1rem;text-align:center;border-bottom:1px solid var(--line-soft)}
+  .cmp th{font-family:var(--font-m);font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);background:var(--sunken)}
+  .cmp td:first-child,.cmp th:first-child{text-align:left}
+  .cmp td:first-child{color:var(--dim)}
+  .cmp .fc{background:rgba(255,138,61,.06)}
+  .cmp th.fc{color:var(--accent)}
+  .yes{color:var(--teal);font-weight:700}
+  .no-x{color:var(--faint)}
+  .part{color:var(--dim)}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1rem}
+  .stat{background:var(--card);border:1px solid var(--line-soft);padding:1.4rem 1.3rem}
+  .stat .v{font-family:var(--font-d);font-size:clamp(2rem,3vw,2.8rem);color:var(--accent);line-height:1}
+  .stat .v small{font-size:55%}
+  .stat p{margin-top:.45rem;color:var(--dim);font-size:.88rem}
+  .infra{margin-top:1.6rem;display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:.55rem 2rem;padding:0;list-style:none;color:var(--dim);font-size:.93rem}
+  .infra li::before{content:"◆ ";color:var(--teal);font-size:.7em}
+  .eras{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:1rem}
+  .era{background:var(--card);border:1px solid var(--line-soft);padding:1.3rem;text-align:center}
+  .era svg{display:block;margin:0 auto .8rem}
+  .era h3{font-size:1rem}
+  .era .res{font-family:var(--font-m);font-size:.7rem;color:var(--teal);margin:.35rem 0 .5rem;letter-spacing:.04em}
+  .era p{color:var(--dim);font-size:.88rem}
+  .badge{display:inline-block;font-family:var(--font-m);font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;padding:.22rem .5rem;margin-bottom:.7rem}
+  .badge.live{color:#1a0900;background:var(--teal)}
+  .badge.plan{color:var(--dim);border:1px solid var(--line)}
+  .climate{margin-top:2.2rem;display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:1rem}
+  .clim{border:1px solid var(--line-soft);padding:1.2rem 1.3rem;display:flex;gap:1rem;align-items:flex-start;background:var(--sunken)}
+  .clim svg{flex:none;margin-top:.15rem}
+  .clim b{font-family:var(--font-d);display:block}
+  .clim span{color:var(--dim);font-size:.88rem}
+  .bridge{margin-top:1.8rem;color:var(--dim);max-width:46rem;font-size:.95rem;border-left:2px solid var(--teal);padding-left:1rem}
+  .road{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:1rem}
+  .road .col{background:var(--card);border-top:2px solid var(--accent);padding:1.3rem}
+  .road .col:nth-child(2){border-top-color:var(--teal)}
+  .road .col:nth-child(3){border-top-color:var(--dim)}
+  .road .k{font-family:var(--font-m);font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+  .road h3{margin:.4rem 0 .7rem;font-size:1.05rem}
+  .road ul{margin:0;padding-left:1.1rem;color:var(--dim);font-size:.9rem}
+  .road li{margin-bottom:.45rem}
+  .ask-box{display:grid;grid-template-columns:1.1fr .9fr;gap:clamp(2rem,5vw,3.5rem);align-items:center}
+  @media (max-width:860px){.ask-box{grid-template-columns:1fr}}
+  .ask-box .big{font-size:var(--fs-lead);color:var(--ink);max-width:34rem}
+  .ask-box .note{margin-top:1rem;color:var(--dim);font-size:.95rem}
+  .ask-ctas{display:flex;flex-wrap:wrap;gap:.8rem;margin-top:1.8rem}
+  .btn{display:inline-flex;align-items:center;gap:.55rem;text-decoration:none;font-family:var(--font-m);font-size:.82rem;letter-spacing:.04em;padding:.8rem 1.2rem}
+  .btn.primary{background:var(--accent);color:#1a0900}
+  .btn.ghost{border:1px solid var(--line);color:var(--ink)}
+  .btn:hover{filter:brightness(1.08)}
+  footer{padding:2.2rem 0 5.5rem;font-family:var(--font-m);font-size:.72rem;color:var(--faint);letter-spacing:.06em}
+  footer .wrap{display:flex;flex-wrap:wrap;gap:.6rem 2rem;justify-content:space-between}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.play-fab .dot,.flame-pulse{animation:none}}
 </style>
+</head>
+<body>
 
 <a class="brandmark" href="/" data-i18n="nav.back">← Frozen City</a>
 <div class="lang-switch" role="group" aria-label="Language">
-  <button type="button" data-setlang="uz">UZ</button>
-  <button type="button" data-setlang="en">EN</button>
-  <button type="button" data-setlang="ru">RU</button>
+  <button data-lang="uz">UZ</button><button data-lang="en">EN</button><button data-lang="ru">RU</button>
 </div>
-<div class="tracker"><span class="tracker-day"><span data-i18n="tracker.dayword">KUN</span> <span id="trackerNum">1</span></span><span class="tracker-temp">-4°C</span></div>
-<a class="play-fab" href="/"><span class="dot" aria-hidden="true"></span><span class="lbl" data-i18n="play.cta">Frozen City'ni o'ynash</span></a>
-<nav class="nav-dots" aria-label="Sections">
-  <a href="#s1" data-i18n-title="nav.s1"></a><a href="#s2" data-i18n-title="nav.s2"></a><a href="#s3" data-i18n-title="nav.s3"></a>
-  <a href="#s4" data-i18n-title="nav.s4"></a><a href="#s5" data-i18n-title="nav.s5"></a><a href="#s6" data-i18n-title="nav.s6"></a>
-  <a href="#s7" data-i18n-title="nav.s7"></a><a href="#s8" data-i18n-title="nav.s8"></a><a href="#s9" data-i18n-title="nav.s9"></a>
-  <a href="#s10" data-i18n-title="nav.s10"></a><a href="#s11" data-i18n-title="nav.s11"></a><a href="#s12" data-i18n-title="nav.vis2"></a><a href="#s13" data-i18n-title="nav.clim"></a><a href="#s14" data-i18n-title="nav.s12"></a>
-  <a href="#s15" data-i18n-title="nav.s13"></a><a href="#s16" data-i18n-title="nav.s14"></a><a href="#s17" data-i18n-title="nav.s15"></a>
-  <a href="#s18" data-i18n-title="nav.s16"></a><a href="#s19" data-i18n-title="nav.s17"></a>
-</nav>
+<a class="play-fab" href="/"><span class="dot"></span><span data-i18n="play.cta">O'ynash</span></a>
 
-<section id="s1" class="slide cover" data-day="1" data-temp="-4">
-  <canvas class="art" data-art="skyline-cover" aria-hidden="true"></canvas>
-  <canvas id="snow" aria-hidden="true"></canvas>
-  <span class="cover-tag" data-i18n="c.tag">game.twelfth.uz'da jonli</span>
+<!-- ================================================== COVER -->
+<header class="cover">
+  <svg class="scene" viewBox="0 0 1440 620" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+    <defs>
+      <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#060b16"/><stop offset=".55" stop-color="#0d1b2e"/><stop offset="1" stop-color="#132a40"/>
+      </linearGradient>
+      <linearGradient id="icefloor" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#223c58"/><stop offset="1" stop-color="#16293f"/>
+      </linearGradient>
+      <radialGradient id="glow" cx=".5" cy=".5" r=".5">
+        <stop offset="0" stop-color="#ff8a3d" stop-opacity=".55"/><stop offset=".55" stop-color="#ff8a3d" stop-opacity=".16"/><stop offset="1" stop-color="#ff8a3d" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <rect width="1440" height="620" fill="url(#sky)"/>
+    <polygon points="180,0 340,0 220,240 120,200" fill="#37e0c8" opacity=".07"/>
+    <polygon points="340,0 470,0 380,210 260,240" fill="#5adfcf" opacity=".05"/>
+    <polygon points="1040,0 1200,0 1130,190 1010,160" fill="#37e0c8" opacity=".06"/>
+    <g fill="#e8f0f8">
+      <circle cx="120" cy="70" r="1.3" opacity=".8"/><circle cx="260" cy="120" r="1" opacity=".5"/>
+      <circle cx="420" cy="60" r="1.2" opacity=".7"/><circle cx="560" cy="110" r="1" opacity=".45"/>
+      <circle cx="660" cy="45" r="1.4" opacity=".85"/><circle cx="790" cy="95" r="1" opacity=".5"/>
+      <circle cx="900" cy="55" r="1.2" opacity=".7"/><circle cx="1030" cy="115" r="1" opacity=".5"/>
+      <circle cx="1180" cy="70" r="1.3" opacity=".8"/><circle cx="1320" cy="130" r="1" opacity=".45"/>
+      <circle cx="1400" cy="60" r="1.2" opacity=".65"/><circle cx="60" cy="160" r="1" opacity=".4"/>
+    </g>
+    <g opacity=".9">
+      <polygon points="1250,88 1282,72 1314,88 1314,124 1282,140 1250,124" fill="#cfe0ef"/>
+      <polygon points="1250,88 1282,72 1282,140 1250,124" fill="#a9c2d8"/>
+      <polygon points="1282,72 1314,88 1282,106" fill="#e6f1fa"/>
+    </g>
+    <polygon points="-60,430 140,205 150,430" fill="#182f4a"/><polygon points="150,430 140,205 340,430" fill="#12233a"/>
+    <polygon points="140,205 112,252 168,252" fill="#8fb2cc" opacity=".85"/>
+    <polygon points="240,430 420,150 440,430" fill="#1a3352"/><polygon points="440,430 420,150 640,430" fill="#142842"/>
+    <polygon points="420,150 384,210 456,210" fill="#cfe4f4" opacity=".9"/>
+    <polygon points="600,430 760,230 780,430" fill="#172c46"/><polygon points="780,430 760,230 930,430" fill="#101f33"/>
+    <polygon points="760,230 736,270 786,270" fill="#8fb2cc" opacity=".8"/>
+    <polygon points="890,430 1080,170 1100,430" fill="#1b3554"/><polygon points="1100,430 1080,170 1320,430" fill="#132540"/>
+    <polygon points="1080,170 1048,224 1114,224" fill="#cfe4f4" opacity=".9"/>
+    <polygon points="1200,430 1340,240 1360,430" fill="#182f4a"/><polygon points="1360,430 1340,240 1500,430" fill="#12233a"/>
+    <polygon points="60,470 260,368 460,470" fill="#24405e" opacity=".9"/>
+    <polygon points="260,368 460,470 340,470" fill="#2c4a6b" opacity=".9"/>
+    <polygon points="980,470 1160,382 1360,470" fill="#24405e" opacity=".9"/>
+    <polygon points="1160,382 1360,470 1250,470" fill="#2c4a6b" opacity=".9"/>
+    <rect y="470" width="1440" height="150" fill="url(#icefloor)"/>
+    <polygon points="0,470 380,470 190,540" fill="#e8f0f8" opacity=".04"/>
+    <polygon points="620,470 1010,470 830,555" fill="#e8f0f8" opacity=".05"/>
+    <polygon points="1100,470 1440,470 1300,545" fill="#e8f0f8" opacity=".04"/>
+    <circle cx="720" cy="440" r="190" fill="url(#glow)"/>
+    <circle cx="720" cy="450" r="90" fill="url(#glow)"/>
+    <g>
+      <polygon points="356,470 404,470 380,424" fill="#1d3a4a"/><polygon points="362,446 398,446 380,410" fill="#234656"/>
+      <polygon points="300,470 336,470 318,436" fill="#1d3a4a"/>
+      <polygon points="1052,470 1096,470 1074,428" fill="#1d3a4a"/><polygon points="1058,448 1090,448 1074,414" fill="#234656"/>
+    </g>
+    <g>
+      <polygon points="472,470 500,432 500,470" fill="#3f5875"/><polygon points="500,470 500,432 528,470" fill="#2c415c"/>
+      <polygon points="494,470 506,470 500,452" fill="#ffb057"/>
+      <polygon points="560,470 584,438 584,470" fill="#3f5875"/><polygon points="584,470 584,438 608,470" fill="#2c415c"/>
+      <polygon points="579,470 589,470 584,455" fill="#ffb057"/>
+      <polygon points="826,470 852,436 852,470" fill="#3f5875"/><polygon points="852,470 852,436 878,470" fill="#2c415c"/>
+      <polygon points="846,470 858,470 852,453" fill="#ffb057"/>
+      <polygon points="896,470 918,442 918,470" fill="#3f5875"/><polygon points="918,470 918,442 940,470" fill="#2c415c"/>
+      <polygon points="913,470 923,470 918,456" fill="#ffb057"/>
+    </g>
+    <g>
+      <polygon points="960,470 1022,470 1022,440 960,440" fill="#33506d"/>
+      <polygon points="954,440 1028,440 991,414" fill="#46688a"/>
+      <polygon points="954,440 991,414 991,427 960,440" fill="#cfe4f4" opacity=".55"/>
+      <polygon points="984,470 998,470 998,452 984,452" fill="#ffb057"/>
+    </g>
+    <g>
+      <polygon points="688,470 752,470 744,378 696,378" fill="#5a3126"/>
+      <polygon points="688,470 696,378 704,378 700,470" fill="#7c4634"/>
+      <polygon points="696,378 744,378 738,348 702,348" fill="#6d3a2a"/>
+      <polygon points="702,348 738,348 720,296" fill="#3a2018"/>
+      <g class="flame-pulse">
+        <polygon points="706,348 734,348 720,306" fill="#ff8a3d"/>
+        <polygon points="712,348 728,348 720,318" fill="#ffb057"/>
+        <polygon points="716,348 724,348 720,330" fill="#ffe29a"/>
+        <polygon points="722,300 728,288 731,302" fill="#ffb057" opacity=".85"/>
+        <polygon points="710,296 705,284 714,292" fill="#ff8a3d" opacity=".7"/>
+      </g>
+      <polygon points="700,410 740,410 738,400 702,400" fill="#e8f0f8" opacity=".14"/>
+    </g>
+    <polygon points="0,620 0,548 210,566 430,532 700,560 980,526 1240,556 1440,534 1440,620" fill="#0b1626"/>
+    <polygon points="0,548 210,566 430,532 700,560 980,526 1240,556 1440,534 1440,545 980,538 700,572 430,544 210,578 0,560" fill="#1c3450" opacity=".5"/>
+    <g fill="#e8f0f8">
+      <circle cx="200" cy="300" r="1.4" opacity=".3"/><circle cx="520" cy="250" r="1.2" opacity=".28"/>
+      <circle cx="840" cy="330" r="1.4" opacity=".3"/><circle cx="1120" cy="280" r="1.2" opacity=".26"/>
+      <circle cx="660" cy="180" r="1.2" opacity=".3"/><circle cx="380" cy="350" r="1" opacity=".2"/>
+    </g>
+  </svg>
   <div class="wrap">
-    <div class="eyebrow" data-i18n="c.eyebrow">Investorlar uchun taqdimot — qoralama</div>
-    <h1>FROZEN&nbsp;CITY</h1>
+    <span class="cover-tag" data-i18n="c.tag">game.twelfth.uz — hozir jonli</span>
+    <div class="eyebrow" data-i18n="c.eyebrow">Investorlar uchun taqdimot</div>
+    <h1>FROZEN CITY</h1>
     <p class="lead" data-i18n="c.lead"></p>
     <div class="meta-row">
-      <span><b data-i18n="c.genre.l"></b> <span data-i18n="c.genre.v"></span></span><span class="dot">·</span>
-      <span><b data-i18n="c.engine.l"></b> Rust + Bevy</span><span class="dot">·</span>
-      <span><b data-i18n="c.platforms.l"></b> <span data-i18n="c.platforms.v"></span></span><span class="dot">·</span>
-      <span><b data-i18n="c.status.l"></b> <span data-i18n="c.status.v"></span></span>
+      <span data-i18n="c.m1"></span><span data-i18n="c.m2"></span><span data-i18n="c.m3"></span><span data-i18n="c.m4"></span>
     </div>
-    <a class="cover-cta" href="/" data-i18n="play.cta2"></a>
-    <div class="scroll-cue" data-i18n="c.scrollcue"></div>
+    <a class="cover-cta" href="/" data-i18n="c.cta">O'ynab ko'ring →</a>
+  </div>
+</header>
+
+<!-- ================================================== 01 SUMMARY -->
+<section class="slide" id="s1">
+  <div class="wrap">
+    <div class="slide-head"><span class="no">01</span>
+      <div class="eyebrow" data-i18n="s1.eyebrow"></div><h2 data-i18n="s1.h2"></h2></div>
+    <div class="cols2">
+      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+        <div class="card"><div class="k teal" data-i18n="s1.c1.k"></div><p data-i18n="s1.c1.d"></p></div>
+        <div class="card"><div class="k" data-i18n="s1.c2.k"></div><p data-i18n="s1.c2.d"></p></div>
+        <div class="card"><div class="k" data-i18n="s1.c3.k"></div><p data-i18n="s1.c3.d"></p></div>
+        <div class="card"><div class="k teal" data-i18n="s1.c4.k"></div><p data-i18n="s1.c4.d"></p></div>
+      </div>
+      <div class="art-frame">
+        <svg class="art" viewBox="0 0 640 360" aria-hidden="true">
+          <g>
+            <polygon points="50,60 268,60 268,196 50,196" fill="#1b3352"/>
+            <polygon points="58,68 260,68 260,188 58,188" fill="#0d1b2e"/>
+            <polygon points="138,196 180,196 188,226 130,226" fill="#24405e"/>
+            <polygon points="112,226 206,226 206,236 112,236" fill="#33506d"/>
+            <polygon points="70,188 130,120 170,188" fill="#24405e"/>
+            <polygon points="150,188 210,104 260,188" fill="#182f4a"/>
+            <polygon points="150,164 166,142 166,164" fill="#3f5875"/><polygon points="166,164 166,142 182,164" fill="#2c415c"/>
+            <polygon points="196,164 210,164 208,132 198,132" fill="#5a3126"/>
+            <polygon points="200,132 206,132 203,118" fill="#ffb057"/>
+            <circle cx="203" cy="140" r="26" fill="#ff8a3d" opacity=".18"/>
+          </g>
+          <g>
+            <polygon points="300,46 540,46 540,200 300,200" fill="#1b3352"/>
+            <polygon points="300,46 540,46 540,70 300,70" fill="#24405e"/>
+            <circle cx="316" cy="58" r="4" fill="#ff8a3d"/><circle cx="332" cy="58" r="4" fill="#ffb057"/><circle cx="348" cy="58" r="4" fill="#5adfcf"/>
+            <polygon points="300,200 540,200 540,70 300,70" fill="#0d1b2e"/>
+            <polygon points="312,200 392,108 452,200" fill="#182f4a"/>
+            <polygon points="430,200 500,120 540,200" fill="#24405e"/>
+            <polygon points="330,200 348,176 348,200" fill="#3f5875"/><polygon points="348,200 348,176 366,200" fill="#2c415c"/>
+            <polygon points="470,200 486,200 484,160 472,160" fill="#5a3126"/>
+            <polygon points="474,160 482,160 478,144" fill="#ffb057"/>
+            <circle cx="478" cy="170" r="30" fill="#ff8a3d" opacity=".18"/>
+          </g>
+          <g>
+            <polygon points="560,110 626,110 626,282 560,282" fill="#1b3352"/>
+            <polygon points="566,124 620,124 620,268 566,268" fill="#0d1b2e"/>
+            <polygon points="583,116 603,116 603,120 583,120" fill="#33506d"/>
+            <polygon points="566,268 596,214 620,268" fill="#182f4a"/>
+            <polygon points="572,268 584,252 584,268" fill="#3f5875"/>
+            <polygon points="600,268 610,268 608,236 602,236" fill="#5a3126"/>
+            <polygon points="603,236 607,236 605,226" fill="#ffb057"/>
+            <circle cx="605" cy="244" r="18" fill="#ff8a3d" opacity=".2"/>
+          </g>
+          <g>
+            <polygon points="322,296 344,284 366,296 366,322 344,334 322,322" fill="#134238"/>
+            <polygon points="322,296 344,284 344,334 322,322" fill="#1a5b4d"/>
+            <polygon points="344,284 366,296 344,310" fill="#5adfcf"/>
+            <g stroke="#5adfcf" stroke-dasharray="5 6" stroke-width="1.5" opacity=".6" fill="none">
+              <path d="M160 236 C 200 290, 270 305, 320 308"/>
+              <path d="M420 200 C 410 250, 380 285, 358 292"/>
+              <path d="M592 282 C 540 320, 430 322, 370 312"/>
+            </g>
+          </g>
+        </svg>
+        <div class="art-cap" data-i18n="s1.cap"></div>
+      </div>
+    </div>
   </div>
 </section>
 
-<section id="s2" class="slide" data-day="2" data-temp="-5">
+<!-- ================================================== 02 PROBLEM -->
+<section class="slide alt" id="s2">
   <div class="wrap">
-    <div class="slide-head"><span class="no" data-i18n="lbl.section">Bo'lim</span> 02
+    <div class="slide-head"><span class="no">02</span>
       <div class="eyebrow" data-i18n="s2.eyebrow"></div><h2 data-i18n="s2.h2"></h2></div>
-    <div class="feat-list">
-      <div class="row"><div class="label" data-i18n="s2.r1.l"></div><div class="val" data-i18n="s2.r1.v"></div></div>
-      <div class="row"><div class="label" data-i18n="s2.r2.l"></div><div class="val" data-i18n="s2.r2.v"></div></div>
-      <div class="row"><div class="label" data-i18n="s2.r3.l"></div><div class="val" data-i18n="s2.r3.v"></div></div>
-      <div class="row"><div class="label" data-i18n="s2.r4.l"></div><div class="val" data-i18n="s2.r4.v"></div></div>
-      <div class="row"><div class="label" data-i18n="s2.r5.l"></div><div class="val" data-i18n="s2.r5.v"></div></div>
-    </div>
-  </div>
-</section>
-
-<section id="s3" class="slide alt" data-day="3" data-temp="-6">
-  <div class="wrap">
-    <div class="slide-head"><span class="no" data-i18n="lbl.section"></span> 03
-      <div class="eyebrow" data-i18n="s3.eyebrow"></div><h2 data-i18n="s3.h2"></h2></div>
-    <div class="feat-list tight">
-      <div class="row"><div class="label" data-i18n="s3.r1.l"></div><div class="val" data-i18n="s3.r1.v"></div></div>
-      <div class="row"><div class="label" data-i18n="s3.r2.l"></div><div class="val" data-i18n="s3.r2.v"></div></div>
-      <div class="row"><div class="label" data-i18n="s3.r3.l"></div><div class="val" data-i18n="s3.r3.v"></div></div>
-    </div>
-    <p style="margin-top:var(--space-6); font-size:var(--fs-lead); color:var(--ink-dim); max-width:42rem;" data-i18n="s3.close"></p>
-  </div>
-</section>
-
-<section id="s4" class="slide" data-day="4" data-temp="-7">
-  <div class="wrap">
-    <div class="slide-head"><span class="no" data-i18n="lbl.section"></span> 04
-      <div class="eyebrow" data-i18n="s4.eyebrow"></div><h2 data-i18n="s4.h2"></h2><p class="lead" data-i18n="s4.lead"></p></div>
-    <div class="loop-row">
-      <div class="step"><div class="n">01</div><h3 data-i18n="s4.s1.t"></h3><p data-i18n="s4.s1.d"></p></div>
-      <div class="step"><div class="n">02</div><h3 data-i18n="s4.s2.t"></h3><p data-i18n="s4.s2.d"></p></div>
-      <div class="step"><div class="n">03</div><h3 data-i18n="s4.s3.t"></h3><p data-i18n="s4.s3.d"></p></div>
-      <div class="step"><div class="n">04</div><h3 data-i18n="s4.s4.t"></h3><p data-i18n="s4.s4.d"></p></div>
-    </div>
-  </div>
-</section>
-
-<section id="s5" class="slide alt" data-day="5" data-temp="-8">
-  <div class="wrap">
-    <div class="slide-head"><span class="no" data-i18n="lbl.section"></span> 05
-      <div class="eyebrow" data-i18n="s5.eyebrow"></div><h2 data-i18n="s5.h2"></h2></div>
-    <div class="cols">
-      <div class="feat-list">
-        <div class="row"><div class="label" data-i18n="s5.r1.l"></div><div class="val" data-i18n="s5.r1.v"></div></div>
-        <div class="row"><div class="label" data-i18n="s5.r2.l"></div><div class="val" data-i18n="s5.r2.v"></div></div>
-        <div class="row"><div class="label" data-i18n="s5.r3.l"></div><div class="val" data-i18n="s5.r3.v"></div></div>
-        <div class="row"><div class="label" data-i18n="s5.r4.l"></div><div class="val" data-i18n="s5.r4.v"></div></div>
-        <div class="row"><div class="label" data-i18n="s5.r5.l"></div><div class="val" data-i18n="s5.r5.v"></div></div>
+    <div class="gap-cards">
+      <div class="gap-card">
+        <svg width="54" height="54" viewBox="0 0 54 54" aria-hidden="true">
+          <polygon points="6,10 48,10 48,36 6,36" fill="#1b3352"/><polygon points="10,14 44,14 44,32 10,32" fill="#0d1b2e"/>
+          <polygon points="22,36 32,36 34,42 20,42" fill="#24405e"/><polygon points="16,42 38,42 38,46 16,46" fill="#33506d"/>
+          <polygon points="12,32 24,18 34,32" fill="#182f4a"/>
+        </svg>
+        <h3 data-i18n="s2.c1.t"></h3><p data-i18n="s2.c1.d"></p>
       </div>
-      <div style="display:grid; gap:1rem;">
-        <div class="img-slot slot-2"><canvas class="art" data-art="isocity" aria-hidden="true"></canvas><span class="cap-wrap"><span class="tag" data-i18n="img.tag2"></span><span class="cap" data-i18n="s5.slot2"></span><span class="dims">≈1200×900</span></span></div>
-        <div class="img-slot slot-5"><canvas class="art" data-art="figures" aria-hidden="true"></canvas><span class="cap-wrap"><span class="tag" data-i18n="img.tag5"></span><span class="cap" data-i18n="s5.slot5"></span><span class="dims">≈1600×900</span></span></div>
+      <div class="gap-card">
+        <svg width="54" height="54" viewBox="0 0 54 54" aria-hidden="true">
+          <polygon points="16,4 38,4 38,50 16,50" fill="#1b3352"/><polygon points="19,9 35,9 35,45 19,45" fill="#0d1b2e"/>
+          <polygon points="24,6 30,6 30,8 24,8" fill="#33506d"/>
+          <polygon points="19,45 27,30 35,45" fill="#182f4a"/>
+        </svg>
+        <h3 data-i18n="s2.c2.t"></h3><p data-i18n="s2.c2.d"></p>
+      </div>
+      <div class="gap-card hole">
+        <svg width="54" height="54" viewBox="0 0 54 54" aria-hidden="true">
+          <polygon points="6,22 20,14 20,30" fill="#ff8a3d"/><polygon points="48,22 34,14 34,30" fill="#ff8a3d"/>
+          <polygon points="20,19 34,19 34,25 20,25" fill="#ffb057"/>
+          <circle cx="27" cy="42" r="3" fill="#5adfcf"/><circle cx="13" cy="42" r="3" fill="#5adfcf" opacity=".55"/><circle cx="41" cy="42" r="3" fill="#5adfcf" opacity=".55"/>
+        </svg>
+        <h3 data-i18n="s2.c3.t"></h3><p data-i18n="s2.c3.d"></p>
       </div>
     </div>
+    <p class="close-line" data-i18n="s2.close"></p>
   </div>
 </section>
 
-<section id="s6" class="slide" data-day="6" data-temp="-9">
+<!-- ================================================== 03 PRODUCT -->
+<section class="slide" id="s3">
   <div class="wrap">
-    <div class="slide-head"><span class="no" data-i18n="lbl.section"></span> 06
-      <div class="eyebrow" data-i18n="s6.eyebrow"></div><h2 data-i18n="s6.h2"></h2><p class="lead" data-i18n="s6.lead"></p></div>
-    <div class="feat-list">
-      <div class="row"><div class="label" data-i18n="s6.w1.l"></div><div class="val" data-i18n="s6.w1.v"></div></div>
-      <div class="row"><div class="label" data-i18n="s6.w2.l"></div><div class="val" data-i18n="s6.w2.v"></div></div>
-      <div class="row"><div class="label" data-i18n="s6.w3.l"></div><div class="val" data-i18n="s6.w3.v"></div></div>
-      <div class="row"><div class="label" data-i18n="s6.w4.l"></div><div class="val" data-i18n="s6.w4.v"></div></div>
-      <div class="row"><div class="label" data-i18n="s6.w5.l"></div><div class="val" data-i18n="s6.w5.v"></div></div>
-      <div class="row"><div class="label" data-i18n="s6.w6.l"></div><div class="val" data-i18n="s6.w6.v"></div></div>
-    </div>
-  </div>
-</section>
-
-<section id="s7" class="slide alt" data-day="7" data-temp="-10">
-  <div class="wrap">
-    <div class="slide-head"><span class="no" data-i18n="lbl.section"></span> 07
-      <div class="eyebrow" data-i18n="s7.eyebrow"></div><h2 data-i18n="s7.h2"></h2><p class="lead" data-i18n="s7.lead"></p></div>
-    <div class="stack">
-      <div class="layer"><div class="name">fc-game</div><div class="desc" data-i18n="s7.l1"></div></div>
-      <div class="connector"></div>
-      <div class="layer"><div class="name">fc-net</div><div class="desc" data-i18n="s7.l2"></div></div>
-      <div class="connector"></div>
-      <div class="layer"><div class="name">client</div><div class="desc" data-i18n="s7.l3"></div></div>
-    </div>
-  </div>
-</section>
-
-<section id="s8" class="slide" data-day="8" data-temp="-11">
-  <div class="wrap"><div class="cols reverse">
-    <div class="img-slot slot-3"><canvas class="art" data-art="tunnel" aria-hidden="true"></canvas><span class="cap-wrap"><span class="tag" data-i18n="img.tag3"></span><span class="cap" data-i18n="s8.slot"></span><span class="dims">≈1200×900</span></span></div>
-    <div>
-      <span class="no" data-i18n="lbl.section"></span> 08
-      <div class="eyebrow" data-i18n="s8.eyebrow"></div><h2 data-i18n="s8.h2"></h2>
-      <div class="flow">
-        <div class="stage"><div class="k" data-i18n="s8.a.k"></div><h3 data-i18n="s8.a.t"></h3><p data-i18n="s8.a.d"></p></div>
-        <div class="arrow">→</div>
-        <div class="stage"><div class="k" data-i18n="s8.b.k"></div><h3 data-i18n="s8.b.t"></h3><p data-i18n="s8.b.d"></p></div>
-        <div class="arrow">→</div>
-        <div class="stage"><div class="k" data-i18n="s8.c.k"></div><h3 data-i18n="s8.c.t"></h3><p data-i18n="s8.c.d"></p></div>
-      </div>
-      <p class="flow-note" data-i18n="s8.note"></p>
-    </div>
-  </div></div>
-</section>
-
-<section id="s9" class="slide alt" data-day="9" data-temp="-12">
-  <div class="wrap">
-    <div class="slide-head"><span class="no" data-i18n="lbl.section"></span> 09
-      <div class="eyebrow" data-i18n="s9.eyebrow"></div><h2 data-i18n="s9.h2"></h2><p class="lead" data-i18n="s9.lead"></p></div>
-    <div class="proof-grid">
-      <div class="cell"><div class="stat">1</div><div class="cap" data-i18n="s9.p1"></div></div>
-      <div class="cell"><div class="stat">3</div><div class="cap" data-i18n="s9.p2"></div></div>
-      <div class="cell"><div class="stat">3</div><div class="cap" data-i18n="s9.p3"></div></div>
-      <div class="cell"><div class="stat">37</div><div class="cap" data-i18n="s9.p4"></div></div>
-    </div>
-    <p style="margin-top:var(--space-4); color:var(--ink-dim); max-width:42rem;" data-i18n="s9.body"></p>
-    <div class="gaps"><h3 data-i18n="s9.gaps.h"></h3><ul>
-      <li data-i18n="s9.gaps.1"></li><li data-i18n="s9.gaps.2"></li><li data-i18n="s9.gaps.3"></li><li data-i18n="s9.gaps.4"></li>
-    </ul></div>
-  </div>
-</section>
-
-<section id="s10" class="slide" data-day="10" data-temp="-13">
-  <div class="wrap">
-    <div class="slide-head"><span class="no" data-i18n="lbl.section"></span> 10
-      <div class="eyebrow" data-i18n="s10.eyebrow"></div><h2 data-i18n="s10.h2"></h2></div>
-    <div class="timeline">
-      <div class="ev"><div class="date">10-iyul</div><h3 data-i18n="s10.e1.t"></h3><p data-i18n="s10.e1.d"></p></div>
-      <div class="ev"><div class="date">11-iyul</div><h3 data-i18n="s10.e2.t"></h3><p data-i18n="s10.e2.d"></p></div>
-      <div class="ev"><div class="date">12-iyul</div><h3 data-i18n="s10.e3.t"></h3><p data-i18n="s10.e3.d"></p></div>
-      <div class="ev"><div class="date">14-iyul</div><h3 data-i18n="s10.e4.t"></h3><p data-i18n="s10.e4.d"></p></div>
-      <div class="ev"><div class="date" data-i18n="s10.e5.date"></div><h3 data-i18n="s10.e5.t"></h3><p data-i18n="s10.e5.d"></p></div>
-    </div>
-  </div>
-</section>
-
-<section id="s11" class="slide alt" data-day="11" data-temp="-14">
-  <div class="wrap">
-    <div class="slide-head"><span class="no" data-i18n="lbl.section"></span> 11
-      <div class="eyebrow" data-i18n="s11.eyebrow"></div><h2 data-i18n="s11.h2"></h2></div>
-    <div class="road-cols">
-      <div class="col"><div class="k" data-i18n="s11.c1.k"></div><h3 data-i18n="s11.c1.t"></h3>
-        <ul><li data-i18n="s11.c1.i1"></li><li data-i18n="s11.c1.i2"></li><li data-i18n="s11.c1.i3"></li></ul></div>
-      <div class="col"><div class="k" data-i18n="s11.c2.k"></div><h3 data-i18n="s11.c2.t"></h3>
-        <ul><li data-i18n="s11.c2.i1"></li><li data-i18n="s11.c2.i2"></li><li data-i18n="s11.c2.i3"></li></ul></div>
-      <div class="col"><div class="k" data-i18n="s11.c3.k"></div><h3 data-i18n="s11.c3.t"></h3>
-        <ul><li data-i18n="s11.c3.i1"></li><li data-i18n="s11.c3.i2"></li><li data-i18n="s11.c3.i3"></li></ul></div>
-    </div>
-  </div>
-</section>
-
-<section id="s12" class="slide alt" data-day="12" data-temp="-15">
-  <div class="wrap">
-    <div class="slide-head"><span class="no" data-i18n="lbl.section"></span> 12
-      <div class="eyebrow" data-i18n="vl.eyebrow"></div><h2 data-i18n="vl.h2"></h2><p class="lead" data-i18n="vl.lead"></p></div>
-    <div class="eras">
-      <div class="era e1"><span class="badge live" data-i18n="badge.live"></span><h3 data-i18n="vl.e1.t"></h3><div class="res" data-i18n="vl.e1.res"></div><p data-i18n="vl.e1.d"></p></div>
-      <div class="era e2"><span class="badge planned" data-i18n="badge.planned"></span><h3 data-i18n="vl.e2.t"></h3><div class="res" data-i18n="vl.e2.res"></div><p data-i18n="vl.e2.d"></p></div>
-      <div class="era e3"><span class="badge planned" data-i18n="badge.planned"></span><h3 data-i18n="vl.e3.t"></h3><div class="res" data-i18n="vl.e3.res"></div><p data-i18n="vl.e3.d"></p></div>
-      <div class="era e4"><span class="badge planned" data-i18n="badge.planned"></span><h3 data-i18n="vl.e4.t"></h3><div class="res" data-i18n="vl.e4.res"></div><p data-i18n="vl.e4.d"></p></div>
-    </div>
-    <p class="flow-note" data-i18n="vl.bridge"></p>
-  </div>
-</section>
-
-<section id="s13" class="slide" data-day="13" data-temp="-16">
-  <div class="wrap">
-    <div class="slide-head"><span class="no" data-i18n="lbl.section"></span> 13
-      <div class="eyebrow" data-i18n="cl.eyebrow"></div><h2 data-i18n="cl.h2"></h2><p class="lead" data-i18n="cl.lead"></p></div>
-    <div class="clim">
-      <div class="season"><span class="badge live" data-i18n="badge.live"></span><h3 data-i18n="cl.c1.t"></h3>
-        <div class="risk"><span class="k" data-i18n="lbl.risk"></span><span data-i18n="cl.c1.risk"></span></div>
-        <div class="resp"><span class="k" data-i18n="lbl.resp"></span><span data-i18n="cl.c1.resp"></span></div></div>
-      <div class="season"><span class="badge planned" data-i18n="badge.planned"></span><h3 data-i18n="cl.c2.t"></h3>
-        <div class="risk"><span class="k" data-i18n="lbl.risk"></span><span data-i18n="cl.c2.risk"></span></div>
-        <div class="resp"><span class="k" data-i18n="lbl.resp"></span><span data-i18n="cl.c2.resp"></span></div></div>
-      <div class="season"><span class="badge planned" data-i18n="badge.planned"></span><h3 data-i18n="cl.c3.t"></h3>
-        <div class="risk"><span class="k" data-i18n="lbl.risk"></span><span data-i18n="cl.c3.risk"></span></div>
-        <div class="resp"><span class="k" data-i18n="lbl.resp"></span><span data-i18n="cl.c3.resp"></span></div></div>
-    </div>
-  </div>
-</section>
-
-<section id="s14" class="slide" data-day="14" data-temp="-17">
-  <div class="wrap">
-    <div class="slide-head"><span class="no" data-i18n="lbl.section"></span> 14
-      <div class="eyebrow" data-i18n="s12.eyebrow"></div><h2 data-i18n="s12.h2"></h2></div>
-    <div class="risk-list">
-      <div class="item"><div class="risk"><span class="k" data-i18n="lbl.risk"></span><span data-i18n="s12.r1"></span></div><div class="mit"><span class="k" data-i18n="lbl.mit"></span><span data-i18n="s12.m1"></span></div></div>
-      <div class="item"><div class="risk"><span class="k" data-i18n="lbl.risk"></span><span data-i18n="s12.r2"></span></div><div class="mit"><span class="k" data-i18n="lbl.mit"></span><span data-i18n="s12.m2"></span></div></div>
-      <div class="item"><div class="risk"><span class="k" data-i18n="lbl.risk"></span><span data-i18n="s12.r3"></span></div><div class="mit"><span class="k" data-i18n="lbl.mit"></span><span data-i18n="s12.m3"></span></div></div>
-      <div class="item"><div class="risk"><span class="k" data-i18n="lbl.risk"></span><span data-i18n="s12.r4"></span></div><div class="mit"><span class="k" data-i18n="lbl.mit"></span><span data-i18n="s12.m4"></span></div></div>
-      <div class="item"><div class="risk"><span class="k" data-i18n="lbl.risk"></span><span data-i18n="s12.r5"></span></div><div class="mit"><span class="k" data-i18n="lbl.mit"></span><span data-i18n="s12.m5"></span></div></div>
-    </div>
-  </div>
-</section>
-
-<section id="s15" class="slide alt" data-day="15" data-temp="-18">
-  <div class="wrap">
-    <div class="slide-head"><span class="no" data-i18n="lbl.section"></span> 15
-      <div class="eyebrow" data-i18n="s13.eyebrow"></div><h2 data-i18n="s13.h2"></h2><p class="lead" data-i18n="s13.lead"></p></div>
-    <div class="todo"><div class="flag" data-i18n="lbl.todo"></div>
-      <div class="todo-fields">
-        <div class="f"><span class="k" data-i18n="s13.f1.k"></span><span class="v" data-i18n="s13.f1.v"></span></div>
-        <div class="f"><span class="k" data-i18n="s13.f2.k"></span><span class="v" data-i18n="s13.f2.v"></span></div>
-        <div class="f"><span class="k" data-i18n="s13.f3.k"></span><span class="v" data-i18n="s13.f3.v"></span></div>
-      </div>
-      <p class="hint" data-i18n="s13.hint"></p>
-    </div>
-  </div>
-</section>
-
-<section id="s16" class="slide" data-day="16" data-temp="-19">
-  <div class="wrap">
-    <div class="slide-head"><span class="no" data-i18n="lbl.section"></span> 16
-      <div class="eyebrow" data-i18n="s14.eyebrow"></div><h2 data-i18n="s14.h2"></h2><p class="lead" data-i18n="s14.lead"></p></div>
-    <div class="todo"><div class="flag" data-i18n="lbl.todo"></div>
-      <div class="todo-fields">
-        <div class="f"><span class="k" data-i18n="s14.f1.k"></span><span class="v" data-i18n="s14.f1.v"></span></div>
-        <div class="f"><span class="k" data-i18n="s14.f2.k"></span><span class="v" data-i18n="s14.f2.v"></span></div>
-        <div class="f"><span class="k" data-i18n="s14.f3.k"></span><span class="v" data-i18n="s14.f3.v"></span></div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section id="s17" class="slide alt" data-day="17" data-temp="-20">
-  <div class="wrap">
-    <div class="slide-head"><span class="no" data-i18n="lbl.section"></span> 17
-      <div class="eyebrow" data-i18n="s15.eyebrow"></div><h2 data-i18n="s15.h2"></h2></div>
-    <div class="todo"><div class="flag" data-i18n="lbl.todo"></div>
-      <div class="todo-fields">
-        <div class="f"><span class="k" data-i18n="s15.f1.k"></span><span class="v" data-i18n="s15.f1.v"></span></div>
-        <div class="f"><span class="k" data-i18n="s15.f2.k"></span><span class="v" data-i18n="s15.f2.v"></span></div>
-        <div class="f"><span class="k" data-i18n="s15.f3.k"></span><span class="v" data-i18n="s15.f3.v"></span></div>
-        <div class="f"><span class="k" data-i18n="s15.f4.k"></span><span class="v" data-i18n="s15.f4.v"></span></div>
-        <div class="f"><span class="k" data-i18n="s15.f5.k"></span><span class="v" data-i18n="s15.f5.v"></span></div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section id="s18" class="slide cover" data-day="18" data-temp="-21" style="min-height:auto; padding-block:var(--space-16); align-items:flex-start;">
-  <div class="wrap" style="width:100%;"><div class="cols">
-    <div>
-      <span class="no" style="color:rgba(242,246,250,.5);" data-i18n="lbl.section"></span> 18
-      <div class="eyebrow" data-i18n="s16.eyebrow"></div><h2 style="color:#f7fafc; margin-top:.6rem;" data-i18n="s16.h2"></h2>
-      <div class="todo" style="margin-top:var(--space-4);"><div class="flag" data-i18n="lbl.todo"></div>
-        <div class="todo-fields">
-          <div class="f"><span class="k" data-i18n="s16.f1.k"></span><span class="v" data-i18n="s16.f1.v"></span></div>
-          <div class="f"><span class="k" data-i18n="s16.f2.k"></span><span class="v" data-i18n="s16.f2.v"></span></div>
-          <div class="f"><span class="k" data-i18n="s16.f3.k"></span><span class="v" data-i18n="s16.f3.v"></span></div>
+    <div class="slide-head"><span class="no">03</span>
+      <div class="eyebrow" data-i18n="s3.eyebrow"></div><h2 data-i18n="s3.h2"></h2>
+      <p class="lead" data-i18n="s3.lead"></p></div>
+    <div class="cols2">
+      <div>
+        <div class="loop">
+          <div class="step"><b data-i18n="s3.l1.t"></b><span data-i18n="s3.l1.d"></span></div>
+          <div class="step"><b data-i18n="s3.l2.t"></b><span data-i18n="s3.l2.d"></span></div>
+          <div class="step"><b data-i18n="s3.l3.t"></b><span data-i18n="s3.l3.d"></span></div>
+          <div class="step"><b data-i18n="s3.l4.t"></b><span data-i18n="s3.l4.d"></span></div>
+        </div>
+        <div class="content-row">
+          <span><b>10</b> <span data-i18n="s3.n1"></span></span>
+          <span><b>6</b> <span data-i18n="s3.n2"></span></span>
+          <span><b>5</b> <span data-i18n="s3.n3"></span></span>
+          <span><b data-i18n="s3.n4b">Tunnel</b> <span data-i18n="s3.n4"></span></span>
         </div>
       </div>
-      <a class="cover-cta" style="margin-top:var(--space-4);" href="/" data-i18n="play.cta2"></a>
+      <div class="art-frame">
+        <svg class="art" viewBox="0 0 360 340" aria-hidden="true">
+          <defs>
+            <radialGradient id="glow2" cx=".5" cy=".5" r=".5">
+              <stop offset="0" stop-color="#ff8a3d" stop-opacity=".5"/><stop offset="1" stop-color="#ff8a3d" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <circle cx="180" cy="230" r="150" fill="none" stroke="#ff8a3d" stroke-opacity=".14"/>
+          <circle cx="180" cy="230" r="105" fill="none" stroke="#ff8a3d" stroke-opacity=".22"/>
+          <circle cx="180" cy="230" r="60" fill="none" stroke="#ff8a3d" stroke-opacity=".3"/>
+          <polygon points="20,300 180,268 340,300 180,332" fill="#16293f"/>
+          <polygon points="20,300 180,268 180,332" fill="#1c3450" opacity=".7"/>
+          <circle cx="180" cy="255" r="95" fill="url(#glow2)"/>
+          <polygon points="150,300 210,300 202,196 158,196" fill="#5a3126"/>
+          <polygon points="150,300 158,196 168,196 162,300" fill="#7c4634"/>
+          <polygon points="158,196 202,196 196,164 164,164" fill="#6d3a2a"/>
+          <polygon points="164,164 196,164 180,108" fill="#3a2018"/>
+          <g class="flame-pulse">
+            <polygon points="168,164 192,164 180,118" fill="#ff8a3d"/>
+            <polygon points="173,164 187,164 180,132" fill="#ffb057"/>
+            <polygon points="177,164 183,164 180,146" fill="#ffe29a"/>
+            <polygon points="184,112 190,98 194,114" fill="#ffb057" opacity=".85"/>
+            <polygon points="172,108 166,94 176,104" fill="#ff8a3d" opacity=".7"/>
+          </g>
+          <polygon points="160,240 200,240 198,228 162,228" fill="#e8f0f8" opacity=".15"/>
+          <polygon points="66,300 92,266 92,300" fill="#3f5875"/><polygon points="92,300 92,266 118,300" fill="#2c415c"/>
+          <polygon points="87,300 97,300 92,283" fill="#ffb057"/>
+          <polygon points="252,300 276,270 276,300" fill="#3f5875"/><polygon points="276,300 276,270 300,300" fill="#2c415c"/>
+          <polygon points="271,300 281,300 276,285" fill="#ffb057"/>
+          <circle cx="90" cy="120" r="1.6" fill="#e8f0f8" opacity=".4"/><circle cx="280" cy="100" r="1.4" fill="#e8f0f8" opacity=".35"/>
+          <circle cx="320" cy="180" r="1.4" fill="#e8f0f8" opacity=".3"/><circle cx="50" cy="200" r="1.2" fill="#e8f0f8" opacity=".3"/>
+        </svg>
+        <div class="art-cap" data-i18n="s3.cap"></div>
+      </div>
     </div>
-    <div class="img-slot slot-4"><canvas class="art" data-art="skyline-dawn" aria-hidden="true"></canvas><span class="cap-wrap"><span class="tag" data-i18n="img.tag4"></span><span class="cap" data-i18n="s16.slot"></span><span class="dims">≈1600×900</span></span></div>
-  </div></div>
-</section>
-
-<section id="s19" class="slide" data-day="19" data-temp="-22">
-  <div class="wrap">
-    <div class="slide-head"><span class="no" data-i18n="lbl.section"></span> 19
-      <div class="eyebrow" data-i18n="s17.eyebrow"></div><h2 data-i18n="s17.h2"></h2></div>
-    <dl class="glossary">
-      <div><dt data-i18n="s17.t1"></dt><dd data-i18n="s17.d1"></dd></div>
-      <div><dt data-i18n="s17.t2"></dt><dd data-i18n="s17.d2"></dd></div>
-      <div><dt>WASM (WebAssembly)</dt><dd data-i18n="s17.d3"></dd></div>
-      <div><dt data-i18n="s17.t4"></dt><dd data-i18n="s17.d4"></dd></div>
-      <div><dt data-i18n="s17.t5"></dt><dd data-i18n="s17.d5"></dd></div>
-    </dl>
   </div>
 </section>
 
-<footer><div class="wrap"><span data-i18n="footer.l"></span><span data-i18n="footer.r"></span></div></footer>
+<!-- ================================================== 04 DIFFERENTIATION -->
+<section class="slide alt" id="s4">
+  <div class="wrap">
+    <div class="slide-head"><span class="no">04</span>
+      <div class="eyebrow" data-i18n="s4.eyebrow"></div><h2 data-i18n="s4.h2"></h2></div>
+    <div class="tbl-scroll">
+      <table class="cmp">
+        <thead><tr>
+          <th data-i18n="s4.th0"></th><th class="fc">Frozen City</th><th data-i18n="s4.th1"></th><th data-i18n="s4.th2"></th>
+        </tr></thead>
+        <tbody>
+          <tr><td data-i18n="s4.r1"></td><td class="fc yes">✓</td><td class="no-x">—</td><td class="no-x">—</td></tr>
+          <tr><td data-i18n="s4.r2"></td><td class="fc yes">✓</td><td class="no-x">—</td><td class="no-x">—</td></tr>
+          <tr><td data-i18n="s4.r3"></td><td class="fc yes">✓</td><td class="no-x">—</td><td class="part" data-i18n="s4.part"></td></tr>
+          <tr><td data-i18n="s4.r4"></td><td class="fc yes">✓</td><td class="yes">✓</td><td class="no-x">—</td></tr>
+          <tr><td data-i18n="s4.r5"></td><td class="fc yes">✓</td><td class="no-x">—</td><td class="no-x">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="close-line" style="font-size:.95rem;color:var(--dim)" data-i18n="s4.note"></p>
+  </div>
+</section>
 
-<script id="i18n-data" type="application/json">
-{
-"uz": {
-"brand.mark":"Frozen City / Taqdimot","nav.back":"← Frozen City","tracker.dayword":"KUN","play.cta":"O'ynash","play.cta2":"Frozen City'ni hoziroq o'ynash →",
-"lbl.section":"Bo'lim","lbl.todo":"Sizdan ma'lumot kerak","lbl.risk":"Xavf","lbl.mit":"Yechim","lbl.resp":"Yechim","nav.vis2":"Uzoq muddatli vizyon","nav.clim":"Iqlim inqirozlari","badge.live":"Bugun jonli","badge.planned":"Rejalashtirilgan","vl.eyebrow":"Uzoq muddatli vizyon","vl.h2":"Bitta olovdan zamonaviy davlatgacha.","vl.lead":"Bugun jonli bo'lgan 12-kunlik qishki sinov — ancha uzunroq voqeaning birinchi bobi, xolos. Reja: xuddi shu shahar, xuddi shu deterministik simulyatsiya ustida to'rtta tsivilizatsiya davrini bosib o'tadi — bu boshqa o'yin emas, xuddi shu o'yinning davomi.","vl.e1.t":"Ibtidoiy Qabila","vl.e1.res":"Olov · yog'och · tosh","vl.e1.d":"Pul yo'q — hammasi umumiy omborda. Bugun jonli bo'lgan aynan shu bosqich.","vl.e2.t":"Qishloq va Jamoa","vl.e2.res":"G'isht · ma'dan · bug'doy · chorva","vl.e2.d":"Doimiy uylar, issiqxonalar, quduqlar. Dehqonlar, chorvadorlar, konchilar paydo bo'ladi.","vl.e3.t":"Sanoat va Shahar","vl.e3.res":"Ko'mir · neft · metall · elektr","vl.e3.d":"Valyuta paydo bo'ladi: aholi maosh oladi va xarid qiladi. Fabrikalar, shifoxonalar.","vl.e4.t":"Zamonaviy Megapolis","vl.e4.res":"Yuqori texnologiya · atom/gidro · moliya","vl.e4.d":"To'liq soliq va byudjet tizimi. Aqlli binolar, suzuvchi megastrukturalar.","vl.bridge":"Bu — hozirgi ko'p o'yinchi Global Olam vizyoniga (8-bo'lim) zid emas: har bir Shaxsiy Olam vaqt o'tishi bilan shu to'rt davrni bosib o'tadi, Tunnel esa qaysi bosqichda bo'lishidan qat'i nazar ochiq qoladi.","cl.eyebrow":"Kuchayib boruvchi iqlim","cl.h2":"Sovuq — bu birinchi inqiroz, xolos.","cl.lead":"Bugungi qishki sinovdan tashqari, reja iqlimning o'zi bitta kampaniya davomida uchta alohida global inqiroz orasida aylanishini ko'zda tutadi — har biri boshqacha infratuzilma talab qiladi.","cl.c1.t":"Sovuq fasl · Muzlik","cl.c1.risk":"Muzlash, gipotermiya, oziq-ovqat tanqisligi","cl.c1.resp":"Pech + ko'mir, issiqxonalar, issiq kiyim ishlab chiqarish","cl.c2.t":"Issiq fasl · Jazirama","cl.c2.risk":"Suv tanqisligi, qurg'oqchilik, issiq urishi, yong'inlar","cl.c2.resp":"Suv zaxiralari, sug'orish tizimlari, sovitish inshootlari, muzxonalar","cl.c3.t":"Toshqin fasli · Akvatoriya","cl.c3.risk":"Quruqlik suv ostida qoladi, logistika uziladi","cl.c3.resp":"Balandlikka ko'chish, suzuvchi platformalar, kema transporti, gidroponika","s12.r5":"Juda ambitsiyali uzoq muddatli vizyon (4 davr, 3 iqlim turi, to'liq iqtisodiyot) — haddan tashqari kengayish xavfi.","s12.m5":"Yo'l xaritasi buni bir xil isbotlangan arxitektura ustiga qo'shimcha kontent sifatida ko'radi (deterministik sim additiv kengayadi — yangi bino turlari, texnologiya tarmoqlari, voqea turlari — qayta yozish emas), va har bir davr V0.2–V0.7'ni yetkazgan bir xil intizom bilan alohida, sinovdan o'tgan bosqich sifatida chiqariladi.",
-"nav.s1":"Muqova","nav.s2":"Qisqacha xulosa","nav.s3":"Muammo","nav.s4":"Dunyo","nav.s5":"Mahsulot","nav.s6":"Mahsulot kuchi","nav.s7":"Nega takrorlash qiyin","nav.s8":"Vizyon","nav.s9":"Allaqachon jonli","nav.s10":"Rivojlanish tezligi","nav.s11":"Yo'l xaritasi","nav.s12":"Xavflar va yechimlar","nav.s13":"Bozor imkoniyati","nav.s14":"Biznes model","nav.s15":"So'rov","nav.s16":"Jamoa va aloqa","nav.s17":"Lug'at",
-"c.tag":"game.twelfth.uz'da jonli","c.eyebrow":"Investorlar uchun taqdimot — qoralama",
-"c.lead":"Cheksiz qish uchun ko'p o'yinchili survival-shahar-quruvchi — bitta Rust kod bazasi desktop, istalgan brauzer va telefonlarda tabiiy ishlaydi, haqiqiy server-avtoritativ ko'p o'yinchili rejim bilan.",
-"c.genre.l":"Janr —","c.genre.v":"Ko'p o'yinchili survival-shahar-quruvchi","c.engine.l":"Dvigatel —","c.platforms.l":"Platformalar —","c.platforms.v":"Desktop / Veb / Mobil","c.status.l":"Holat —","c.status.v":"Jonli, hoziroq o'ynash mumkin",
-"c.scrollcue":"19 bo'lim · pastga suring yoki o'ngdagi nuqtalardan foydalaning ↓",
-"s2.eyebrow":"Qisqacha xulosa","s2.h2":"Shu sahifadagi hammasi — besh qatorda.",
-"s2.r1.l":"Mahsulot","s2.r1.v":"Ko'p o'yinchili survival-shahar-quruvchi. Bitta Rust kod bazasi desktop, brauzer (WebGPU, WebGL2 zaxira bilan) va mobil brauzerlarda ishlaydi — hammasi bitta real-vaqtli, server-avtoritativ dunyoni bo'lishadi.",
-"s2.r2.l":"Bosqich","s2.r2.v":"<b>game.twelfth.uz</b>da hoziroq jonli va o'ynash mumkin — bu maket emas. Production infratuzilma (akkauntlar, ko'p-region hosting, sinovdan o'tgan deploy jarayoni) allaqachon ishlayapti. Batafsil — 09-bo'lim.",
-"s2.r3.l":"Farq","s2.r3.v":"Janrda bitta kod bazasidan real-vaqtli ko'p o'yinchi <i>va</i> haqiqiy cross-platformni birga beradigan yagona o'yin. Taqqoslash — 06-bo'lim.",
-"s2.r4.l":"Bozor","s2.r4.v":"Isbotlangan janr (Frostpunk, Banished, They Are Billions va mobil \"Frozen City\" klonlari) — va shu loyiha yopishga mo'ljallangan aniq bo'shliq. 13-bo'lim — <i>sizdan ma'lumot kerak</i>.",
-"s2.r5.l":"So'rov","s2.r5.v":"Summasi, mablag' sarfi va bosqichlar. 15-bo'lim — <i>sizdan ma'lumot kerak</i>.",
-"s3.eyebrow":"Muammo","s3.h2":"Survival-shahar-quruvchilar auditoriyani isbotladi. Keyin janr uni uch qismga bo'lib tashladi.",
-"s3.r1.l":"Desktop klassiklar","s3.r1.v":"Frostpunk, Banished, They Are Billions chuqur simulyatsiya beradi — lekin ular yakka o'yinchi uchun, hech kim o'yinni ko'rishdan oldin sotib olish va o'rnatish kerak.",
-"s3.r2.l":"Mobil klonlar","s3.r2.v":"Telefon uchun qilingan o'yinlar (bir nechtasi to'g'ridan-to'g'ri \"Frozen City\" deb ataladi) katta ommaviy auditoriyaga yetadi, lekin odatda sayoz, yakka o'yinchi uchun, monetizatsiya bosimiga moslashtirilgan.",
-"s3.r3.l":"Bo'shliq","s3.r3.v":"Janrda deyarli hech narsa do'stingizga bitta havolani bosib, brauzerda ochib, <b>xuddi shu</b> shaharni siz bilan real vaqtda qura olish imkonini bermaydi — u qaysi qurilmani ochgan bo'lishidan qat'i nazar.",
-"s3.close":"Frozen City bu bo'shliqni \"chuqur\" va \"qulay\" o'rtasida murosaga kelmasdan, bitta simulyatsiyani o'zgarishsiz har platformada bir vaqtda ishlatib yopadi.",
-"s4.eyebrow":"Dunyo","s4.h2":"Bitta pech. Cheksiz qish. Birga yashaydigan yoki birga o'ladigan shahar.",
-"s4.lead":"Bir guruh omon qolganlar harorat kun sayin pasayib borayotganda yagona Pech atrofida to'planadi. O'yinchilar yog'och kesadi, ko'mir qazadi, ov qiladi va dehqonchilik qiladi, pechning issiqlik radiusi ichida boshpana quradi — tunlar sovuqroq bo'ladi, yoqilg'i kamayadi, yangi kelganlarga joy kerak bo'ladi.",
-"s4.s1.t":"Yig'ish","s4.s1.d":"Lager atrofidan yog'och, ko'mir va oziq-ovqat.",
-"s4.s2.t":"Qurish","s4.s2.d":"Chodirlar, arra zavodlari, konlar, ovchi kulbalari, issiqxonalar — har biri o'z ekipaji bilan.",
-"s4.s3.t":"Pechni yoqib turish","s4.s3.d":"Uning darajasi issiqlik radiusini belgilaydi; yoqilg'i tugasa radius — va u bergan boshpana — qisqaradi.",
-"s4.s4.t":"Tunni omon o'tkazish","s4.s4.d":"Sovuq to'lqinlar, bo'ronlar, kasalliklar va darvoza oldidagi notanishlar haqidagi qiyin qarorlar.",
-"s5.eyebrow":"Mahsulot","s5.h2":"Soatlab vaqt sarflashga yetarli chuqur, allaqachon chiqarilishga yetarli ixcham.",
-"s5.r1.l":"Binolar","s5.r1.v":"Chodir va Arra zavodidan tortib Issiqxona, Kasalxona, Oshxona va Omborgacha o'nta inshoot — har biri darajasi oshiriladigan, va endi qurilgandan keyin <b>ko'chiriladigan</b>.",
-"s5.r2.l":"Aholi","s5.r2.v":"Mos bonuslar bilan olti kasb, har birining XP va darajasi, tayinlangan <b>yetakchi</b>, va butun koloniya bo'yicha <b>ruh holati (morale)</b> tizimi.",
-"s5.r3.l":"Progressiya","s5.r3.v":"Besh tarmoqli texnologiya daraxti, missiyalar zanjiri, va shaxsiy olamni yakunlaydigan ko'p bosqichli megaloyiha — <b>Tunnel</b>.",
-"s5.r4.l":"Voqealar","s5.r4.v":"Kasallik, bo'ronlar, va haqiqiy qabul-yoki-rad javobini talab qiladigan qochoqlar karvoni.",
-"s5.r5.l":"Iqtisodiyot","s5.r5.v":"Ov qilish abstrakt yovvoyi tabiat populyatsiyasini kamaytiradi; dehqonchilik chorva boqadi; savdo karvoni Tunnel orqali tovar tashiydi.",
-"s5.slot2":"Shahar, izometrik","s5.slot5":"Aholi, kasblar bo'yicha",
-"s6.eyebrow":"Mahsulot kuchi","s6.h2":"Bitta o'yin, oltita aniq yutuq.",
-"s6.lead":"Ko'pchilik survival-shahar-quruvchilar yakka o'yinchi va bitta platformaga bog'langan. Frozen City buni birortasiga ham bog'lanmaydi — quyida sabab.",
-"s6.w1.l":"Real-vaqtli hamkorlik","s6.w1.v":"8 o'yinchigacha bitta shaharni real vaqtda boshqaradi — istalgan qurilmadan.",
-"s6.w2.l":"Bitta kod, uch platforma","s6.w2.v":"Desktop, brauzer (WebGPU/WebGL2) va mobil brauzer — alohida portlar yo'q.",
-"s6.w3.l":"O'rnatishsiz o'ynash","s6.w3.v":"Brauzer tabi yetarli — hech qanday yuklab olish yoki o'rnatish shart emas.",
-"s6.w4.l":"Assetsiz kontent","s6.w4.v":"Har bino, personaj va effekt protsedural kodda yaratiladi — art byudjeti kutilmaydi.",
-"s6.w5.l":"Allaqachon jonli","s6.w5.v":"game.twelfth.uz'da bugun ishlayapti — bu prototip emas.",
-"s6.w6.l":"Chuqur va sinovdan o'tgan","s6.w6.v":"10 bino turi, 6 kasb, 5 tarmoqli texnologiya daraxti, dinamik voqealar — va har chiqarish ortida 37 avtomatik test.",
-"s7.eyebrow":"Nega uni takrorlash qiyin","s7.h2":"Ko'pchilik raqobatchi qilmaydigan uchta muhandislik tanlovi.",
-"s7.lead":"Bu arxitektura tasodifiy emas — shu sababli bitta kichik jamoa real-vaqtli ko'p o'yinchi o'yinni bir vaqtda uchta platformaga chiqara oladi.",
-"s7.l1":"<b>Bitta deterministik simulyatsiya, uchta runtime.</b> Bevy'siz simulyatsiya yadrosi dedicated serverda, yakka o'yinda in-process, va brauzerda WebAssembly orqali xuddi bir xil ishlaydi.<span class=\"plain\">Oddiy tilda: o'yin qoidalari hamma joyda bir xil ishlaydi — orqada qolib ketadigan alohida mobil versiya yo'q.</span>",
-"s7.l2":"<b>Har qanday qurilmadan haqiqiy ko'p o'yinchi.</b> Bitta TCP/WebSocket/HTTP port orqali server-avtoritativ tarmoq 8 o'yinchigacha bitta shaharni real vaqtda bo'lishishga imkon beradi — desktopda bo'lsin, telefon brauzerida bo'lsin.<span class=\"plain\">Oddiy tilda: do'stlar istalgan qurilmadan darhol birga o'ynaydi, keyinchalik qo'shilgan sekin ko'p o'yinchi rejimisiz.</span>",
-"s7.l3":"<b>Kontentni to'xtatadigan art-pipeline yo'q.</b> Har bir bino, personaj va effekt kodda protsedural yaratiladi, qo'lda chizilmaydi.<span class=\"plain\">Oddiy tilda: yangi kontent kunlar ichida chiqadi, chunki hech narsa tashqi art byudjetini kutmaydi.</span>",
-"s8.eyebrow":"Vizyon","s8.h2":"Har bir shaxsiy shahar oxir-oqibat bitta umumiy dunyoga ochiladi.",
-"s8.a.k":"Shu yerdan boshlanadi","s8.a.t":"Shaxsiy Olam","s8.a.d":"Akkaunt shart emas. Missiyalar va progressiya Tunnelgacha olib boradi.",
-"s8.b.k":"Megaloyiha","s8.b.t":"Tunnel","s8.b.d":"Butun shahar birgalikda sarmoya kiritadigan ko'p bosqichli qazish.",
-"s8.c.k":"Natija","s8.c.t":"Global Olam","s8.c.d":"Har bir bitirgan o'yinchi o'zi sifatida uchrashadigan bitta doimiy umumiy dunyo.",
-"s8.note":"Global Olamdan o'yinchilar uchratgan do'stlarini o'z Shaxsiy Olamiga taklif qiladi — yakka boshlanishdan ijtimoiy o'yingacha bo'lgan aylanani yopadi. Bu aylana mahsulotning o'rnatilgan o'sish mexanizmi ham: har bir bitirgan o'yinchi shunchaki marketing nishoni emas, jonli taklifga aylanadi.",
-"s8.slot":"Tunnel",
-"s9.eyebrow":"Allaqachon jonli","s9.h2":"Prototip emas. Ishlab turgan mahsulot.","s9.lead":"Frozen City bugun o'ynash mumkin, ortida production infratuzilma bilan — bu taqdimot uchun qilingan demo emas.",
-"s9.p1":"kod bazasi → desktop, brauzer va mobil, alohida portlarsiz","s9.p2":"mustaqil dunyo regioni production'da ishlayapti","s9.p3":"til jonli UI'da — o'zbek, ingliz, rus","s9.p4":"avtomatik test fayli har chiqarishni tekshiradi",
-"s9.body":"Har deploy o'yinchilarga yetib borishdan oldin to'liq test to'plami va haqiqiy render smoke-testidan o'tadi; akkauntlar Telegram bot orqali o'z-o'zidan ro'yxatdan o'tadi; dunyo o'zini uzluksiz saqlaydi, o'yinchiga saqlash menyusi kerak emas.",
-"s9.gaps.h":"Ochiq gapiraylik: 1.0 versiyagacha hali nima yetishmayapti",
-"s9.gaps.1":"Avtomatik CI/CD (GitHub Actions) — hozir chiqarishlar qo'lda ishga tushiriladigan skript orqali ketadi",
-"s9.gaps.2":"Production'dagi gzip siqishdan tashqari, WASM hajmini yanada kamaytirish (dvigatel feature-trim)",
-"s9.gaps.3":"Server tomonidan yaratiladigan matn (o'yin ichidagi voqealar lentasi) UI'ning qolgan qismidan farqli o'laroq hali lokalizatsiya qilinmagan",
-"s9.gaps.4":"To'g'ridan-to'g'ri game.twelfth.uz havolasidan tashqari ommaviy do'kon sahifasi yo'q (masalan, itch.io)",
-"s10.eyebrow":"Rivojlanish tezligi","s10.h2":"Besh kunlik bitta davrda nima chiqarildi.",
-"s10.e1.t":"Tarmoq poydevori","s10.e1.d":"Delta snapshot va freym siqish ko'p o'yinchi trafigini har o'yinchi uchun minimal darajaga tushiradi.",
-"s10.e2.t":"Global Olam, birinchi versiyasi","s10.e2.d":"Doimiy umumiy hub jonli bo'ladi, Tunnel orqali har akkauntga ko'chib keluvchilar bilan.",
-"s10.e3.t":"Akkauntlar, takliflar va jonli aholi","s10.e3.d":"O'z-o'zidan ro'yxatdan o'tish, qurilmalar orasida o'ynash, mehmon co-op'ga do'st taklifi, va to'liq aholi qatlami — kasblar, XP, tayinlangan yetakchi, koloniya ruh holati — hammasi bir kunda.",
-"s10.e4.t":"Har bir omon qolgan o'z yuziga ega bo'ladi","s10.e4.d":"Protsedural, kasbga mos personaj modellari — art byudjeti sarflanmasdan.",
-"s10.e5.date":"Shundan beri","s10.e5.t":"Sekinlashish yo'q","s10.e5.d":"Bino ko'chirish, ov-asosidagi yovvoyi tabiat iqtisodiyoti, chorvachilik, dafn mexanikasi va Tunnel savdo karvonlari qo'shildi.",
-"s11.eyebrow":"Yo'l xaritasi","s11.h2":"Muhandislikka keyingi sarmoya nima sotib oladi.",
-"s11.c1.k":"Yaqin muddat","s11.c1.t":"Chiqishga tayyorlik","s11.c1.i1":"CI/CD — bitta teg, beshta platforma artefakti","s11.c1.i2":"WASM hajmini kamaytirish (dvigatel feature-trim + binary optimizatsiya)","s11.c1.i3":"Lokalizatsiya qilinmagan oxirgi qatlam: server matni",
-"s11.c2.k":"O'rta muddat","s11.c2.t":"Tarqatish","s11.c2.i1":"Ommaviy do'kon sahifasi — skrinshotlar, treyler, brauzer build","s11.c2.i2":"Birinchi pullik yoki targ'ib qilingan foydalanuvchi jalb qilish kanali","s11.c2.i3":"Mavjud hissa daftari ustiga marketpleys",
-"s11.c3.k":"Masshtablashga tayyorlik","s11.c3.t":"Zaxira imkoniyat","s11.c3.i1":"Bitta hub'da 100 bir vaqtdagi o'yinchiga allaqachon sinovdan o'tgan","s11.c3.i2":"1000+ bir vaqtdagi o'yinchi uchun interest-management/gateway shardlash","s11.c3.i3":"Ko'p-region dunyo menejeri (hozir 3 statik region qo'lda boshqariladi)",
-"s12.eyebrow":"Xavflar va yechimlar","s12.h2":"Nima noto'g'ri ketishi mumkin, va hozir nima uni hal qiladi.",
-"s12.r1":"Kichik jamoa, bir kishiga bog'liqlik.","s12.m1":"Hujjatlashtirilgan arxitektura, modulli uch-crate workspace, va 37 avtomatik test fayli — loyiha hech kimning xotirasiga bog'liq emas.",
-"s12.r2":"Mobil veb yuklama hajmi — WASM build siqilmagan holda ~55–57MB.","s12.m2":"Server-tomonidan gzip production'da bu hajmni ~4.4× kamaytiradi (66MB → 15MB, jamoaning o'z o'lchovi bo'yicha); keyingi qadam — binary hajmini yanada optimallashtirish.",
-"s12.r3":"Monetizatsiya modeli hali aniqlanmagan.","s12.m3":"Sizdan ma'lumot kerak — 14-bo'limga qarang.",
-"s12.r4":"Band va yaxshi o'rnashgan janr.","s12.m4":"Ko'p o'yinchi va haqiqiy cross-platform qamrov bilan farqlanadi (06-bo'lim), yakka o'yinchi chuqurligida raqobatchilar bilan to'g'ridan-to'g'ri kurashish o'rniga.",
-"s13.eyebrow":"Bozor imkoniyati","s13.h2":"Isbotlangan janr, xizmat ko'rsatilmagan nisha.",
-"s13.lead":"Survival-shahar-quruvchilar doimo katta, sodiq auditoriya topgan — Frostpunk, Banished, They Are Billions, va \"Frozen City\" nomini olib yuruvchi mobil hitlar. Ularning deyarli hech biri real-vaqtli ko'p o'yinchi emas, va hech biri bitta kod bazasidan desktop, brauzer va mobilda tabiiy ishlamaydi.",
-"s13.f1.k":"Maqsadli auditoriya","s13.f1.v":"kim o'ynaydi va taxminan nechta kishi","s13.f2.k":"O'xshash o'yinlar","s13.f2.v":"sotuvlar / yuklab olishlar / o'yinchilar soni, manbalari bilan","s13.f3.k":"Erishiladigan bozor","s13.f3.v":"sizning bahoingiz va uni qanday hisoblaganingiz",
-"s13.hint":"Raqamlar va manbalarni yuboring — men ularni to'g'ridan-to'g'ri shu slaydga joylashtiraman.",
-"s14.eyebrow":"Biznes model","s14.h2":"Frozen City qanday pul ishlaydi.",
-"s14.lead":"Bu janr uchun odatiy yo'llar: desktop do'konlarida bir martalik premium sotib olish; kosmetik yoki qulaylik xaridlari bilan bepul brauzer/mobil kirish nuqtasi; yoki gibrid — bepul Shaxsiy Olam, Global Olamda pullik xususiyatlar.",
-"s14.f1.k":"Daromad modeli","s14.f1.v":"premium / free-to-play / gibrid / boshqa","s14.f2.k":"Kim to'laydi","s14.f2.v":"va aynan nima uchun","s14.f3.k":"Narx(lar)","s14.f3.v":"agar hal qilingan bo'lsa",
-"s15.eyebrow":"So'rov","s15.h2":"Nima uchun mablag' yig'moqdamiz, va u nimani sotib oladi.",
-"s15.f1.k":"Yig'ilayotgan summa","s15.f1.v":"masalan, $150,000","s15.f2.k":"Instrument","s15.f2.v":"SAFE / ulush / boshqa","s15.f3.k":"Mablag' sarfi","s15.f3.v":"masalan, art/ovoz, marketing, muhandislik, server xarajatlari — foizda","s15.f4.k":"Yetarli muddat","s15.f4.v":"necha oyga yetadi","s15.f5.k":"Bosqichlar","s15.f5.v":"bu aniq nimani ochadi — 11-bo'limdagi Yo'l xaritasiga qarang",
-"s16.eyebrow":"Jamoa va aloqa","s16.h2":"Buni kim quryapti.",
-"s16.f1.k":"Asoschilar","s16.f1.v":"ismlar, rollar, tegishli tajriba","s16.f2.k":"Suratlar","s16.f2.v":"jamoa portretlari","s16.f3.k":"Aloqa","s16.f3.v":"email, Telegram, telefon",
-"s16.slot":"Shahar ustida tong",
-"s17.eyebrow":"Lug'at","s17.h2":"Yuqorida uchraydigan besh atama, oddiy tilda.",
-"s17.t1":"Server-avtoritativ","s17.d1":"Server shaharning yagona haqiqiy nusxasini saqlaydi; hech qanday o'yinchi qurilmasi taraqqiyotni soxtalashtira olmaydi yoki boshqalardan sinxronlanmay qololmaydi.",
-"s17.t2":"Deterministik simulyatsiya","s17.d2":"Bir xil kirish ma'lumotlari bilan simulyatsiya har doim aynan bir xil natija beradi — shu xususiyat bitta yadroni serverda, brauzer tabida yoki oflaynda bir xil ishlatishga imkon beradi.",
-"s17.d3":"Brauzer ichida plagin yoki o'rnatishsiz, deyarli tabiiy tezlikda kod ishlatadigan format.",
-"s17.t4":"Protsedural / assetsiz","s17.d4":"Ishlash vaqtida kod tomonidan yaratiladigan vizuallar, qo'lda chizilib rasm/model fayli sifatida jo'natilmaydi.",
-"s17.t5":"Delta snapshot","s17.d5":"Ko'p o'yinchi trafigini kichik saqlash uchun butun dunyo holatini emas, faqat oxirgi yangilanishdan beri o'zgargan narsani yuborish.",
-"img.tag2":"Rasm 2 · Generativ eskiz","img.tag3":"Rasm 3 · Generativ eskiz","img.tag4":"Rasm 4 · Generativ eskiz","img.tag5":"Rasm 5 · Generativ eskiz",
-"footer.l":"Frozen City — Investorlar uchun taqdimot (qoralama)","footer.r":"Ichki ko'rib chiqish uchun tayyorlangan — yakuniy emas"
-},
-"en": {
-"brand.mark":"Frozen City / Briefing","nav.back":"← Frozen City","tracker.dayword":"DAY","play.cta":"Play","play.cta2":"Play Frozen City now →",
-"lbl.section":"Section","lbl.todo":"Needs your input","lbl.risk":"Risk","lbl.mit":"Mitigation","lbl.resp":"Response","nav.vis2":"Long-term vision","nav.clim":"Climate crises","badge.live":"Live today","badge.planned":"Planned","vl.eyebrow":"The Long-Term Vision","vl.h2":"From one campfire to a modern state.","vl.lead":"The 12-day winter run live today is only the first chapter. The plan: the same city, on the same deterministic simulation, climbs through four eras of civilization — not a different game, a continuation of this one.","vl.e1.t":"Primitive Tribe","vl.e1.res":"Fire · wood · stone","vl.e1.d":"No currency — everything shared from one stockpile. This is exactly what's live today.","vl.e2.t":"Village & Settlement","vl.e2.res":"Brick · ore · wheat · livestock","vl.e2.d":"Permanent housing, greenhouses, wells. Farmers, herders and miners appear.","vl.e3.t":"Industrial Town","vl.e3.res":"Coal · oil · metal · electricity","vl.e3.d":"Currency appears: citizens earn wages and buy goods. Factories, hospitals.","vl.e4.t":"Modern Megapolis","vl.e4.res":"High tech · nuclear/hydro · finance","vl.e4.d":"A full tax-and-budget system. Smart buildings, floating megastructures.","vl.bridge":"This doesn't replace the multiplayer Global World vision (slide 08) — every Personal World climbs through these four eras over time, and the Tunnel stays open regardless of which era it's currently in.","cl.eyebrow":"Escalating Climate","cl.h2":"The cold is only the first crisis.","cl.lead":"Beyond the winter run live today, the plan has the climate itself cycle through three distinct global crises within one campaign — each demanding different infrastructure.","cl.c1.t":"Cold Season · Ice","cl.c1.risk":"Freezing, hypothermia, food scarcity","cl.c1.resp":"Furnace + coal, greenhouses, warm-clothing production","cl.c2.t":"Heat Season · Blaze","cl.c2.risk":"Water scarcity, drought, heatstroke, wildfires","cl.c2.resp":"Water reserves, irrigation systems, cooling structures, ice-houses","cl.c3.t":"Flood Season · Deluge","cl.c3.risk":"Land submerges, logistics cut off","cl.c3.resp":"Relocate to high ground, floating platforms, boat transport, hydroponics","s12.r5":"An extremely ambitious long-term vision (4 eras, 3 climate types, a full economy) — risk of overextension.","s12.m5":"The roadmap treats this as content expansion on the same proven architecture (the deterministic sim scales additively — new building types, tech branches, event types — not a rewrite), and each era ships as its own separately-tested milestone, the same discipline that shipped V0.2–V0.7.",
-"nav.s1":"Cover","nav.s2":"Executive summary","nav.s3":"The problem","nav.s4":"The world","nav.s5":"The product","nav.s6":"Product Strength","nav.s7":"Why it's hard to copy","nav.s8":"The vision","nav.s9":"Already live","nav.s10":"Execution speed","nav.s11":"Roadmap","nav.s12":"Risks & mitigations","nav.s13":"Market opportunity","nav.s14":"Business model","nav.s15":"The ask","nav.s16":"Team & contact","nav.s17":"Glossary",
-"c.tag":"Live at game.twelfth.uz","c.eyebrow":"Investor Briefing — Draft",
-"c.lead":"A cooperative survival city-builder for the endless winter — one Rust codebase, running natively on desktop, in any browser, and on phones, with real server-authoritative multiplayer.",
-"c.genre.l":"Genre —","c.genre.v":"Co-op survival city-builder","c.engine.l":"Engine —","c.platforms.l":"Platforms —","c.platforms.v":"Desktop / Web / Mobile","c.status.l":"Status —","c.status.v":"Live, playable today",
-"c.scrollcue":"19 sections · scroll or use the dots on the right ↓",
-"s2.eyebrow":"Executive Summary","s2.h2":"Everything on this page, in five lines.",
-"s2.r1.l":"Product","s2.r1.v":"A cooperative survival city-builder. One Rust codebase renders natively on desktop, in-browser (WebGPU with WebGL2 fallback) and on mobile browsers, all sharing one real-time, server-authoritative world.",
-"s2.r2.l":"Stage","s2.r2.v":"Live and playable today at <b>game.twelfth.uz</b> — not a mockup. Production infrastructure (accounts, multi-region hosting, a tested deploy pipeline) is already running. Details on slide 09.",
-"s2.r3.l":"Differentiation","s2.r3.v":"The only title in the genre that is simultaneously real-time co-op <i>and</i> truly cross-platform from one codebase. Comparison on slide 06.",
-"s2.r4.l":"Market","s2.r4.v":"A proven genre (Frostpunk, Banished, They Are Billions and mobile \"Frozen City\" clones) with a structural gap this product closes. Slide 13 — <i>needs your input</i>.",
-"s2.r5.l":"The ask","s2.r5.v":"Amount, use of funds and milestones. Slide 15 — <i>needs your input</i>.",
-"s3.eyebrow":"The Problem","s3.h2":"Survival city-builders proved the audience. Then the genre split it three ways.",
-"s3.r1.l":"Desktop classics","s3.r1.v":"Frostpunk, Banished, They Are Billions deliver deep simulation — but they're single-player, and ask for a purchase and an install before anyone sees the game.",
-"s3.r2.l":"Mobile clones","s3.r2.v":"Titles built for phones (several literally named \"Frozen City\") reach a huge casual audience, but are typically shallow, single-player idle loops tuned for monetization pressure.",
-"s3.r3.l":"The gap","s3.r3.v":"Almost nothing in the genre lets a friend click one link, land in a browser, and start building the <b>same</b> city with you in real time — on whichever device they happen to have open.",
-"s3.close":"Frozen City closes that gap not by compromising between \"deep\" and \"accessible,\" but by running one simulation, unmodified, on every platform at once.",
-"s4.eyebrow":"The World","s4.h2":"One furnace. An endless winter. A city that lives or dies together.",
-"s4.lead":"A handful of survivors gather around a single Furnace as the temperature drops, day after day. Players chop wood, mine coal, hunt and farm, and put up shelter within the furnace's heat radius — while the nights get colder, the fuel runs low, and new arrivals need somewhere to sleep.",
-"s4.s1.t":"Gather","s4.s1.d":"Wood, coal and food from the land around camp.",
-"s4.s2.t":"Build","s4.s2.d":"Tents, sawmills, mines, hunters' huts, greenhouses — each with its own crew.",
-"s4.s3.t":"Fuel the furnace","s4.s3.d":"Its level sets the heat radius; run dry and the radius — and the shelter it gives — shrinks.",
-"s4.s4.t":"Survive the night","s4.s4.d":"Cold snaps, blizzards, sickness and hard choices about strangers at the gate.",
-"s5.eyebrow":"The Product","s5.h2":"Deep enough to sink hours into, small enough to have shipped already.",
-"s5.r1.l":"Buildings","s5.r1.v":"Ten structures from Tent and Sawmill to Greenhouse, Hospital, Kitchen and Warehouse — each upgradeable, and now <b>relocatable</b> once built.",
-"s5.r2.l":"Population","s5.r2.v":"Six professions with matching bonuses, individual XP and levels, an appointed <b>leader</b>, and a colony-wide <b>morale</b> system.",
-"s5.r3.l":"Progression","s5.r3.v":"A five-branch tech tree, a chain of missions, and the <b>Tunnel</b> — a multi-stage megaproject that caps a personal world.",
-"s5.r4.l":"Events","s5.r4.v":"Disease, blizzards, and refugee caravans that force a real accept-or-reject choice.",
-"s5.r5.l":"Economy","s5.r5.v":"Hunting draws down an abstract wildlife population; farming raises livestock; a trade caravan carries goods through the Tunnel.",
-"s5.slot2":"The city, isometric","s5.slot5":"Survivors, by profession",
-"s6.eyebrow":"Product Strength","s6.h2":"One game, six concrete wins.",
-"s6.lead":"Most survival city-builders are single-player and locked to one platform. Frozen City is neither — here's why.",
-"s6.w1.l":"Real-time co-op","s6.w1.v":"Up to 8 players run one city together in real time, from any device.",
-"s6.w2.l":"One codebase, three platforms","s6.w2.v":"Desktop, browser (WebGPU/WebGL2) and mobile browser — no separate ports.",
-"s6.w3.l":"No install required","s6.w3.v":"A browser tab is all it takes — nothing to download or install.",
-"s6.w4.l":"Asset-free content","s6.w4.v":"Every building, character and effect is procedurally generated in code — no art-budget bottleneck.",
-"s6.w5.l":"Already live","s6.w5.v":"Running in production at game.twelfth.uz today — not a prototype.",
-"s6.w6.l":"Deep and tested","s6.w6.v":"10 building types, 6 professions, a 5-branch tech tree, dynamic events — and 37 automated tests behind every release.",
-"s7.eyebrow":"Why It's Hard to Copy","s7.h2":"Three engineering bets most competitors don't make.",
-"s7.lead":"The architecture isn't incidental — it's why one small team can ship a real-time multiplayer game to three platforms at once.",
-"s7.l1":"<b>One deterministic simulation, three runtimes.</b> The Bevy-free simulation core runs identically on the dedicated server, in-process for singleplayer, and inline inside the browser via WebAssembly.<span class=\"plain\">Plain English: the same rules of the game run everywhere — there's no separate mobile version that can quietly fall behind.</span>",
-"s7.l2":"<b>Real co-op, from any device.</b> Server-authoritative networking over one TCP/WebSocket/HTTP port lets up to 8 players share a city in real time, whether they're on desktop or in a phone browser.<span class=\"plain\">Plain English: friends play together instantly from any device, with no lag-prone multiplayer mode bolted on after the fact.</span>",
-"s7.l3":"<b>No art pipeline to bottleneck content.</b> Every building, character and effect is procedurally generated in code, not hand-drawn.<span class=\"plain\">Plain English: new content ships in days, because nothing is waiting on an outsourced art budget.</span>",
-"s8.eyebrow":"The Vision","s8.h2":"Every private city eventually opens onto one shared world.",
-"s8.a.k":"Start here","s8.a.t":"Personal World","s8.a.d":"No account needed. Missions and progression build toward the Tunnel.",
-"s8.b.k":"The megaproject","s8.b.t":"The Tunnel","s8.b.d":"A multi-stage excavation the whole city invests in together.",
-"s8.c.k":"The payoff","s8.c.t":"Global World","s8.c.d":"One persistent shared world where every graduated player meets, as themselves.",
-"s8.note":"From the Global World, players invite the friends they meet back into their own Personal World — closing the loop from solo start to social game. This loop is also the product's built-in growth engine: every graduated player becomes a live invitation, not just a marketing target.",
-"s8.slot":"The Tunnel",
-"s9.eyebrow":"Already Live","s9.h2":"Not a prototype. A running product.","s9.lead":"Frozen City is playable today, with production infrastructure behind it — not a demo built for this deck.",
-"s9.p1":"codebase → desktop, browser and mobile, no separate ports","s9.p2":"independent world regions running in production","s9.p3":"languages in the live UI — Uzbek, English, Russian","s9.p4":"automated test files gating every release",
-"s9.body":"Every deploy runs the full test suite and a real render smoke-test before it's allowed to reach players; accounts are self-serve via a Telegram bot; the world saves itself continuously, with no player-facing save menu required.",
-"s9.gaps.h":"What's honestly still missing before a public 1.0",
-"s9.gaps.1":"Automated CI/CD (GitHub Actions) — releases currently go out through a scripted, manually triggered deploy",
-"s9.gaps.2":"Further WASM size reduction (engine feature-trim) on top of the gzip compression already in production",
-"s9.gaps.3":"Server-generated text (the in-game event log) is not yet localized, unlike the rest of the UI",
-"s9.gaps.4":"No public storefront or distribution page yet (e.g. itch.io) beyond the direct game.twelfth.uz link",
-"s10.eyebrow":"Execution Speed","s10.h2":"What shipped in one five-day stretch.",
-"s10.e1.t":"Network foundation","s10.e1.d":"Delta snapshots and frame compression cut multiplayer bandwidth per player to a trickle.",
-"s10.e2.t":"The Global World, first cut","s10.e2.d":"The permanent shared hub goes live, with per-account migrants arriving through the Tunnel.",
-"s10.e3.t":"Accounts, invites, and a living population","s10.e3.d":"Self-serve accounts, cross-device play, friend invites into guest co-op, and a full survivor layer — professions, XP, an appointed leader, colony morale — all in one day.",
-"s10.e4.t":"Every survivor gets a face","s10.e4.d":"Procedural, profession-matched character models — no art asset budget spent.",
-"s10.e5.date":"Since","s10.e5.t":"No slowdown","s10.e5.d":"Building relocation, a wildlife-driven hunting economy, livestock, burial mechanics and Tunnel trade caravans have followed.",
-"s11.eyebrow":"Roadmap","s11.h2":"What the next investment in engineering buys.",
-"s11.c1.k":"Near-term","s11.c1.t":"Ship readiness","s11.c1.i1":"CI/CD — one tag, five platform artifacts","s11.c1.i2":"WASM size pass (engine feature-trim + binary optimizer)","s11.c1.i3":"Localize the last non-localized surface: server text",
-"s11.c2.k":"Mid-term","s11.c2.t":"Distribution","s11.c2.i1":"A public storefront page — screenshots, trailer, embedded web build","s11.c2.i2":"First paid or promoted user-acquisition channel","s11.c2.i3":"Marketplace on top of the existing contribution ledger",
-"s11.c3.k":"Scale-readiness","s11.c3.t":"Headroom","s11.c3.i1":"Load-tested to 100 concurrent players in one shared hub already","s11.c3.i2":"Interest-management / gateway sharding for 1,000+ concurrent","s11.c3.i3":"Multi-region world manager (currently 3 static regions run by hand)",
-"s12.eyebrow":"Risks & Mitigations","s12.h2":"What could go wrong, and what already addresses it.",
-"s12.r1":"Small team, key-person dependency.","s12.m1":"A documented architecture, a modular three-crate workspace, and 37 automated test files mean the project doesn't rely on any one person's memory.",
-"s12.r2":"Mobile web payload size — the WASM build is ~55–57MB uncompressed.","s12.m2":"Server-side gzip already cuts this by roughly 4.4× in production (66MB → 15MB, by the team's own measurement); a further binary-size pass is next.",
-"s12.r3":"Monetization model not yet defined.","s12.m3":"Needs your input — see slide 14.",
-"s12.r4":"A crowded, well-established genre.","s12.m4":"Differentiated on co-op and true cross-platform reach (slide 06) rather than competing head-on on single-player depth.",
-"s13.eyebrow":"Market Opportunity","s13.h2":"A proven genre, an underserved niche.",
-"s13.lead":"Survival city-builders have repeatedly found large, devoted audiences — Frostpunk, Banished, They Are Billions, and mobile hits carrying the \"Frozen City\" name itself. Almost none are real-time co-op, and none ship natively across desktop, browser and mobile from one codebase.",
-"s13.f1.k":"Target audience","s13.f1.v":"who plays this, and roughly how many","s13.f2.k":"Comparable titles","s13.f2.v":"sales / downloads / player counts, with sources","s13.f3.k":"Addressable market","s13.f3.v":"your estimate, and how you got there",
-"s13.hint":"Send the figures and sources and I'll drop them straight into this slide.",
-"s14.eyebrow":"Business Model","s14.h2":"How Frozen City makes money.",
-"s14.lead":"Common paths for this genre: a one-time premium purchase on desktop storefronts; a free browser/mobile entry point with cosmetic or convenience purchases; or a hybrid — free Personal World, paid features in the Global World.",
-"s14.f1.k":"Revenue model","s14.f1.v":"premium / free-to-play / hybrid / other","s14.f2.k":"Who pays","s14.f2.v":"and for what, specifically","s14.f3.k":"Price point(s)","s14.f3.v":"if decided",
-"s15.eyebrow":"The Ask","s15.h2":"What we're raising, and what it buys.",
-"s15.f1.k":"Amount raising","s15.f1.v":"e.g. $150,000","s15.f2.k":"Instrument","s15.f2.v":"SAFE / equity / other","s15.f3.k":"Use of funds","s15.f3.v":"e.g. art/audio, marketing, engineering, server costs — by %","s15.f4.k":"Runway","s15.f4.v":"how many months this covers","s15.f5.k":"Milestones","s15.f5.v":"what this specifically unlocks — see Roadmap, slide 11",
-"s16.eyebrow":"Team & Contact","s16.h2":"Who's building this.",
-"s16.f1.k":"Founders","s16.f1.v":"names, roles, relevant background","s16.f2.k":"Photos","s16.f2.v":"team headshots","s16.f3.k":"Contact","s16.f3.v":"email, Telegram, phone",
-"s16.slot":"Dawn over the city",
-"s17.eyebrow":"Glossary","s17.h2":"The five terms that come up above, explained plainly.",
-"s17.t1":"Server-authoritative","s17.d1":"The server holds the one true copy of the city; no player's device can fake progress or drift out of sync with everyone else's.",
-"s17.t2":"Deterministic simulation","s17.d2":"Given the same inputs, the simulation produces the exact same result every time — the property that lets one core run identically on a server, in a browser tab, or offline.",
-"s17.d3":"A format that runs near-native-speed code directly inside a web browser, with no plugin or install required.",
-"s17.t4":"Procedural / asset-free","s17.d4":"Visuals generated by code at runtime, rather than drawn by hand and shipped as image or model files.",
-"s17.t5":"Delta snapshot","s17.d5":"Sending only what changed since the last update, instead of the whole world state, to keep multiplayer traffic small.",
-"img.tag2":"Image 2 · Generated sketch","img.tag3":"Image 3 · Generated sketch","img.tag4":"Image 4 · Generated sketch","img.tag5":"Image 5 · Generated sketch",
-"footer.l":"Frozen City — Investor Briefing (Draft)","footer.r":"Prepared for internal review — not final"
-},
-"ru": {
-"brand.mark":"Frozen City / Брифинг","nav.back":"← Frozen City","tracker.dayword":"ДЕНЬ","play.cta":"Играть","play.cta2":"Играть в Frozen City сейчас →",
-"lbl.section":"Раздел","lbl.todo":"Нужны ваши данные","lbl.risk":"Риск","lbl.mit":"Решение","lbl.resp":"Решение","nav.vis2":"Долгосрочное видение","nav.clim":"Климатические кризисы","badge.live":"Уже сегодня","badge.planned":"Запланировано","vl.eyebrow":"Долгосрочное видение","vl.h2":"От одного костра до современного государства.","vl.lead":"Живой сегодня 12-дневный зимний забег — лишь первая глава. План: тот же город, на той же детерминированной симуляции, проходит через четыре эпохи цивилизации — не другая игра, а продолжение этой же.","vl.e1.t":"Первобытное племя","vl.e1.res":"Огонь · дерево · камень","vl.e1.d":"Валюты нет — всё в общем складе. Это именно то, что работает сегодня.","vl.e2.t":"Деревня и поселение","vl.e2.res":"Кирпич · руда · пшеница · скот","vl.e2.d":"Постоянное жильё, теплицы, колодцы. Появляются фермеры, скотоводы, шахтёры.","vl.e3.t":"Промышленный город","vl.e3.res":"Уголь · нефть · металл · электричество","vl.e3.d":"Появляется валюта: горожане получают зарплату и покупают товары. Фабрики, больницы.","vl.e4.t":"Современный мегаполис","vl.e4.res":"Высокие технологии · АЭС/ГЭС · финансы","vl.e4.d":"Полноценная налогово-бюджетная система. Умные здания, плавучие мегаструктуры.","vl.bridge":"Это не заменяет мультиплеерное видение Глобального мира (раздел 08) — каждый Личный мир со временем проходит через эти четыре эпохи, а Туннель остаётся открытым независимо от текущей эпохи.","cl.eyebrow":"Нарастающий климат","cl.h2":"Холод — лишь первый кризис.","cl.lead":"Помимо живого сегодня зимнего забега, план предполагает, что сам климат в рамках одной кампании проходит через три разных глобальных кризиса — каждый требует своей инфраструктуры.","cl.c1.t":"Холодный сезон · Лёд","cl.c1.risk":"Обморожение, гипотермия, нехватка еды","cl.c1.resp":"Печь + уголь, теплицы, производство тёплой одежды","cl.c2.t":"Жаркий сезон · Зной","cl.c2.risk":"Нехватка воды, засуха, тепловой удар, пожары","cl.c2.resp":"Запасы воды, ирригация, охлаждающие сооружения, ледники","cl.c3.t":"Сезон наводнений · Потоп","cl.c3.risk":"Земля уходит под воду, логистика прерывается","cl.c3.resp":"Переселение на возвышенность, плавучие платформы, водный транспорт, гидропоника","s12.r5":"Чрезвычайно амбициозное долгосрочное видение (4 эпохи, 3 типа климата, полноценная экономика) — риск чрезмерного расширения.","s12.m5":"Дорожная карта рассматривает это как расширение контента поверх той же проверенной архитектуры (детерминированная симуляция масштабируется аддитивно — новые типы зданий, ветки технологий, типы событий — а не переписывание), и каждая эпоха выходит отдельной, протестированной вехой — той же дисциплиной, что выпустила V0.2–V0.7.",
-"nav.s1":"Обложка","nav.s2":"Краткое содержание","nav.s3":"Проблема","nav.s4":"Мир","nav.s5":"Продукт","nav.s6":"Сила продукта","nav.s7":"Почему сложно скопировать","nav.s8":"Видение","nav.s9":"Уже запущено","nav.s10":"Скорость разработки","nav.s11":"Дорожная карта","nav.s12":"Риски и меры","nav.s13":"Рыночная возможность","nav.s14":"Бизнес-модель","nav.s15":"Запрос инвестиций","nav.s16":"Команда и контакты","nav.s17":"Глоссарий",
-"c.tag":"Уже работает на game.twelfth.uz","c.eyebrow":"Брифинг для инвесторов — черновик",
-"c.lead":"Кооперативный сити-билдер на выживание в бесконечную зиму — единая кодовая база на Rust, работающая нативно на десктопе, в любом браузере и на телефонах, с настоящим сервер-авторитативным мультиплеером.",
-"c.genre.l":"Жанр —","c.genre.v":"Кооп survival-сити-билдер","c.engine.l":"Движок —","c.platforms.l":"Платформы —","c.platforms.v":"Десктоп / Веб / Мобильные","c.status.l":"Статус —","c.status.v":"Уже работает, можно играть",
-"c.scrollcue":"19 разделов · листайте вниз или используйте точки справа ↓",
-"s2.eyebrow":"Краткое содержание","s2.h2":"Всё, что на этой странице, в пяти строках.",
-"s2.r1.l":"Продукт","s2.r1.v":"Кооперативный survival-сити-билдер. Единая кодовая база на Rust работает нативно на десктопе, в браузере (WebGPU с откатом на WebGL2) и в мобильных браузерах — все они делят один мир в реальном времени под контролем сервера.",
-"s2.r2.l":"Стадия","s2.r2.v":"Уже работает и доступна для игры на <b>game.twelfth.uz</b> — это не макет. Продакшн-инфраструктура (аккаунты, мультирегиональный хостинг, протестированный процесс деплоя) уже запущена. Подробности — раздел 09.",
-"s2.r3.l":"Отличие","s2.r3.v":"Единственный проект в жанре, который одновременно является кооп-мультиплеером в реальном времени <i>и</i> по-настоящему кроссплатформенным из одной кодовой базы. Сравнение — раздел 06.",
-"s2.r4.l":"Рынок","s2.r4.v":"Проверенный жанр (Frostpunk, Banished, They Are Billions и мобильные клоны \"Frozen City\") со структурным разрывом, который закрывает этот продукт. Раздел 13 — <i>нужны ваши данные</i>.",
-"s2.r5.l":"Запрос","s2.r5.v":"Сумма, использование средств и вехи. Раздел 15 — <i>нужны ваши данные</i>.",
-"s3.eyebrow":"Проблема","s3.h2":"Survival-сити-билдеры доказали спрос. Затем жанр разделил его натрое.",
-"s3.r1.l":"Десктопная классика","s3.r1.v":"Frostpunk, Banished, They Are Billions дают глубокую симуляцию — но это одиночные игры, требующие покупки и установки прежде чем кто-либо увидит игру.",
-"s3.r2.l":"Мобильные клоны","s3.r2.v":"Игры для телефонов (некоторые буквально называются \"Frozen City\") охватывают огромную казуальную аудиторию, но обычно это неглубокие одиночные idle-циклы, настроенные под монетизацию.",
-"s3.r3.l":"Разрыв","s3.r3.v":"Почти ничто в жанре не позволяет другу кликнуть одну ссылку, открыть браузер и начать строить <b>тот же самый</b> город вместе с вами в реальном времени — с любого устройства, какое у него под рукой.",
-"s3.close":"Frozen City закрывает этот разрыв не компромиссом между \"глубоко\" и \"доступно\", а запуском одной и той же симуляции одновременно на каждой платформе.",
-"s4.eyebrow":"Мир","s4.h2":"Одна печь. Бесконечная зима. Город, который выживает или гибнет вместе.",
-"s4.lead":"Горстка выживших собирается вокруг единственной Печи, пока температура падает день за днём. Игроки рубят дрова, добывают уголь, охотятся и занимаются земледелием, строят укрытия в радиусе тепла печи — ночи становятся холоднее, топливо заканчивается, новоприбывшим нужно где-то спать.",
-"s4.s1.t":"Собирать","s4.s1.d":"Дрова, уголь и еду с земель вокруг лагеря.",
-"s4.s2.t":"Строить","s4.s2.d":"Палатки, лесопилки, шахты, охотничьи хижины, теплицы — у каждой свой персонал.",
-"s4.s3.t":"Топить печь","s4.s3.d":"Её уровень задаёт радиус тепла; кончится топливо — радиус, а с ним и укрытие, сократится.",
-"s4.s4.t":"Пережить ночь","s4.s4.d":"Резкие похолодания, бураны, болезни и трудный выбор насчёт незнакомцев у ворот.",
-"s5.eyebrow":"Продукт","s5.h2":"Достаточно глубоко, чтобы провести часы, и уже достаточно готово, чтобы быть выпущенным.",
-"s5.r1.l":"Здания","s5.r1.v":"Десять построек от Палатки и Лесопилки до Теплицы, Госпиталя, Кухни и Склада — каждая улучшаема, а теперь ещё и <b>переносима</b> после постройки.",
-"s5.r2.l":"Население","s5.r2.v":"Шесть профессий с соответствующими бонусами, индивидуальный опыт и уровни, назначаемый <b>лидер</b>, и общая для колонии система <b>морали</b>.",
-"s5.r3.l":"Прогрессия","s5.r3.v":"Дерево технологий из пяти веток, цепочка миссий и <b>Туннель</b> — многоэтапный мегапроект, венчающий личный мир.",
-"s5.r4.l":"События","s5.r4.v":"Болезни, бураны и караваны беженцев, требующие реального выбора «принять или отказать».",
-"s5.r5.l":"Экономика","s5.r5.v":"Охота истощает абстрактную популяцию дичи; земледелие разводит скот; торговый караван возит товары через Туннель.",
-"s5.slot2":"Город, изометрия","s5.slot5":"Выжившие по профессиям",
-"s6.eyebrow":"Сила продукта","s6.h2":"Одна игра, шесть конкретных преимуществ.",
-"s6.lead":"Большинство survival-сити-билдеров — однопользовательские и привязаны к одной платформе. Frozen City — ни то, ни другое. Вот почему.",
-"s6.w1.l":"Кооп в реальном времени","s6.w1.v":"До 8 игроков управляют одним городом в реальном времени, с любого устройства.",
-"s6.w2.l":"Одна кодовая база, три платформы","s6.w2.v":"Десктоп, браузер (WebGPU/WebGL2) и мобильный браузер — без отдельных портов.",
-"s6.w3.l":"Не требует установки","s6.w3.v":"Достаточно вкладки браузера — ничего скачивать или устанавливать не нужно.",
-"s6.w4.l":"Контент без ассетов","s6.w4.v":"Каждое здание, персонаж и эффект создаются процедурно в коде — без арт-бюджета.",
-"s6.w5.l":"Уже работает","s6.w5.v":"Работает в продакшне на game.twelfth.uz уже сегодня — это не прототип.",
-"s6.w6.l":"Глубоко и протестировано","s6.w6.v":"10 типов зданий, 6 профессий, дерево технологий из 5 веток, динамические события — и 37 автотестов за каждым релизом.",
-"s7.eyebrow":"Почему сложно скопировать","s7.h2":"Три инженерных решения, на которые не идёт большинство конкурентов.",
-"s7.lead":"Эта архитектура не случайна — именно поэтому одна небольшая команда может выпускать мультиплеер сразу на три платформы.",
-"s7.l1":"<b>Одна детерминированная симуляция, три среды выполнения.</b> Ядро симуляции без Bevy работает идентично на выделенном сервере, внутри процесса для одиночной игры и внутри браузера через WebAssembly.<span class=\"plain\">Простыми словами: правила игры везде одинаковы — нет отдельной мобильной версии, которая может незаметно отстать.</span>",
-"s7.l2":"<b>Настоящий кооп с любого устройства.</b> Сетевой код под контролем сервера через единый порт TCP/WebSocket/HTTP позволяет до 8 игрокам делить город в реальном времени — на десктопе или в мобильном браузере.<span class=\"plain\">Простыми словами: друзья играют вместе мгновенно с любого устройства, без тормозящего мультиплеера, прикрученного постфактум.</span>",
-"s7.l3":"<b>Нет арт-конвейера, тормозящего контент.</b> Каждое здание, персонаж и эффект генерируются процедурно в коде, а не рисуются вручную.<span class=\"plain\">Простыми словами: новый контент выходит за дни, потому что ничего не ждёт аутсорс-бюджета на арт.</span>",
-"s8.eyebrow":"Видение","s8.h2":"Каждый личный город рано или поздно открывается в один общий мир.",
-"s8.a.k":"Начало","s8.a.t":"Личный мир","s8.a.d":"Аккаунт не нужен. Миссии и прогрессия ведут к Туннелю.",
-"s8.b.k":"Мегапроект","s8.b.t":"Туннель","s8.b.d":"Многоэтапная раскопка, в которую весь город вкладывается сообща.",
-"s8.c.k":"Итог","s8.c.t":"Глобальный мир","s8.c.d":"Один постоянный общий мир, где каждый выпустившийся игрок встречается как он сам.",
-"s8.note":"Из Глобального мира игроки приглашают встреченных друзей обратно в свой Личный мир — замыкая цикл от одиночного старта до социальной игры. Этот цикл — встроенный механизм роста продукта: каждый выпустившийся игрок становится живым приглашением, а не просто целью маркетинга.",
-"s8.slot":"Туннель",
-"s9.eyebrow":"Уже запущено","s9.h2":"Не прототип. Работающий продукт.","s9.lead":"В Frozen City можно играть уже сегодня, за ней стоит продакшн-инфраструктура — это не демо, сделанное для этой презентации.",
-"s9.p1":"кодовая база → десктоп, браузер и мобильные, без отдельных портов","s9.p2":"независимых игровых региона работают в продакшне","s9.p3":"языка в живом интерфейсе — узбекский, английский, русский","s9.p4":"файлов автотестов проверяют каждый релиз",
-"s9.body":"Каждый деплой проходит полный набор тестов и настоящий smoke-тест рендера прежде чем дойти до игроков; аккаунты регистрируются самостоятельно через Telegram-бота; мир сохраняет себя непрерывно, без меню сохранения для игрока.",
-"s9.gaps.h":"Честно: что ещё не готово до публичной версии 1.0",
-"s9.gaps.1":"Автоматический CI/CD (GitHub Actions) — сейчас релизы выходят через скрипт, запускаемый вручную",
-"s9.gaps.2":"Дальнейшее уменьшение размера WASM (обрезка функций движка) поверх уже работающего gzip-сжатия",
-"s9.gaps.3":"Серверный текст (лента событий в игре) пока не локализован, в отличие от остального интерфейса",
-"s9.gaps.4":"Пока нет публичной витрины или страницы дистрибуции (например, itch.io), кроме прямой ссылки game.twelfth.uz",
-"s10.eyebrow":"Скорость разработки","s10.h2":"Что было выпущено за один пятидневный рывок.",
-"s10.e1.t":"Сетевой фундамент","s10.e1.d":"Дельта-снапшоты и сжатие кадров сократили сетевой трафик на игрока до минимума.",
-"s10.e2.t":"Глобальный мир, первая версия","s10.e2.d":"Постоянный общий хаб запускается, с переселенцами по аккаунтам, прибывающими через Туннель.",
-"s10.e3.t":"Аккаунты, приглашения и живое население","s10.e3.d":"Самостоятельная регистрация, игра с разных устройств, приглашения друзей в гостевой кооп и полноценный слой выживших — профессии, опыт, назначаемый лидер, мораль колонии — всё за один день.",
-"s10.e4.t":"У каждого выжившего теперь есть лицо","s10.e4.d":"Процедурные, подобранные под профессию модели персонажей — без затрат на арт-бюджет.",
-"s10.e5.date":"С тех пор","s10.e5.t":"Без замедления","s10.e5.d":"Добавлены перенос зданий, экономика охоты на основе дикой природы, скотоводство, механика захоронений и торговые караваны через Туннель.",
-"s11.eyebrow":"Дорожная карта","s11.h2":"Что купит следующая инвестиция в разработку.",
-"s11.c1.k":"Ближний срок","s11.c1.t":"Готовность к релизу","s11.c1.i1":"CI/CD — один тег, пять артефактов под платформы","s11.c1.i2":"Уменьшение размера WASM (обрезка функций движка + оптимизация бинарника)","s11.c1.i3":"Локализация последней нелокализованной поверхности: серверный текст",
-"s11.c2.k":"Средний срок","s11.c2.t":"Дистрибуция","s11.c2.i1":"Публичная страница витрины — скриншоты, трейлер, встроенная веб-версия","s11.c2.i2":"Первый платный или продвигаемый канал привлечения пользователей","s11.c2.i3":"Маркетплейс поверх существующего реестра вкладов",
-"s11.c3.k":"Готовность к масштабированию","s11.c3.t":"Запас прочности","s11.c3.i1":"Уже протестировано под нагрузкой на 100 одновременных игроков в одном хабе","s11.c3.i2":"Interest-management / шардинг шлюза для 1000+ одновременных игроков","s11.c3.i3":"Мультирегиональный менеджер миров (сейчас 3 статичных региона под ручным управлением)",
-"s12.eyebrow":"Риски и меры","s12.h2":"Что может пойти не так, и что уже с этим справляется.",
-"s12.r1":"Маленькая команда, зависимость от одного человека.","s12.m1":"Документированная архитектура, модульный workspace из трёх крейтов и 37 файлов автотестов означают, что проект не зависит от памяти одного человека.",
-"s12.r2":"Размер веб-версии для мобильных — сборка WASM ~55–57МБ без сжатия.","s12.m2":"Серверный gzip уже сокращает это примерно в 4.4× в продакшне (66МБ → 15МБ, по собственным замерам команды); следующий шаг — дальнейшая оптимизация размера бинарника.",
-"s12.r3":"Модель монетизации пока не определена.","s12.m3":"Нужны ваши данные — см. раздел 14.",
-"s12.r4":"Переполненный, устоявшийся жанр.","s12.m4":"Дифференциация через кооп и настоящий кроссплатформенный охват (раздел 06), а не прямая конкуренция в глубине одиночной игры.",
-"s13.eyebrow":"Рыночная возможность","s13.h2":"Проверенный жанр, недообслуженная ниша.",
-"s13.lead":"Survival-сити-билдеры неоднократно находили большую, преданную аудиторию — Frostpunk, Banished, They Are Billions и мобильные хиты, несущие само имя \"Frozen City\". Почти ни один из них не является коопом в реальном времени, и ни один не работает нативно на десктопе, в браузере и на мобильных из одной кодовой базы.",
-"s13.f1.k":"Целевая аудитория","s13.f1.v":"кто в это играет и примерно сколько их","s13.f2.k":"Сопоставимые игры","s13.f2.v":"продажи / загрузки / число игроков, с источниками","s13.f3.k":"Доступный рынок","s13.f3.v":"ваша оценка и как вы её получили",
-"s13.hint":"Пришлите цифры и источники — я сразу вставлю их в этот раздел.",
-"s14.eyebrow":"Бизнес-модель","s14.h2":"Как Frozen City зарабатывает деньги.",
-"s14.lead":"Распространённые пути для этого жанра: разовая премиум-покупка в десктопных магазинах; бесплатный вход в браузере/мобильных с косметическими или удобными покупками; либо гибрид — бесплатный Личный мир, платные функции в Глобальном мире.",
-"s14.f1.k":"Модель дохода","s14.f1.v":"премиум / free-to-play / гибрид / другое","s14.f2.k":"Кто платит","s14.f2.v":"и конкретно за что","s14.f3.k":"Цена (цены)","s14.f3.v":"если уже решено",
-"s15.eyebrow":"Запрос инвестиций","s15.h2":"Что мы привлекаем и что это купит.",
-"s15.f1.k":"Привлекаемая сумма","s15.f1.v":"например, $150 000","s15.f2.k":"Инструмент","s15.f2.v":"SAFE / доля / другое","s15.f3.k":"Использование средств","s15.f3.v":"например, арт/звук, маркетинг, разработка, сервера — в процентах","s15.f4.k":"Запас времени","s15.f4.v":"на сколько месяцев хватит","s15.f5.k":"Вехи","s15.f5.v":"что конкретно это открывает — см. Дорожную карту, раздел 11",
-"s16.eyebrow":"Команда и контакты","s16.h2":"Кто это строит.",
-"s16.f1.k":"Основатели","s16.f1.v":"имена, роли, релевантный опыт","s16.f2.k":"Фото","s16.f2.v":"портреты команды","s16.f3.k":"Контакты","s16.f3.v":"email, Telegram, телефон",
-"s16.slot":"Рассвет над городом",
-"s17.eyebrow":"Глоссарий","s17.h2":"Пять терминов из текста выше, простыми словами.",
-"s17.t1":"Сервер-авторитативность","s17.d1":"Сервер хранит единственную настоящую копию города; ни одно устройство игрока не может подделать прогресс или разойтись с остальными.",
-"s17.t2":"Детерминированная симуляция","s17.d2":"При одинаковых входных данных симуляция каждый раз даёт абсолютно одинаковый результат — это свойство позволяет одному ядру работать одинаково на сервере, во вкладке браузера или офлайн.",
-"s17.d3":"Формат, позволяющий выполнять код почти с нативной скоростью прямо в браузере, без плагинов и установки.",
-"s17.t4":"Процедурный / без ассетов","s17.d4":"Визуальные элементы, создаваемые кодом во время выполнения, а не нарисованные вручную и поставляемые как файлы изображений или моделей.",
-"s17.t5":"Дельта-снапшот","s17.d5":"Отправка только того, что изменилось с последнего обновления, вместо всего состояния мира — чтобы сетевой трафик оставался малым.",
-"img.tag2":"Изображение 2 · Генеративный эскиз","img.tag3":"Изображение 3 · Генеративный эскиз","img.tag4":"Изображение 4 · Генеративный эскиз","img.tag5":"Изображение 5 · Генеративный эскиз",
-"footer.l":"Frozen City — Брифинг для инвесторов (черновик)","footer.r":"Подготовлено для внутреннего обзора — не финальная версия"
-}
-}
-</script>
+<!-- ================================================== 05 TRACTION -->
+<section class="slide" id="s5">
+  <div class="wrap">
+    <div class="slide-head"><span class="no">05</span>
+      <div class="eyebrow" data-i18n="s5.eyebrow"></div><h2 data-i18n="s5.h2"></h2></div>
+    <div class="stats">
+      <div class="stat"><div class="v">100</div><p data-i18n="s5.s1"></p></div>
+      <div class="stat"><div class="v">39</div><p data-i18n="s5.s2"></p></div>
+      <div class="stat"><div class="v">12<small> MB</small></div><p data-i18n="s5.s3"></p></div>
+      <div class="stat"><div class="v">3</div><p data-i18n="s5.s4"></p></div>
+    </div>
+    <ul class="infra">
+      <li data-i18n="s5.i1"></li><li data-i18n="s5.i2"></li><li data-i18n="s5.i3"></li>
+      <li data-i18n="s5.i4"></li><li data-i18n="s5.i5"></li><li data-i18n="s5.i6"></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ================================================== 06 VISION -->
+<section class="slide alt" id="s6">
+  <div class="wrap">
+    <div class="slide-head"><span class="no">06</span>
+      <div class="eyebrow" data-i18n="s6.eyebrow"></div><h2 data-i18n="s6.h2"></h2>
+      <p class="lead" data-i18n="s6.lead"></p></div>
+    <div class="eras">
+      <div class="era"><span class="badge live" data-i18n="badge.live"></span>
+        <svg width="84" height="84" viewBox="0 0 84 84" aria-hidden="true">
+          <polygon points="24,66 60,58 64,64 28,72" fill="#6d4a30"/><polygon points="60,66 24,58 20,64 56,72" fill="#5a3c26"/>
+          <polygon points="30,58 54,58 42,20" fill="#ff8a3d"/><polygon points="35,58 49,58 42,32" fill="#ffb057"/>
+          <polygon points="39,58 45,58 42,44" fill="#ffe29a"/>
+          <polygon points="48,24 53,14 56,26" fill="#ffb057" opacity=".8"/>
+        </svg>
+        <h3 data-i18n="s6.e1.t"></h3><div class="res" data-i18n="s6.e1.r"></div><p data-i18n="s6.e1.d"></p></div>
+      <div class="era"><span class="badge plan" data-i18n="badge.plan"></span>
+        <svg width="84" height="84" viewBox="0 0 84 84" aria-hidden="true">
+          <polygon points="18,66 66,66 66,42 18,42" fill="#3f5875"/><polygon points="18,66 18,42 30,42 30,66" fill="#4c6989"/>
+          <polygon points="12,42 72,42 42,18" fill="#8fb2cc"/><polygon points="12,42 42,18 42,26 20,42" fill="#cfe4f4"/>
+          <polygon points="37,66 47,66 47,52 37,52" fill="#ffb057"/>
+          <polygon points="54,60 62,60 62,50 54,50" fill="#5adfcf" opacity=".7"/>
+        </svg>
+        <h3 data-i18n="s6.e2.t"></h3><div class="res" data-i18n="s6.e2.r"></div><p data-i18n="s6.e2.d"></p></div>
+      <div class="era"><span class="badge plan" data-i18n="badge.plan"></span>
+        <svg width="84" height="84" viewBox="0 0 84 84" aria-hidden="true">
+          <polygon points="14,68 70,68 70,40 14,40" fill="#33506d"/>
+          <polygon points="14,40 28,28 28,40" fill="#46688a"/><polygon points="28,40 42,28 42,40" fill="#46688a"/><polygon points="42,40 56,28 56,40" fill="#46688a"/>
+          <polygon points="58,40 66,40 66,16 58,16" fill="#2c415c"/>
+          <polygon points="59,14 65,10 68,14 62,18" fill="#5d7288" opacity=".7"/><polygon points="64,8 70,4 74,9 68,13" fill="#5d7288" opacity=".45"/>
+          <polygon points="22,68 30,68 30,54 22,54" fill="#ffb057"/><polygon points="38,68 46,68 46,54 38,54" fill="#ffb057" opacity=".7"/>
+        </svg>
+        <h3 data-i18n="s6.e3.t"></h3><div class="res" data-i18n="s6.e3.r"></div><p data-i18n="s6.e3.d"></p></div>
+      <div class="era"><span class="badge plan" data-i18n="badge.plan"></span>
+        <svg width="84" height="84" viewBox="0 0 84 84" aria-hidden="true">
+          <polygon points="16,70 30,70 30,30 16,30" fill="#3f5875"/><polygon points="16,30 30,30 23,20" fill="#4c6989"/>
+          <polygon points="36,70 52,70 52,14 36,14" fill="#2c415c"/><polygon points="36,14 52,14 44,4" fill="#3f5875"/>
+          <polygon points="58,70 70,70 70,40 58,40" fill="#33506d"/>
+          <g fill="#5adfcf"><circle cx="23" cy="40" r="1.8"/><circle cx="23" cy="52" r="1.8"/><circle cx="44" cy="26" r="1.8"/><circle cx="44" cy="40" r="1.8"/><circle cx="44" cy="54" r="1.8"/><circle cx="64" cy="50" r="1.8"/><circle cx="64" cy="60" r="1.8"/></g>
+        </svg>
+        <h3 data-i18n="s6.e4.t"></h3><div class="res" data-i18n="s6.e4.r"></div><p data-i18n="s6.e4.d"></p></div>
+    </div>
+    <div class="climate">
+      <div class="clim">
+        <svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
+          <g fill="#8fd8f0">
+            <polygon points="22,4 25,20 22,24 19,20"/><polygon points="22,40 25,24 22,20 19,24"/>
+            <polygon points="4,13 19,19 24,22 18,24"/><polygon points="40,31 25,25 20,22 26,20"/>
+            <polygon points="40,13 25,19 20,22 26,24"/><polygon points="4,31 19,25 24,22 18,20"/>
+          </g><circle cx="22" cy="22" r="3.4" fill="#cfe4f4"/>
+        </svg>
+        <div><b data-i18n="s6.cl1.t"></b><span data-i18n="s6.cl1.d"></span></div>
+      </div>
+      <div class="clim">
+        <svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
+          <polygon points="22,12 31,17 31,27 22,32 13,27 13,17" fill="#ffb057"/>
+          <g fill="#ff8a3d"><polygon points="22,2 25,10 19,10"/><polygon points="22,42 25,34 19,34"/><polygon points="2,22 10,19 10,25"/><polygon points="42,22 34,19 34,25"/>
+          <polygon points="8,8 15,11 11,15"/><polygon points="36,8 33,15 29,11"/><polygon points="8,36 11,29 15,33"/><polygon points="36,36 29,33 33,29"/></g>
+        </svg>
+        <div><b data-i18n="s6.cl2.t"></b><span data-i18n="s6.cl2.d"></span></div>
+      </div>
+      <div class="clim">
+        <svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
+          <polygon points="2,18 10,10 18,18 26,10 34,18 42,10 42,16 34,24 26,16 18,24 10,16 2,24" fill="#5adfcf"/>
+          <polygon points="2,28 10,20 18,28 26,20 34,28 42,20 42,26 34,34 26,26 18,34 10,26 2,34" fill="#37b8a8" opacity=".8"/>
+          <polygon points="2,38 10,30 18,38 26,30 34,38 42,30 42,36 34,44 26,36 18,44 10,36 2,44" fill="#25917f" opacity=".6"/>
+        </svg>
+        <div><b data-i18n="s6.cl3.t"></b><span data-i18n="s6.cl3.d"></span></div>
+      </div>
+    </div>
+    <p class="bridge" data-i18n="s6.bridge"></p>
+  </div>
+</section>
+
+<!-- ================================================== 07 ROADMAP -->
+<section class="slide" id="s7">
+  <div class="wrap">
+    <div class="slide-head"><span class="no">07</span>
+      <div class="eyebrow" data-i18n="s7.eyebrow"></div><h2 data-i18n="s7.h2"></h2></div>
+    <div class="road">
+      <div class="col"><div class="k" data-i18n="s7.c1.k"></div><h3 data-i18n="s7.c1.t"></h3>
+        <ul><li data-i18n="s7.c1.i1"></li><li data-i18n="s7.c1.i2"></li><li data-i18n="s7.c1.i3"></li></ul></div>
+      <div class="col"><div class="k" data-i18n="s7.c2.k"></div><h3 data-i18n="s7.c2.t"></h3>
+        <ul><li data-i18n="s7.c2.i1"></li><li data-i18n="s7.c2.i2"></li><li data-i18n="s7.c2.i3"></li></ul></div>
+      <div class="col"><div class="k" data-i18n="s7.c3.k"></div><h3 data-i18n="s7.c3.t"></h3>
+        <ul><li data-i18n="s7.c3.i1"></li><li data-i18n="s7.c3.i2"></li><li data-i18n="s7.c3.i3"></li></ul></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================== 08 ASK -->
+<section class="slide alt" id="s8">
+  <div class="wrap">
+    <div class="slide-head"><span class="no">08</span>
+      <div class="eyebrow" data-i18n="s8.eyebrow"></div><h2 data-i18n="s8.h2"></h2></div>
+    <div class="ask-box">
+      <div>
+        <p class="big" data-i18n="s8.big"></p>
+        <p class="note" data-i18n="s8.note"></p>
+        <div class="ask-ctas">
+          <a class="btn primary" href="https://twelfth.uz" data-i18n="s8.cta1">Bog'lanish — twelfth.uz</a>
+          <a class="btn ghost" href="/" data-i18n="s8.cta2">O'yinni ochish</a>
+        </div>
+      </div>
+      <div class="art-frame">
+        <svg class="art" viewBox="0 0 360 220" aria-hidden="true">
+          <defs><radialGradient id="glow3" cx=".5" cy=".5" r=".5">
+            <stop offset="0" stop-color="#ff8a3d" stop-opacity=".4"/><stop offset="1" stop-color="#ff8a3d" stop-opacity="0"/>
+          </radialGradient></defs>
+          <rect width="360" height="220" fill="#0d1b2e"/>
+          <polygon points="0,170 90,96 180,170" fill="#182f4a"/>
+          <polygon points="150,170 250,80 360,170" fill="#1b3352"/>
+          <polygon points="250,80 224,120 278,120" fill="#cfe4f4" opacity=".85"/>
+          <rect y="170" width="360" height="50" fill="#16293f"/>
+          <circle cx="180" cy="168" r="70" fill="url(#glow3)"/>
+          <polygon points="168,170 192,170 189,128 171,128" fill="#5a3126"/>
+          <polygon points="171,128 189,128 180,102" fill="#3a2018"/>
+          <g class="flame-pulse">
+            <polygon points="174,128 186,128 180,106" fill="#ff8a3d"/><polygon points="177,128 183,128 180,114" fill="#ffb057"/>
+          </g>
+          <polygon points="120,170 138,148 138,170" fill="#3f5875"/><polygon points="138,170 138,148 156,170" fill="#2c415c"/>
+          <polygon points="134,170 142,170 138,158" fill="#ffb057"/>
+          <polygon points="212,170 228,150 228,170" fill="#3f5875"/><polygon points="228,170 228,150 244,170" fill="#2c415c"/>
+          <polygon points="224,170 232,170 228,159" fill="#ffb057"/>
+          <circle cx="70" cy="46" r="1.4" fill="#e8f0f8" opacity=".6"/><circle cx="300" cy="36" r="1.4" fill="#e8f0f8" opacity=".6"/>
+          <circle cx="330" cy="70" r="1.1" fill="#e8f0f8" opacity=".4"/><circle cx="40" cy="80" r="1.1" fill="#e8f0f8" opacity=".4"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span data-i18n="f.l"></span>
+    <span>game.twelfth.uz · 2026</span>
+  </div>
+</footer>
 
 <script>
+const I18N = {
+uz: {
+  "nav.back":"← Frozen City","play.cta":"O'ynash",
+  "c.tag":"game.twelfth.uz — hozir jonli","c.eyebrow":"Investorlar uchun taqdimot",
+  "c.lead":"Abadiy qishda birgalikda omon qolish shahar-qurish o'yini. Bitta Rust kod bazasi — desktop, brauzer va telefonda; haqiqiy server-nazoratli real-vaqt ko'p o'yinchi.",
+  "c.m1":"Janr — <b>Kooperativ survival city-builder</b>","c.m2":"Texnologiya — <b>Rust + Bevy</b>","c.m3":"Platformalar — <b>Desktop / Web / Mobil</b>","c.m4":"Holat — <b>Jonli, o'ynash mumkin</b>",
+  "c.cta":"O'ynab ko'ring →",
+  "s1.eyebrow":"Xulosa","s1.h2":"Butun taqdimot — to'rt kartada.",
+  "s1.c1.k":"Jonli","s1.c1.d":"game.twelfth.uz — bu maket emas: akkauntlar, saqlanadigan dunyolar va ishlab chiqarish serveri bilan ishlab turgan mahsulot.",
+  "s1.c2.k":"1 kod bazasi","s1.c2.d":"O'sha bitta Rust kodi desktopda nativ, brauzerda (WebGPU, WebGL2 zaxira) va mobil brauzerlarda ishlaydi.",
+  "s1.c3.k":"Real-vaqt ko'p o'yinchi","s1.c3.d":"Server-nazoratli yagona shahar: hech bir qurilma taraqqiyotni soxtalashtira olmaydi. Trafik — faqat o'zgargan qism (delta-snapshot).",
+  "s1.c4.k":"0 rassom xarajati","s1.c4.d":"Barcha grafika kod bilan protsedural chiziladi — kontent-budjetsiz shu ko'rinishga erishilgan.",
+  "s1.cap":"Bitta simulyatsiya — uch platforma, bitta server atrofida",
+  "s2.eyebrow":"Muammo","s2.h2":"Janr talabni isbotladi — keyin uni uchga bo'lib yubordi.",
+  "s2.c1.t":"Desktop klassikalar","s2.c1.d":"Frostpunk, Banished, They Are Billions — chuqur simulyatsiya, lekin yakka o'yin: ko'rishdan oldin sotib olish va o'rnatish shart.",
+  "s2.c2.t":"Mobil klonlar","s2.c2.d":"Telefon o'yinlari (ba'zilari aynan \"Frozen City\" nomi bilan) ulkan auditoriyani oladi, lekin sayoz, yakka idle-tsikllar.",
+  "s2.c3.t":"Bo'shliq","s2.c3.d":"Do'stingiz bitta havolani bosib, brauzerda aynan siz qurayotgan shaharga real vaqtda qo'shila oladigan mahsulot janrda deyarli yo'q.",
+  "s2.close":"Frozen City bu bo'shliqni \"chuqur yoki qulay\" degan kelishuv bilan emas, bitta simulyatsiyani barcha platformada birdek ishlatish bilan yopadi.",
+  "s3.eyebrow":"Mahsulot","s3.h2":"Bitta Pechka. Abadiy qish. Shahar birga omon qoladi — yoki birga halok bo'ladi.",
+  "s3.lead":"Bir hovuch omon qolganlar yagona Pechka atrofida to'planadi; harorat kundan-kunga tushib boradi. Pechka darajasi issiqlik radiusini belgilaydi — yoqilg'i tugasa, boshpana ham toraya boradi.",
+  "s3.l1.t":"To'plash","s3.l1.d":"O'tin, ko'mir va oziq-ovqat — lager atrofidagi yerlardan.",
+  "s3.l2.t":"Qurish","s3.l2.d":"Chodirdan tortib teplitsa, gospital va omborgacha — har birida o'z xodimi.",
+  "s3.l3.t":"Pechkani yoqish","s3.l3.d":"Darajasi issiqlik radiusini beradi; yoqilg'i tugasa radius — va boshpana — qisqaradi.",
+  "s3.l4.t":"Tunni o'tkazish","s3.l4.d":"Keskin sovuqlar, bo'ronlar, kasallik va darvoza oldidagi notanishlar haqida og'ir qarorlar.",
+  "s3.n1":"bino turi, yaxshilanadigan va ko'chiriladigan","s3.n2":"kasb, tajriba va darajalar bilan","s3.n3":"tarmoqli texnologiya daraxti","s3.n4b":"Tunnel","s3.n4":"— shaxsiy dunyoni yakunlovchi megaloyiha",
+  "s3.cap":"Pechka va issiqlik radiusi — o'yinning markaziy mexanikasi",
+  "s4.eyebrow":"Farqlanish","s4.h2":"Janrda hech kim bu kombinatsiyani bermaydi.",
+  "s4.th0":"Xususiyat","s4.th1":"Desktop klassikalar","s4.th2":"Mobil klonlar","s4.part":"qisman",
+  "s4.r1":"Real-vaqt kooperativ ko'p o'yinchi","s4.r2":"Bitta kod bazasidan 3 platforma","s4.r3":"Havola orqali bir zumda o'ynash","s4.r4":"Simulyatsiya chuqurligi","s4.r5":"Server-nazoratli yagona dunyo",
+  "s4.note":"Raqobat yo'nalishi — yakka o'yin chuqurligida to'qnashish emas: kooperatsiya va chinakam kross-platforma qamrovida ustunlik.",
+  "s5.eyebrow":"Bugungi holat","s5.h2":"Bu reja emas — ishlab turgan tizim.",
+  "s5.s1":"bitta umumiy hubda parallel o'yinchi — yuklama testidan o'tgan",
+  "s5.s2":"avtomatlashtirilgan test fayli — har deploy oldidan majburiy",
+  "s5.s3":"web-yuklama hajmi gzip bilan (optimallashtirilgan WASM: 34 MB)",
+  "s5.s4":"til — o'zbek, ingliz, rus: interfeys to'liq lokalizatsiya qilingan",
+  "s5.i1":"Akkauntlar, saqlanadigan shaxsiy dunyolar va mehmon rejimi",
+  "s5.i2":"Sinovdan o'tgan avtomatik deploy-quvur: test → build → smoke-test → almashtirish",
+  "s5.i3":"Jonli iqtisod: ovchilik, chorvachilik, karvon savdosi",
+  "s5.i4":"Lider, ma'naviyat va kasb-tajriba tizimlari",
+  "s5.i5":"Qurilgan binolarni ko'chirish — sohada kam uchraydigan qulaylik",
+  "s5.i6":"Protsedural personaj modellari — kasbga mos ko'rinish",
+  "s6.eyebrow":"Uzoq muddatli vizyon","s6.h2":"Bitta gulxandan zamonaviy davlatgacha.",
+  "s6.lead":"Bugungi qishki omon qolish — birinchi bob xolos. Reja: o'sha shahar, o'sha tekshirilgan simulyatsiya ustida to'rt sivilizatsiya davridan o'tadi.",
+  "badge.live":"Bugun jonli","badge.plan":"Rejada",
+  "s6.e1.t":"Ibtidoiy qabila","s6.e1.r":"Olov · yog'och · tosh","s6.e1.d":"Valyuta yo'q — hamma narsa umumiy omborda. Aynan bugun ishlab turgan bosqich.",
+  "s6.e2.t":"Qishloq","s6.e2.r":"G'isht · ruda · bug'doy · chorva","s6.e2.d":"Doimiy uy-joy, teplitsalar, quduqlar. Dehqon, chorvador, konchi kasblari.",
+  "s6.e3.t":"Sanoat shahri","s6.e3.r":"Ko'mir · neft · metall · elektr","s6.e3.d":"Valyuta paydo bo'ladi: maosh va savdo. Fabrikalar, kasalxonalar.",
+  "s6.e4.t":"Zamonaviy megapolis","s6.e4.r":"Yuqori texnologiya · AES/GES · moliya","s6.e4.d":"To'liq soliq-byudjet tizimi, aqlli binolar, suzuvchi megastrukturalar.",
+  "s6.cl1.t":"Sovuq fasl — Muz","s6.cl1.d":"Sovuq urishi va ochlik; pechka, teplitsa, issiq kiyim ishlab chiqarishni talab qiladi.",
+  "s6.cl2.t":"Issiq fasl — Jazirama","s6.cl2.d":"Suv taqchilligi, yong'inlar; suv zaxiralari, irrigatsiya va sovutish inshootlari kerak.",
+  "s6.cl3.t":"Toshqin fasli — Suv","s6.cl3.d":"Yerlar suv ostida qoladi; balandlikka ko'chish, suzuvchi platformalar, gidroponika.",
+  "s6.bridge":"Bularning bari qayta yozish emas — o'sha tekshirilgan deterministik yadro ustiga qo'shimcha kontent sifatida, V0.2–V0.7 ni chiqargan intizom bilan bosqichma-bosqich qo'shiladi.",
+  "s7.eyebrow":"Yo'l xaritasi","s7.h2":"Keyingi investitsiya nimani sotib oladi.",
+  "s7.c1.k":"Yaqin muddat","s7.c1.t":"Relizga tayyorlik","s7.c1.i1":"CI/CD — bitta teg, beshta platforma artefakti","s7.c1.i2":"WASM hajmini yana qisqartirish bosqichi","s7.c1.i3":"Oxirgi lokalizatsiya qilinmagan qatlam: server matnlari",
+  "s7.c2.k":"O'rta muddat","s7.c2.t":"Tarqatish","s7.c2.i1":"Ochiq vitrina-sahifa: skrinshot, treyler, o'ynaladigan web-versiya","s7.c2.i2":"Birinchi pullik foydalanuvchi jalb qilish kanali","s7.c2.i3":"Mavjud hissa-reyestri ustida marketplace",
+  "s7.c3.k":"Masshtab","s7.c3.t":"O'sish zaxirasi","s7.c3.i1":"Bitta hubda 100 parallel o'yinchi — allaqachon testdan o'tgan","s7.c3.i2":"1 000+ parallel uchun interest-management / sharding","s7.c3.i3":"Ko'p mintaqali dunyo-menejeri",
+  "s8.eyebrow":"Taklif","s8.h2":"Keyingi qadam — suhbat.",
+  "s8.big":"Investitsiya miqdori, instrument va mablag'lar taqsimoti — uchrashuvda kelishiladi. Mahsulotning o'zi esa allaqachon jonli: uni hoziroq ochib, o'ynab ko'rishingiz mumkin.",
+  "s8.note":"Texnik chuqur tahlil (arxitektura, kod bazasi, infratuzilma) so'rov bo'yicha taqdim etiladi.",
+  "s8.cta1":"Bog'lanish — twelfth.uz","s8.cta2":"O'yinni ochish",
+  "f.l":"Frozen City — Investor taqdimoti"
+},
+en: {
+  "nav.back":"← Frozen City","play.cta":"Play",
+  "c.tag":"game.twelfth.uz — live now","c.eyebrow":"Investor briefing",
+  "c.lead":"A cooperative survival city-builder in the endless winter. One Rust codebase running on desktop, in the browser and on phones — with true server-authoritative real-time multiplayer.",
+  "c.m1":"Genre — <b>Co-op survival city-builder</b>","c.m2":"Tech — <b>Rust + Bevy</b>","c.m3":"Platforms — <b>Desktop / Web / Mobile</b>","c.m4":"Status — <b>Live and playable</b>",
+  "c.cta":"Try it now →",
+  "s1.eyebrow":"Summary","s1.h2":"The whole deck in four cards.",
+  "s1.c1.k":"Live","s1.c1.d":"game.twelfth.uz is not a mockup: a working product with accounts, persistent worlds and production infrastructure.",
+  "s1.c2.k":"1 codebase","s1.c2.d":"The same Rust code runs natively on desktop, in the browser (WebGPU with WebGL2 fallback) and in mobile browsers.",
+  "s1.c3.k":"Real-time co-op","s1.c3.d":"One server-authoritative city: no device can fake progress. Traffic is delta snapshots — only what changed.",
+  "s1.c4.k":"0 art budget","s1.c4.d":"All visuals are generated procedurally by code — this look was achieved with no content spend.",
+  "s1.cap":"One simulation — three platforms around one server",
+  "s2.eyebrow":"Problem","s2.h2":"The genre proved demand — then split it three ways.",
+  "s2.c1.t":"Desktop classics","s2.c1.d":"Frostpunk, Banished, They Are Billions — deep simulation, but single-player, bought and installed before anyone sees the game.",
+  "s2.c2.t":"Mobile clones","s2.c2.d":"Phone games (some literally named \"Frozen City\") reach a huge casual audience but are shallow single-player idle loops.",
+  "s2.c3.t":"The gap","s2.c3.d":"Almost nothing in the genre lets a friend click one link and start building the same city with you, in real time, from any device.",
+  "s2.close":"Frozen City closes that gap not by trading depth for reach, but by running the same simulation on every platform at once.",
+  "s3.eyebrow":"Product","s3.h2":"One Furnace. Endless winter. The city survives together — or falls together.",
+  "s3.lead":"A handful of survivors gathers around a single Furnace as the temperature drops day after day. The furnace level sets the heat radius — run out of fuel and the shelter itself shrinks.",
+  "s3.l1.t":"Gather","s3.l1.d":"Wood, coal and food from the lands around camp.",
+  "s3.l2.t":"Build","s3.l2.d":"From tents to greenhouses, a hospital and a warehouse — each with its own staff.",
+  "s3.l3.t":"Feed the Furnace","s3.l3.d":"Its level sets the heat radius; when fuel runs out, the radius — and shelter — contracts.",
+  "s3.l4.t":"Survive the night","s3.l4.d":"Cold snaps, blizzards, sickness and hard choices about strangers at the gate.",
+  "s3.n1":"building types, upgradeable and relocatable","s3.n2":"professions with XP and levels","s3.n3":"tech-tree branches","s3.n4b":"Tunnel","s3.n4":"— the megaproject crowning a personal world",
+  "s3.cap":"The Furnace and its heat radius — the core mechanic",
+  "s4.eyebrow":"Differentiation","s4.h2":"No one in the genre offers this combination.",
+  "s4.th0":"Capability","s4.th1":"Desktop classics","s4.th2":"Mobile clones","s4.part":"partial",
+  "s4.r1":"Real-time co-op multiplayer","s4.r2":"3 platforms from one codebase","s4.r3":"Instant play via a link","s4.r4":"Simulation depth","s4.r5":"Server-authoritative shared world",
+  "s4.note":"The strategy is not to out-depth single-player titles — it is to win on co-op and true cross-platform reach.",
+  "s5.eyebrow":"Where it stands","s5.h2":"Not a plan — a running system.",
+  "s5.s1":"concurrent players in one shared hub — load-tested",
+  "s5.s2":"automated test files — a mandatory gate before every deploy",
+  "s5.s3":"web download with gzip (optimized WASM: 34 MB)",
+  "s5.s4":"languages — Uzbek, English, Russian: fully localized UI",
+  "s5.i1":"Accounts, persistent personal worlds and a guest mode",
+  "s5.i2":"A proven automated deploy pipeline: test → build → smoke-test → swap",
+  "s5.i3":"A living economy: hunting, livestock, caravan trade",
+  "s5.i4":"Leader, morale and profession-XP systems",
+  "s5.i5":"Relocating constructed buildings — rare in the genre",
+  "s5.i6":"Procedural, profession-matched character models",
+  "s6.eyebrow":"Long-term vision","s6.h2":"From one campfire to a modern state.",
+  "s6.lead":"Today's winter survival run is only the first chapter. The plan: the same city, on the same proven simulation, advances through four eras of civilization.",
+  "badge.live":"Live today","badge.plan":"Planned",
+  "s6.e1.t":"Primitive tribe","s6.e1.r":"Fire · wood · stone","s6.e1.d":"No currency — everything in a shared stockpile. Exactly what runs today.",
+  "s6.e2.t":"Village","s6.e2.r":"Brick · ore · wheat · livestock","s6.e2.d":"Permanent housing, greenhouses, wells. Farmers, herders and miners appear.",
+  "s6.e3.t":"Industrial city","s6.e3.r":"Coal · oil · metal · electricity","s6.e3.d":"Currency arrives: wages and trade. Factories and hospitals.",
+  "s6.e4.t":"Modern metropolis","s6.e4.r":"High tech · nuclear/hydro · finance","s6.e4.d":"A full fiscal system, smart buildings, floating megastructures.",
+  "s6.cl1.t":"Cold season — Ice","s6.cl1.d":"Frostbite and famine; demands the furnace, greenhouses and warm-clothing production.",
+  "s6.cl2.t":"Hot season — Heat","s6.cl2.d":"Water scarcity and fires; demands reservoirs, irrigation and cooling structures.",
+  "s6.cl3.t":"Flood season — Water","s6.cl3.d":"Land goes underwater; relocation to high ground, floating platforms, hydroponics.",
+  "s6.bridge":"None of this is a rewrite — it lands as content on top of the same proven deterministic core, shipped milestone by milestone with the discipline that delivered V0.2–V0.7.",
+  "s7.eyebrow":"Roadmap","s7.h2":"What the next investment buys.",
+  "s7.c1.k":"Near term","s7.c1.t":"Ship readiness","s7.c1.i1":"CI/CD — one tag, five platform artifacts","s7.c1.i2":"A further WASM size-reduction pass","s7.c1.i3":"Localizing the last surface: server text",
+  "s7.c2.k":"Mid term","s7.c2.t":"Distribution","s7.c2.i1":"A public storefront page: screenshots, trailer, playable web build","s7.c2.i2":"First paid user-acquisition channel","s7.c2.i3":"A marketplace on top of the existing contribution ledger",
+  "s7.c3.k":"Scale","s7.c3.t":"Headroom","s7.c3.i1":"100 concurrent players in one hub — already load-tested","s7.c3.i2":"Interest management / sharding for 1,000+ concurrent","s7.c3.i3":"A multi-region world manager",
+  "s8.eyebrow":"The ask","s8.h2":"The next step is a conversation.",
+  "s8.big":"Investment amount, instrument and use of funds are agreed in a meeting. The product itself is already live — you can open it and play right now.",
+  "s8.note":"A technical deep-dive (architecture, codebase, infrastructure) is available on request.",
+  "s8.cta1":"Get in touch — twelfth.uz","s8.cta2":"Open the game",
+  "f.l":"Frozen City — Investor briefing"
+},
+ru: {
+  "nav.back":"← Frozen City","play.cta":"Играть",
+  "c.tag":"game.twelfth.uz — уже работает","c.eyebrow":"Брифинг для инвесторов",
+  "c.lead":"Кооперативный сити-билдер на выживание в бесконечную зиму. Одна кодовая база на Rust — на десктопе, в браузере и на телефонах, с настоящим сервер-авторитативным мультиплеером в реальном времени.",
+  "c.m1":"Жанр — <b>Кооп survival-сити-билдер</b>","c.m2":"Технологии — <b>Rust + Bevy</b>","c.m3":"Платформы — <b>Десктоп / Веб / Мобильные</b>","c.m4":"Статус — <b>Работает, можно играть</b>",
+  "c.cta":"Попробовать →",
+  "s1.eyebrow":"Кратко","s1.h2":"Вся презентация — в четырёх карточках.",
+  "s1.c1.k":"Live","s1.c1.d":"game.twelfth.uz — не макет: работающий продукт с аккаунтами, сохраняемыми мирами и продакшн-инфраструктурой.",
+  "s1.c2.k":"1 кодовая база","s1.c2.d":"Один и тот же Rust-код работает нативно на десктопе, в браузере (WebGPU с откатом на WebGL2) и в мобильных браузерах.",
+  "s1.c3.k":"Кооп в реальном времени","s1.c3.d":"Один сервер-авторитативный город: ни одно устройство не может подделать прогресс. Трафик — только изменения (дельта-снапшоты).",
+  "s1.c4.k":"0 затрат на арт","s1.c4.d":"Вся графика генерируется кодом процедурно — этот облик достигнут без контент-бюджета.",
+  "s1.cap":"Одна симуляция — три платформы вокруг одного сервера",
+  "s2.eyebrow":"Проблема","s2.h2":"Жанр доказал спрос — и разделил его натрое.",
+  "s2.c1.t":"Десктопная классика","s2.c1.d":"Frostpunk, Banished, They Are Billions — глубокая симуляция, но одиночная: покупка и установка прежде, чем кто-то увидит игру.",
+  "s2.c2.t":"Мобильные клоны","s2.c2.d":"Игры для телефонов (некоторые буквально называются \"Frozen City\") берут огромную аудиторию, но это неглубокие одиночные idle-циклы.",
+  "s2.c3.t":"Разрыв","s2.c3.d":"Почти ничто в жанре не даёт другу кликнуть одну ссылку и строить тот же город вместе с вами в реальном времени — с любого устройства.",
+  "s2.close":"Frozen City закрывает разрыв не компромиссом между глубиной и доступностью, а запуском одной симуляции сразу на всех платформах.",
+  "s3.eyebrow":"Продукт","s3.h2":"Одна Печь. Бесконечная зима. Город выживает вместе — или гибнет вместе.",
+  "s3.lead":"Горстка выживших собирается вокруг единственной Печи, пока температура падает день за днём. Уровень печи задаёт радиус тепла — кончится топливо, и укрытие сожмётся.",
+  "s3.l1.t":"Собирать","s3.l1.d":"Дрова, уголь и еду с земель вокруг лагеря.",
+  "s3.l2.t":"Строить","s3.l2.d":"От палаток до теплиц, госпиталя и склада — у каждого здания свой персонал.",
+  "s3.l3.t":"Топить печь","s3.l3.d":"Уровень задаёт радиус тепла; кончится топливо — радиус и укрытие сократятся.",
+  "s3.l4.t":"Пережить ночь","s3.l4.d":"Похолодания, бураны, болезни и трудные решения о незнакомцах у ворот.",
+  "s3.n1":"типов зданий, улучшаемых и переносимых","s3.n2":"профессий с опытом и уровнями","s3.n3":"веток дерева технологий","s3.n4b":"Туннель","s3.n4":"— мегапроект, венчающий личный мир",
+  "s3.cap":"Печь и радиус тепла — центральная механика игры",
+  "s4.eyebrow":"Отличие","s4.h2":"Никто в жанре не предлагает эту комбинацию.",
+  "s4.th0":"Возможность","s4.th1":"Десктопная классика","s4.th2":"Мобильные клоны","s4.part":"частично",
+  "s4.r1":"Кооп-мультиплеер в реальном времени","s4.r2":"3 платформы из одной кодовой базы","s4.r3":"Мгновенная игра по ссылке","s4.r4":"Глубина симуляции","s4.r5":"Сервер-авторитативный общий мир",
+  "s4.note":"Стратегия — не соревноваться в глубине одиночной игры, а выигрывать на коопе и настоящей кроссплатформенности.",
+  "s5.eyebrow":"Текущий статус","s5.h2":"Это не план — это работающая система.",
+  "s5.s1":"одновременных игроков в одном хабе — нагрузочный тест пройден",
+  "s5.s2":"файлов автотестов — обязательный шлюз перед каждым деплоем",
+  "s5.s3":"веб-загрузка с gzip (оптимизированный WASM: 34 МБ)",
+  "s5.s4":"языка — узбекский, английский, русский: полностью локализованный интерфейс",
+  "s5.i1":"Аккаунты, сохраняемые личные миры и гостевой режим",
+  "s5.i2":"Проверенный автодеплой: тесты → сборка → smoke-тест → замена",
+  "s5.i3":"Живая экономика: охота, скотоводство, караванная торговля",
+  "s5.i4":"Системы лидера, морали и профессионального опыта",
+  "s5.i5":"Перенос построенных зданий — редкость в жанре",
+  "s5.i6":"Процедурные модели персонажей под профессию",
+  "s6.eyebrow":"Долгосрочное видение","s6.h2":"От одного костра до современного государства.",
+  "s6.lead":"Сегодняшний зимний забег — лишь первая глава. План: тот же город, на той же проверенной симуляции, проходит четыре эпохи цивилизации.",
+  "badge.live":"Уже сегодня","badge.plan":"Запланировано",
+  "s6.e1.t":"Первобытное племя","s6.e1.r":"Огонь · дерево · камень","s6.e1.d":"Валюты нет — всё в общем складе. Именно это работает сегодня.",
+  "s6.e2.t":"Деревня","s6.e2.r":"Кирпич · руда · пшеница · скот","s6.e2.d":"Постоянное жильё, теплицы, колодцы. Фермеры, скотоводы, шахтёры.",
+  "s6.e3.t":"Промышленный город","s6.e3.r":"Уголь · нефть · металл · электричество","s6.e3.d":"Появляется валюта: зарплаты и торговля. Фабрики, больницы.",
+  "s6.e4.t":"Современный мегаполис","s6.e4.r":"Хай-тек · АЭС/ГЭС · финансы","s6.e4.d":"Полная налогово-бюджетная система, умные здания, плавучие мегаструктуры.",
+  "s6.cl1.t":"Холодный сезон — Лёд","s6.cl1.d":"Обморожение и голод; нужны печь, теплицы и производство тёплой одежды.",
+  "s6.cl2.t":"Жаркий сезон — Зной","s6.cl2.d":"Нехватка воды и пожары; нужны резервуары, ирригация и охлаждающие сооружения.",
+  "s6.cl3.t":"Сезон наводнений — Вода","s6.cl3.d":"Земля уходит под воду; переезд на возвышенность, плавучие платформы, гидропоника.",
+  "s6.bridge":"Всё это — не переписывание, а контент поверх того же проверенного детерминированного ядра, выходящий веха за вехой с той же дисциплиной, что выпустила V0.2–V0.7.",
+  "s7.eyebrow":"Дорожная карта","s7.h2":"Что покупает следующая инвестиция.",
+  "s7.c1.k":"Ближайший срок","s7.c1.t":"Готовность к релизу","s7.c1.i1":"CI/CD — один тег, пять платформенных артефактов","s7.c1.i2":"Ещё один проход по размеру WASM","s7.c1.i3":"Локализация последнего слоя: серверные тексты",
+  "s7.c2.k":"Средний срок","s7.c2.t":"Дистрибуция","s7.c2.i1":"Публичная витрина: скриншоты, трейлер, играбельная веб-версия","s7.c2.i2":"Первый платный канал привлечения","s7.c2.i3":"Маркетплейс поверх существующего реестра вкладов",
+  "s7.c3.k":"Масштаб","s7.c3.t":"Запас роста","s7.c3.i1":"100 одновременных игроков в одном хабе — уже проверено","s7.c3.i2":"Interest management / шардинг для 1 000+","s7.c3.i3":"Мультирегиональный менеджер миров",
+  "s8.eyebrow":"Предложение","s8.h2":"Следующий шаг — разговор.",
+  "s8.big":"Сумма, инструмент и распределение средств согласуются на встрече. Сам продукт уже работает — его можно открыть и играть прямо сейчас.",
+  "s8.note":"Технический разбор (архитектура, кодовая база, инфраструктура) — по запросу.",
+  "s8.cta1":"Связаться — twelfth.uz","s8.cta2":"Открыть игру",
+  "f.l":"Frozen City — брифинг для инвесторов"
+}
+};
 (function(){
-  var I18N = JSON.parse(document.getElementById('i18n-data').textContent);
-  var LANGS = ['uz','en','ru'];
+  const KEY="fc_inv_lang";
+  const btns=document.querySelectorAll(".lang-switch button");
   function apply(lang){
-    var dict = I18N[lang] || I18N.uz;
-    document.querySelectorAll('[data-i18n]').forEach(function(el){
-      var k = el.getAttribute('data-i18n');
-      if (dict[k] !== undefined) el.innerHTML = dict[k];
+    if(!I18N[lang]) lang="uz";
+    const d=I18N[lang];
+    document.documentElement.lang=lang;
+    document.querySelectorAll("[data-i18n]").forEach(el=>{
+      const k=el.getAttribute("data-i18n");
+      if(d[k]!==undefined) el.innerHTML=d[k];
     });
-    document.querySelectorAll('[data-i18n-title]').forEach(function(el){
-      var k = el.getAttribute('data-i18n-title');
-      if (dict[k] !== undefined) el.setAttribute('title', dict[k]);
-    });
-    document.documentElement.lang = lang;
-    document.querySelectorAll('.lang-switch button').forEach(function(b){
-      b.classList.toggle('active', b.getAttribute('data-setlang') === lang);
-    });
-    try { localStorage.setItem('fc_lang', lang); } catch(e){}
+    btns.forEach(b=>b.classList.toggle("active",b.dataset.lang===lang));
+    try{localStorage.setItem(KEY,lang);}catch(e){}
   }
-  document.querySelectorAll('.lang-switch button').forEach(function(b){
-    b.addEventListener('click', function(){ apply(b.getAttribute('data-setlang')); });
-  });
-  var saved = null;
-  try { saved = localStorage.getItem('fc_lang'); } catch(e){}
-  apply(LANGS.indexOf(saved) !== -1 ? saved : 'uz');
-})();
-
-(function(){
-  var slides = document.querySelectorAll('.slide[data-day]');
-  var dots = document.querySelectorAll('.nav-dots a');
-  var tempEl = document.querySelector('.tracker-temp');
-  var numEl = document.getElementById('trackerNum');
-  if (!slides.length) return;
-  var io = new IntersectionObserver(function(entries){
-    entries.forEach(function(e){
-      if (e.isIntersecting) {
-        if (numEl) numEl.textContent = e.target.getAttribute('data-day');
-        if (tempEl) tempEl.textContent = e.target.getAttribute('data-temp') + '°C';
-        dots.forEach(function(d){ d.classList.toggle('active', d.getAttribute('href') === '#' + e.target.id); });
-      }
-    });
-  }, { threshold: 0.55 });
-  slides.forEach(function(s){ io.observe(s); });
-})();
-
-(function(){
-  var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  var canvas = document.getElementById('snow');
-  if (!canvas || reduceMotion) return;
-  var ctx = canvas.getContext('2d');
-  var flakes = [], N = 70, w = 0, h = 0;
-  function resize(){
-    w = canvas.clientWidth; h = canvas.clientHeight;
-    canvas.width = w * (window.devicePixelRatio || 1);
-    canvas.height = h * (window.devicePixelRatio || 1);
-    ctx.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0);
-  }
-  function init(){
-    resize(); flakes = [];
-    for (var i = 0; i < N; i++){
-      flakes.push({ x: Math.random()*w, y: Math.random()*h, r: 1+Math.random()*2.1, s: .25+Math.random()*.8, d: Math.random()*Math.PI*2 });
-    }
-  }
-  function tick(){
-    ctx.clearRect(0,0,w,h); ctx.fillStyle = 'rgba(223,233,242,0.8)';
-    for (var i=0;i<flakes.length;i++){
-      var f = flakes[i]; f.y += f.s; f.x += Math.sin(f.d + f.y*0.01)*0.3;
-      if (f.y > h) { f.y = -4; f.x = Math.random()*w; }
-      ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, Math.PI*2); ctx.fill();
-    }
-    requestAnimationFrame(tick);
-  }
-  window.addEventListener('resize', resize);
-  init(); requestAnimationFrame(tick);
+  btns.forEach(b=>b.addEventListener("click",()=>apply(b.dataset.lang)));
+  let saved="uz";
+  try{saved=localStorage.getItem(KEY)||"uz";}catch(e){}
+  apply(saved);
 })();
 </script>
-
-<script>
-(function(){
-  function mulberry32(seed){
-    return function(){
-      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
-      var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
-      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-      return ((t ^ t >>> 14) >>> 0) / 4294967296;
-    };
-  }
-  function fitCanvas(cv){
-    var dpr = Math.min(window.devicePixelRatio || 1, 2);
-    var w = cv.clientWidth || 300, h = cv.clientHeight || 200;
-    cv.width = Math.max(1, Math.round(w*dpr));
-    cv.height = Math.max(1, Math.round(h*dpr));
-    var ctx = cv.getContext('2d');
-    ctx.setTransform(dpr,0,0,dpr,0,0);
-    return { ctx: ctx, w: w, h: h };
-  }
-  function hexToRgba(hex, a){
-    hex = hex.replace('#','');
-    var r = parseInt(hex.slice(0,2),16), g = parseInt(hex.slice(2,4),16), b = parseInt(hex.slice(4,6),16);
-    return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
-  }
-  function bgWash(ctx, w, h, top, bottom){
-    var g = ctx.createLinearGradient(0,0,0,h);
-    g.addColorStop(0, top); g.addColorStop(1, bottom);
-    ctx.fillStyle = g; ctx.fillRect(0,0,w,h);
-  }
-  function softGlow(ctx, cx, cy, r, hex, a){
-    var g = ctx.createRadialGradient(cx,cy,0,cx,cy,r);
-    g.addColorStop(0, hexToRgba(hex, a));
-    g.addColorStop(0.55, hexToRgba(hex, a*0.35));
-    g.addColorStop(1, hexToRgba(hex, 0));
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fill();
-  }
-  function grain(ctx, w, h, rnd, n, alpha){
-    ctx.save(); ctx.globalAlpha = alpha;
-    for (var i=0;i<n;i++){
-      var x = rnd()*w, y = rnd()*h, r = 0.4 + rnd()*0.9;
-      ctx.fillStyle = 'rgba(255,255,255,1)';
-      ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
-    }
-    ctx.restore();
-  }
-  // Smooth horizon silhouette (Catmull-Rom-ish via quadratic mids) -- no
-  // literal buildings, just soft layered ridgelines.
-  function horizon(ctx, w, h, baseY, amp, rnd, color, alpha){
-    var pts = [], n = 6;
-    for (var i=0;i<=n;i++) pts.push({ x: (w/n)*i, y: baseY - rnd()*amp });
-    ctx.save(); ctx.globalAlpha = alpha;
-    ctx.beginPath(); ctx.moveTo(0, h); ctx.lineTo(pts[0].x, pts[0].y);
-    for (var j=1;j<pts.length;j++){
-      var midx = (pts[j-1].x+pts[j].x)/2, midy = (pts[j-1].y+pts[j].y)/2;
-      ctx.quadraticCurveTo(pts[j-1].x, pts[j-1].y, midx, midy);
-    }
-    ctx.lineTo(w, pts[pts.length-1].y); ctx.lineTo(w, h); ctx.closePath();
-    ctx.fillStyle = color; ctx.fill(); ctx.restore();
-  }
-  function auroraBand(ctx, w, h, rnd, hue){
-    ctx.save(); ctx.globalAlpha = 0.14;
-    for (var i=0;i<3;i++){
-      var y0 = h*0.05 + i*16 + rnd()*8;
-      ctx.beginPath(); ctx.moveTo(0, y0);
-      for (var x=0; x<=w; x+=w/16) ctx.lineTo(x, y0 + Math.sin(x*0.018+i*1.7)*(10+rnd()*14));
-      ctx.lineTo(w, y0+70); ctx.lineTo(0, y0+70); ctx.closePath();
-      ctx.fillStyle = hue; ctx.fill();
-    }
-    ctx.restore();
-  }
-  function snowDust(ctx, w, h, rnd, n){
-    ctx.save(); ctx.fillStyle = 'rgba(255,255,255,0.5)';
-    for (var i=0;i<n;i++){
-      var x=rnd()*w, y=rnd()*h*0.85, r=0.6+rnd()*1.3;
-      ctx.globalAlpha = 0.25+rnd()*0.4;
-      ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
-    }
-    ctx.restore();
-  }
-
-  // ---- Atmospheric horizon: cover hero + dawn panel. Pure silhouette +
-  // glow + aurora/dust, no representational buildings. ----
-  function drawHorizon(cv, o){
-    var f = fitCanvas(cv), ctx=f.ctx, w=f.w, h=f.h, rnd = mulberry32(o.seed);
-    bgWash(ctx, w, h, o.sky0, o.sky1);
-    if (o.aurora) auroraBand(ctx, w, h, rnd, o.aurora);
-    softGlow(ctx, w*o.glowX, h*o.glowY, w*0.5, o.glowHex, o.glowA);
-    horizon(ctx, w, h, h*0.66, h*0.14, rnd, o.ridgeBack, 0.55);
-    horizon(ctx, w, h, h*0.80, h*0.10, rnd, o.ridgeFront, 0.85);
-    softGlow(ctx, w*o.glowX, h*o.glowY, w*0.16, o.emberHex, 0.9);
-    snowDust(ctx, w, h, rnd, o.dust||40);
-  }
-
-  // ---- Radiant network: a warm core with soft nodes fanned around it,
-  // connected by faint threads -- an abstract "growing settlement", not a
-  // literal isometric city. ----
-  function drawNetwork(cv, o){
-    var f = fitCanvas(cv), ctx=f.ctx, w=f.w, h=f.h, rnd = mulberry32(o.seed);
-    bgWash(ctx, w, h, o.bg0, o.bg1);
-    var cx = w*0.5, cy = h*0.56;
-    softGlow(ctx, cx, cy, w*0.62, o.coreHex, 0.5);
-    var n = 9, nodes = [];
-    for (var i=0;i<n;i++){
-      var a = (i/n)*Math.PI*2 + rnd()*0.4;
-      var rad = w*(0.22 + rnd()*0.30);
-      nodes.push({ x: cx+Math.cos(a)*rad, y: cy+Math.sin(a)*rad*0.72, r: 3+rnd()*5 });
-    }
-    ctx.save(); ctx.strokeStyle = hexToRgba(o.lineHex, 0.28); ctx.lineWidth = 1;
-    nodes.forEach(function(p){ ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(p.x,p.y); ctx.stroke(); });
-    for (var j=0;j<n;j++){
-      var a2 = nodes[j], b2 = nodes[(j+1)%n];
-      ctx.globalAlpha = 0.14; ctx.beginPath(); ctx.moveTo(a2.x,a2.y); ctx.lineTo(b2.x,b2.y); ctx.stroke();
-    }
-    ctx.restore();
-    nodes.forEach(function(p){ softGlow(ctx, p.x, p.y, p.r*4.5, o.nodeHex, 0.55); });
-    softGlow(ctx, cx, cy, w*0.1, o.coreHex, 0.95);
-  }
-
-  // ---- Radiant tunnel: smooth concentric arcs cooling outward from a
-  // bright core -- an abstract "light at the end of the tunnel". ----
-  function drawTunnel(cv, o){
-    var f = fitCanvas(cv), ctx=f.ctx, w=f.w, h=f.h, rnd = mulberry32(o.seed);
-    bgWash(ctx, w, h, o.bg0, o.bg1);
-    var cx=w*0.5, cy=h*0.52, rings=7;
-    for (var i=rings;i>=1;i--){
-      var t = i/rings, r = (Math.max(w,h)*0.55)*t;
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
-      ctx.strokeStyle = t > 0.55 ? hexToRgba(o.coolHex, 0.5*(1-t)+0.12) : hexToRgba(o.warmHex, 0.35*(1-t)+0.10);
-      ctx.lineWidth = 10 + rnd()*10;
-      ctx.stroke();
-    }
-    softGlow(ctx, cx, cy, w*0.34, o.warmHex, 0.85);
-    softGlow(ctx, cx, cy, w*0.12, '#fff3df', 0.9);
-  }
-
-  // ---- Six soft glyph-flames: an abstract stand-in for "six professions",
-  // colour-coded, no literal figures. ----
-  function drawGlyphs(cv, o){
-    var f = fitCanvas(cv), ctx=f.ctx, w=f.w, h=f.h, rnd = mulberry32(o.seed);
-    bgWash(ctx, w, h, o.bg0, o.bg1);
-    var n = o.colors.length, slot = w/n, baseY = h*0.82;
-    ctx.strokeStyle = hexToRgba('#ffffff', 0.12);
-    ctx.beginPath(); ctx.moveTo(w*0.06,baseY); ctx.lineTo(w*0.94,baseY); ctx.stroke();
-    for (var i=0;i<n;i++){
-      var cx = slot*i + slot/2, hgt = h*(0.38 + (i%3)*0.06), hex = o.colors[i];
-      softGlow(ctx, cx, baseY - hgt*0.55, slot*0.62, hex, 0.4);
-      ctx.save();
-      var g = ctx.createLinearGradient(0, baseY-hgt, 0, baseY);
-      g.addColorStop(0, hexToRgba(hex, 0.05));
-      g.addColorStop(0.7, hexToRgba(hex, 0.75));
-      g.addColorStop(1, hexToRgba(hex, 0.92));
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.moveTo(cx, baseY-hgt);
-      ctx.quadraticCurveTo(cx+slot*0.22, baseY-hgt*0.5, cx+slot*0.11, baseY);
-      ctx.lineTo(cx-slot*0.11, baseY);
-      ctx.quadraticCurveTo(cx-slot*0.22, baseY-hgt*0.5, cx, baseY-hgt);
-      ctx.closePath(); ctx.fill();
-      ctx.restore();
-      softGlow(ctx, cx, baseY-hgt, slot*0.22, '#ffffff', 0.7);
-    }
-  }
-
-  var PALETTE_COVER = { seed:1, sky0:'#050810', sky1:'#141d29', aurora:'rgba(85,217,201,0.5)', glowX:0.30, glowY:0.62, glowHex:'#ff7a33', glowA:0.22, emberHex:'#ffb066', ridgeBack:'#101826', ridgeFront:'#0a0f18', dust:46 };
-  var PALETTE_DAWN  = { seed:4, sky0:'#241f2a', sky1:'#4a3320', aurora:null, glowX:0.68, glowY:0.58, glowHex:'#ffb066', glowA:0.30, emberHex:'#ffd39a', ridgeBack:'#2c2a2e', ridgeFront:'#1b1712', dust:22 };
-  var ARTISTS = {
-    'skyline-cover': function(cv){ drawHorizon(cv, PALETTE_COVER); },
-    'skyline-dawn': function(cv){ drawHorizon(cv, PALETTE_DAWN); },
-    'isocity': function(cv){ drawNetwork(cv, { seed:2, bg0:'#0c1420', bg1:'#182233', coreHex:'#ff8a44', nodeHex:'#7fd9c9', lineHex:'#dbe8f2' }); },
-    'tunnel': function(cv){ drawTunnel(cv, { seed:3, bg0:'#0a0f18', bg1:'#0d1420', coolHex:'#3d6a8a', warmHex:'#f2b25c' }); },
-    'figures': function(cv){ drawGlyphs(cv, { seed:5, bg0:'#0e1620', bg1:'#141d29', colors:['#e2793b','#5b9bd5','#7fae6a','#d9a441','#c25b5b','#9a7bd9'] }); }
-  };
-  function initArt(){
-    document.querySelectorAll('canvas.art').forEach(function(cv){
-      var fn = ARTISTS[cv.getAttribute('data-art')];
-      if (fn) fn(cv);
-    });
-  }
-  var t;
-  window.addEventListener('resize', function(){ clearTimeout(t); t = setTimeout(initArt, 200); });
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initArt);
-  else initArt();
-})();
-</script>
+</body>
+</html>
