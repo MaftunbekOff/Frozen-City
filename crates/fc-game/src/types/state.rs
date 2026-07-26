@@ -409,6 +409,14 @@ impl GameState {
                         None => b.owner == Some(pid),
                     })
                 }
+                // Rotating re-squares the structure just like relocating —
+                // same ownership rule.
+                PlayerCommand::RotateBuilding { building } => {
+                    self.find_building(*building).is_some_and(|b| match b.owner_account {
+                        Some(owner_acc) => account == Some(owner_acc),
+                        None => b.owner == Some(pid),
+                    })
+                }
                 // Only your own settlers, by account identity.
                 PlayerCommand::AssignSurvivor { survivor, .. } => {
                     account.is_some()
@@ -511,6 +519,23 @@ impl GameState {
         }
         if self.stock.wood < kind.cost_wood() as f32 {
             return Err("Not enough wood");
+        }
+        Ok(())
+    }
+
+    /// V0.16: validation for `PlayerCommand::RotateBuilding` — a finished,
+    /// buildable building can be turned in place. Rotation never moves the
+    /// footprint, so there are no coordinates to check: it's just the "is this
+    /// a rotatable building right now" half of [`Self::can_relocate`].
+    pub fn can_rotate(&self, building: u32) -> Result<(), &'static str> {
+        let Some(b) = self.find_building(building) else {
+            return Err("No such building");
+        };
+        if !b.kind.buildable() {
+            return Err("That cannot be rotated");
+        }
+        if b.under_construction() {
+            return Err("Still under construction");
         }
         Ok(())
     }

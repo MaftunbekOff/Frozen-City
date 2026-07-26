@@ -360,6 +360,7 @@ fn missions_to_tunnel_to_hub_to_invite_to_guest_build() {
         kind: BuildingKind::Tent,
         x: spot.0,
         y: spot.1,
+        facing: 0,
     }));
     let with_guest_tent = wait_state(&traveler_home, |s| {
         s.buildings

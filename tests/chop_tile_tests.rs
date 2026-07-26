@@ -89,7 +89,7 @@ fn chop_tile_overrides_an_existing_job_assignment() {
         }
         spot.expect("a valid sawmill spot exists")
     };
-    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let sawmill_id = state.buildings.last().unwrap().id;
     // Finishing drops the auto-crew drafted at placement time to
     // `max_workers()`, but doesn't clear it — drain it so the sole named

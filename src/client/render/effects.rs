@@ -168,6 +168,28 @@ pub fn animate_effects(
     }
 }
 
+/// V0.16: the Kitchen dining-cluster campfire's flicker — same emissive-pulse
+/// idea as `animate_effects`'s furnace loop, but unconditionally "lit" (a
+/// Kitchen is always cooking, independent of `state.furnace_lit`), so it's
+/// a separate small system rather than a branch inside `animate_effects`.
+pub fn animate_meal_fire(
+    time: Res<Time>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    fires: Query<&MealFireGlow>,
+    mut lights: Query<&mut PointLight, With<MealFireLight>>,
+) {
+    let pulse = (time.elapsed_secs() * 6.0).sin();
+    for glow in &fires {
+        if let Some(mut m) = materials.get_mut(&glow.fire_mat) {
+            let k = 1.0 + 0.18 * pulse;
+            m.emissive = LinearRgba::rgb(0.9 * k, 0.32 * k, 0.07 * k);
+        }
+    }
+    for mut light in &mut lights {
+        light.intensity = 60_000.0 * (1.0 + 0.12 * pulse);
+    }
+}
+
 /// Chimney smoke rises, drifts and grows while the furnace burns.
 pub fn animate_smoke(
     time: Res<Time>,

@@ -77,26 +77,47 @@ pub fn kick_player(state: &mut GameState, target: u64) {
 pub fn extract_migrants(state: &mut GameState, max: usize) -> Vec<Survivor> {
     // Never extract the whole population — a personal world always keeps at
     // least one survivor behind, the same invariant `sim::tick`'s empty-
-    // -survivors defeat check assumes everywhere else. This matters most
-    // right after a fresh (post-graduation) reset, where the sole starting
-    // leader is idle and would otherwise be exactly what gets picked first.
+    // -survivors defeat check assumes everywhere else. With a lone survivor
+    // (`len - 1 == 0`) nothing is extracted, so even a one-person colony's
+    // leader can never be stranded away by crossing.
     let max = max.min(state.survivors.len().saturating_sub(1));
-    let mut picked: Vec<u32> = state
+    // V0.16: the player crosses to the Global World WITH their leader. The
+    // leader heads the migration group so a graduated colony's chosen leader
+    // always makes the trip (whenever at least one settler may go); idle
+    // survivors fill the rest, then assigned ones, exactly as before.
+    let mut picked: Vec<u32> = Vec::with_capacity(max);
+    if max > 0 {
+        if let Some(leader) = state.leader {
+            if state.survivors.iter().any(|s| s.id == leader) {
+                picked.push(leader);
+            }
+        }
+    }
+    for id in state
         .survivors
         .iter()
         .filter(|s| s.assigned_building.is_none())
         .map(|s| s.id)
-        .take(max)
-        .collect();
-    if picked.len() < max {
-        let more: Vec<u32> = state
-            .survivors
-            .iter()
-            .filter(|s| s.assigned_building.is_some())
-            .map(|s| s.id)
-            .take(max - picked.len())
-            .collect();
-        picked.extend(more);
+    {
+        if picked.len() >= max {
+            break;
+        }
+        if !picked.contains(&id) {
+            picked.push(id);
+        }
+    }
+    for id in state
+        .survivors
+        .iter()
+        .filter(|s| s.assigned_building.is_some())
+        .map(|s| s.id)
+    {
+        if picked.len() >= max {
+            break;
+        }
+        if !picked.contains(&id) {
+            picked.push(id);
+        }
     }
     let mut out = Vec::with_capacity(picked.len());
     for id in picked {

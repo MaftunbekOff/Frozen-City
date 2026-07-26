@@ -94,6 +94,7 @@ fn a_built_tent_survives_a_server_restart() {
         kind: BuildingKind::Tent,
         x: spot.0,
         y: spot.1,
+        facing: 0,
     }));
     wait_state(&alice, |s| {
         s.buildings

@@ -23,7 +23,7 @@ fn find_spot(state: &GameState, kind: BuildingKind) -> (u8, u8) {
 }
 
 fn place_and_finish(state: &mut GameState, kind: BuildingKind, x: u8, y: u8) -> u32 {
-    sim::apply_command(state, 1, &PlayerCommand::Place { kind, x, y });
+    sim::apply_command(state, 1, &PlayerCommand::Place { kind, x, y, facing: 0 });
     let id = state.buildings.last().unwrap().id;
     sim::finish_all_construction(state);
     id
@@ -109,7 +109,7 @@ fn relocating_an_under_construction_building_is_refused() {
     let mut state = sim::new_game(SEED, 12);
     state.stock.wood = 500.0;
     let (x, y) = find_spot(&state, BuildingKind::Tent);
-    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
+    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y, facing: 0 });
     let id = state.buildings.last().unwrap().id;
     assert!(state.find_building(id).unwrap().under_construction(), "sanity: still a fresh site");
 
@@ -181,7 +181,7 @@ fn only_the_owning_account_may_relocate_a_central_building() {
     sim::player_joined_as(&mut state, 10, "Aziz", Some(1));
     sim::player_joined_as(&mut state, 20, "Vali", Some(2));
     let (x, y) = find_spot(&state, BuildingKind::Sawmill);
-    sim::apply_command(&mut state, 10, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    sim::apply_command(&mut state, 10, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let sawmill = state.buildings.iter().find(|b| b.kind == BuildingKind::Sawmill).unwrap().id;
     sim::finish_all_construction(&mut state);
     let (tx, ty) = find_spot(&state, BuildingKind::Sawmill);

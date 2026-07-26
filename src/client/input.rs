@@ -31,6 +31,17 @@ impl ModalBlockers<'_> {
     }
 }
 
+/// The three mutually-exclusive placement-mode resources `build_input` drives,
+/// bundled into one `SystemParam` so the system stays under Bevy's per-system
+/// parameter cap once `PendingPlace` (V0.16's CoC confirm step) joined
+/// `BuildMode`/`RelocateMode`.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct PlacementModes<'w> {
+    build: ResMut<'w, BuildMode>,
+    relocate: ResMut<'w, RelocateMode>,
+    pending: ResMut<'w, PendingPlace>,
+}
+
 /// A world-space click closer than this to a survivor's sim position selects
 /// them instead of whatever building (or empty ground) is under the cursor —
 /// "aholiga bosish ... bino tanlashdan ustunroq bo'lsin agar survivor yaqin
@@ -328,8 +339,7 @@ pub fn build_input(
     ui_hover: Res<UiHover>,
     view: Res<GameView>,
     net: Res<NetConn>,
-    mut build: ResMut<BuildMode>,
-    mut relocate: ResMut<RelocateMode>,
+    mut modes: PlacementModes,
     mut selection: ResMut<Selection>,
     mut survivor_sel: ResMut<SurvivorSelection>,
     mut move_queue: ResMut<MoveOrderQueue>,
@@ -339,6 +349,7 @@ pub fn build_input(
     mut ghost: Query<(&mut Transform, &GhostMarker, &mut Visibility)>,
     modal: ModalBlockers,
 ) {
+    let PlacementModes { build, relocate, pending } = &mut modes;
     // While typing in chat or in the research/social modal, keys don't build/cancel.
     if modal.blocking() {
         hide_ghost(&mut ghost);
@@ -358,16 +369,24 @@ pub fn build_input(
     for (key, kind) in hotkeys {
         if keys.just_pressed(key) {
             build.0 = if build.0 == Some(kind) { None } else { Some(kind) };
+            // Choosing (or toggling off) a kind resets any half-dropped
+            // pending building — the confirm step always restarts fresh.
+            pending.0 = None;
         }
     }
     if keys.just_pressed(KeyCode::Escape) {
         build.0 = None;
         relocate.0 = None;
+        pending.0 = None;
         selection.0 = None;
         survivor_sel.0 = None;
     }
     if buttons.just_pressed(MouseButton::Right) {
-        if build.0.is_some() || relocate.0.is_some() {
+        if pending.0.is_some() {
+            // Back out of the confirm step to positioning — the kind stays
+            // selected so the ghost resumes following the cursor.
+            pending.0 = None;
+        } else if build.0.is_some() || relocate.0.is_some() {
             build.0 = None;
             relocate.0 = None;
         } else {
@@ -399,38 +418,49 @@ pub fn build_input(
         return;
     }
 
-    // Placement ghost — also used for `RelocateMode` (the moving building's
-    // own kind stands in for what `build.0` normally supplies), just
-    // validated against `can_relocate` instead of `can_place`.
+    // The tile under the cursor (ignored while hovering UI) — used both for
+    // the positioning ghost and to decide where a click drops/moves things.
+    let cursor_tile = if ui_hover.0 { None } else { cursor.and_then(world_to_tile) };
+    // `RelocateMode` reuses the same ghost: the moving building's own kind
+    // stands in for what `build.0` normally supplies, validated against
+    // `can_relocate` instead of `can_place`.
     let relocating_kind = relocate.0.and_then(|id| state.find_building(id)).map(|b| b.kind);
-    let mut ghost_tile: Option<(u8, u8)> = None;
-    if let (Some(kind), Some(world), false) = (build.0.or(relocating_kind), cursor, ui_hover.0) {
-        if let Some((tx, ty)) = world_to_tile(world) {
-            ghost_tile = Some((tx, ty));
-            if let Ok((mut t, marker, mut vis)) = ghost.single_mut() {
-                *vis = Visibility::Visible;
-                let pos = tile_center_world(tx, ty);
-                t.translation.x = pos.x;
-                t.translation.z = pos.z;
-                let valid = match relocate.0 {
-                    Some(id) => state.can_relocate(id, tx, ty).is_ok(),
-                    None => state.can_place(kind, tx, ty).is_ok(),
-                };
-                let color = if valid {
-                    if relocate.0.is_none() && kind == BuildingKind::Sawmill && state.forest_near(tx, ty, 4) == 0 {
-                        Color::srgba(0.95, 0.85, 0.30, 0.45) // valid but pointless
-                    } else {
-                        Color::srgba(0.30, 0.90, 0.40, 0.45)
-                    }
+
+    // What the placement ghost shows this frame: `(tile, facing, kind,
+    // is_relocate)`. A dropped `PendingPlace` (CoC confirm step) freezes the
+    // ghost at its tile and shows the chosen `facing`; otherwise, while
+    // positioning, it follows the cursor at `facing: 0`.
+    let ghost_show: Option<(u8, u8, u8, BuildingKind, bool)> = if let Some(p) = pending.0 {
+        Some((p.tx, p.ty, p.facing, p.kind, false))
+    } else if let (Some(kind), Some((tx, ty))) = (build.0.or(relocating_kind), cursor_tile) {
+        Some((tx, ty, 0, kind, relocate.0.is_some()))
+    } else {
+        None
+    };
+    if let Some((tx, ty, facing, kind, is_relocate)) = ghost_show {
+        if let Ok((mut t, marker, mut vis)) = ghost.single_mut() {
+            *vis = Visibility::Visible;
+            let pos = tile_center_world(tx, ty);
+            t.translation.x = pos.x;
+            t.translation.z = pos.z;
+            t.rotation = Quat::from_rotation_y(facing as f32 * std::f32::consts::FRAC_PI_2);
+            let valid = if is_relocate {
+                relocate.0.map(|id| state.can_relocate(id, tx, ty).is_ok()).unwrap_or(false)
+            } else {
+                state.can_place(kind, tx, ty).is_ok()
+            };
+            let color = if valid {
+                if !is_relocate && kind == BuildingKind::Sawmill && state.forest_near(tx, ty, 4) == 0 {
+                    Color::srgba(0.95, 0.85, 0.30, 0.45) // valid but pointless
                 } else {
-                    Color::srgba(0.95, 0.25, 0.25, 0.45)
-                };
-                if let Some(mut m) = materials.get_mut(&marker.mat) {
-                    m.base_color = color;
+                    Color::srgba(0.30, 0.90, 0.40, 0.45)
                 }
+            } else {
+                Color::srgba(0.95, 0.25, 0.25, 0.45)
+            };
+            if let Some(mut m) = materials.get_mut(&marker.mat) {
+                m.base_color = color;
             }
-        } else {
-            hide_ghost(&mut ghost);
         }
     } else {
         hide_ghost(&mut ghost);
@@ -440,7 +470,7 @@ pub fn build_input(
     if buttons.just_pressed(MouseButton::Left) && !ui_hover.0 && state.phase == GamePhase::Running
     {
         if let Some(id) = relocate.0 {
-            if let Some((tx, ty)) = ghost_tile {
+            if let Some((tx, ty)) = cursor_tile {
                 if state.can_relocate(id, tx, ty).is_ok() {
                     net.send(ClientMsg::Cmd(PlayerCommand::RelocateBuilding { building: id, x: tx, y: ty }));
                     // One-shot: unlike `BuildMode`, relocating targets one
@@ -449,13 +479,15 @@ pub fn build_input(
                 }
             }
         } else if let Some(kind) = build.0 {
-            if let Some((tx, ty)) = ghost_tile {
+            // CoC step 1 -> 2 (and repositioning while already pending): a
+            // click on a valid tile drops/moves the pending building there.
+            // Nothing is sent to the server until the ✓ button confirms it
+            // (`ui::placement::placement_buttons`); `facing` carries across a
+            // reposition so a rotate isn't lost by nudging the spot.
+            if let Some((tx, ty)) = cursor_tile {
                 if state.can_place(kind, tx, ty).is_ok() {
-                    net.send(ClientMsg::Cmd(PlayerCommand::Place {
-                        kind,
-                        x: tx,
-                        y: ty,
-                    }));
+                    let facing = pending.0.map(|p| p.facing).unwrap_or(0);
+                    pending.0 = Some(PendingPlaceData { kind, tx, ty, facing });
                 }
             }
         } else if let Some(world) = cursor {

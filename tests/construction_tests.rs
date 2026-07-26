@@ -30,7 +30,7 @@ fn placement_starts_a_site_with_auto_crew() {
     assert!(idle_before > 0, "fresh world should have idle survivors");
 
     let (x, y) = find_spot(&state, BuildingKind::HunterHut);
-    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::HunterHut, x, y });
+    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::HunterHut, x, y, facing: 0 });
 
     let b = state.buildings.last().unwrap();
     assert_eq!(b.kind, BuildingKind::HunterHut);
@@ -58,7 +58,7 @@ fn a_site_without_crew_never_progresses_and_produces_nothing() {
     sim::apply_command(
         &mut experiment,
         1,
-        &PlayerCommand::Place { kind: BuildingKind::HunterHut, x, y },
+        &PlayerCommand::Place { kind: BuildingKind::HunterHut, x, y, facing: 0 },
     );
     let id = experiment.buildings.last().unwrap().id;
     // Brigadani butunlay bo'shatamiz.
@@ -105,7 +105,7 @@ fn crew_finishes_the_site_and_it_starts_working() {
 
     let (x, y) = find_spot(&experiment, BuildingKind::HunterHut);
     for s in [&mut control, &mut experiment] {
-        sim::apply_command(s, 1, &PlayerCommand::Place { kind: BuildingKind::HunterHut, x, y });
+        sim::apply_command(s, 1, &PlayerCommand::Place { kind: BuildingKind::HunterHut, x, y, facing: 0 });
     }
     let id = experiment.buildings.last().unwrap().id;
     sim::apply_command(
@@ -149,7 +149,7 @@ fn upgrades_chain_one_level_at_a_time_to_max() {
     state.stock.wood = 100_000.0;
 
     let (x, y) = find_spot(&state, BuildingKind::HunterHut);
-    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::HunterHut, x, y });
+    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::HunterHut, x, y, facing: 0 });
     let id = state.buildings.last().unwrap().id;
     sim::finish_all_construction(&mut state);
 
@@ -194,7 +194,7 @@ fn upgrade_requires_wood() {
     let mut state = sim::new_game(SEED, 12);
     state.stock.wood = 500.0;
     let (x, y) = find_spot(&state, BuildingKind::HunterHut);
-    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::HunterHut, x, y });
+    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::HunterHut, x, y, facing: 0 });
     let id = state.buildings.last().unwrap().id;
     sim::finish_all_construction(&mut state);
 
@@ -215,7 +215,7 @@ fn higher_level_produces_more() {
     for s in [&mut control, &mut experiment] {
         s.stock.wood = 500.0;
         let (x, y) = find_spot(s, BuildingKind::HunterHut);
-        sim::apply_command(s, 1, &PlayerCommand::Place { kind: BuildingKind::HunterHut, x, y });
+        sim::apply_command(s, 1, &PlayerCommand::Place { kind: BuildingKind::HunterHut, x, y, facing: 0 });
         let id = s.buildings.last().unwrap().id;
         sim::finish_all_construction(s);
         sim::apply_command(s, 1, &PlayerCommand::AdjustWorkers { building: id, delta: 2 });
@@ -247,7 +247,7 @@ fn tents_house_nobody_while_building_and_more_when_leveled() {
     let base = state.housing_capacity();
 
     let (x, y) = find_spot(&state, BuildingKind::Tent);
-    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
+    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y, facing: 0 });
     assert_eq!(state.housing_capacity(), base, "an unfinished tent shelters nobody");
 
     sim::finish_all_construction(&mut state);
@@ -271,7 +271,7 @@ fn placement_without_wood_is_refused() {
     state.stock.wood = 500.0;
     let (x, y) = find_spot(&state, BuildingKind::Tent);
     state.stock.wood = 5.0;
-    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
+    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y, facing: 0 });
     assert_eq!(state.buildings.len(), buildings_before, "no wood, no site");
     assert_eq!(state.stock.wood, 5.0, "wood must never go negative");
 }

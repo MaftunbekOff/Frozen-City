@@ -12,7 +12,7 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
         return;
     }
     match cmd {
-        PlayerCommand::Place { kind, x, y } => {
+        PlayerCommand::Place { kind, x, y, facing } => {
             if state.can_place(*kind, *x, *y).is_ok() {
                 // V0.8: kasalxona/oshxona kabi, ombor darajasi ham
                 // chegirmani kuchaytiradi — eng yuqori darajali ishchili
@@ -66,6 +66,9 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                     owner_account,
                     level: 1,
                     build_left: kind.build_workdays(),
+                    // Visual only; clamp defensively so a hand-crafted client
+                    // can't smuggle an out-of-range value into the world.
+                    facing: *facing % 4,
                 });
                 // Central-world economy v1: charge the placing account's
                 // ledger for what it spent, so a showcase can reflect it.
@@ -522,6 +525,28 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                     let name = state.player(player).map(|p| p.name.clone());
                     if let Some(name) = name {
                         push_action_event(state, format!("{} started relocating a {}.", name, kind.name()));
+                    }
+                }
+            }
+        }
+        PlayerCommand::RotateBuilding { building } => {
+            if state.can_rotate(*building).is_ok() {
+                // Idle count snapshotted before the mutation, same as
+                // `RelocateBuilding`/`UpgradeBuilding`.
+                let idle = state.idle_workers();
+                if let Some(i) = state.buildings.iter().position(|b| b.id == *building) {
+                    let kind = state.buildings[i].kind;
+                    let b = &mut state.buildings[i];
+                    b.facing = (b.facing + 1) % 4;
+                    // Modelled on relocation: free of wood, but re-squaring the
+                    // structure re-enters construction at the discounted timer.
+                    b.build_left = kind.build_workdays() * RELOCATE_WORKDAYS_FACTOR;
+                    let idle = if state.central { 0 } else { idle };
+                    let add = (CONSTRUCTION_CREW_MAX.saturating_sub(b.workers) as u32).min(idle) as u8;
+                    b.workers += add;
+                    let name = state.player(player).map(|p| p.name.clone());
+                    if let Some(name) = name {
+                        push_action_event(state, format!("{} started turning a {}.", name, kind.name()));
                     }
                 }
             }

@@ -35,7 +35,7 @@ fn find_sawmill_spot_near_forest(state: &GameState) -> (u8, u8) {
 fn place(state: &mut GameState, kind: BuildingKind) -> u32 {
     state.stock.wood = 500.0;
     let (x, y) = find_spot(state, kind);
-    sim::apply_command(state, 1, &PlayerCommand::Place { kind, x, y });
+    sim::apply_command(state, 1, &PlayerCommand::Place { kind, x, y, facing: 0 });
     let id = state.buildings.last().unwrap().id;
     // V0.8: maydonchani darhol bitirib, avto-brigadani bo'shatamiz — testlar
     // bo'sh binoni o'zi xohlagancha (nomlangan/anonim) to'ldiradi.
@@ -130,7 +130,7 @@ fn higher_level_survivor_outproduces_a_fresh_one() {
     }
 
     let (x, y) = find_sawmill_spot_near_forest(&control);
-    sim::apply_command(&mut control, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    sim::apply_command(&mut control, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let control_id = control.buildings.last().unwrap().id;
     // V0.8: bitirish + brigada tozalash — test 1 nomlangan ishchini o'lchaydi.
     sim::finish_all_construction(&mut control);
@@ -144,7 +144,7 @@ fn higher_level_survivor_outproduces_a_fresh_one() {
     );
 
     let (x, y) = find_sawmill_spot_near_forest(&experiment);
-    sim::apply_command(&mut experiment, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    sim::apply_command(&mut experiment, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let exp_id = experiment.buildings.last().unwrap().id;
     sim::finish_all_construction(&mut experiment);
     let cur = experiment.find_building(exp_id).unwrap().workers as i8;

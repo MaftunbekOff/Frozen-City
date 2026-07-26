@@ -363,6 +363,16 @@ pub fn relocate_label(l: Lang) -> &'static str {
     }
 }
 
+/// V0.16: turn a finished building a quarter-turn in place — free of wood,
+/// but re-squaring it takes rebuild time, same as relocating.
+pub fn rotate_label(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Aylantirish (bepul)",
+        Lang::En => "Rotate (free)",
+        Lang::Ru => "Повернуть (бесплатно)",
+    }
+}
+
 /// Worker count row, e.g. "3/4 workers".
 pub fn worker_count(cur: u8, max: u8, l: Lang) -> String {
     match l {
@@ -783,13 +793,13 @@ pub fn go_reset_countdown(seconds: u32, l: Lang) -> String {
 pub fn go_info_graduated(day: u32, wood: i64, coal: i64, food: i64, countdown: &str, l: Lang) -> String {
     match l {
         Lang::Uz => format!(
-            "Kun {day} — Tunnel ochildi. Global Olam sizni kutmoqda!\nYog'och {wood}   Ko'mir {coal}   Oziq {food}{countdown}",
+            "Kun {day} — Tunnel ochildi. Global Olam sizni kutmoqda!\nYetakchingiz siz bilan birga o'tadi.\nYog'och {wood}   Ko'mir {coal}   Oziq {food}{countdown}",
         ),
         Lang::En => format!(
-            "Day {day} — the Tunnel broke through. The Global World awaits!\nWood {wood}   Coal {coal}   Food {food}{countdown}",
+            "Day {day} — the Tunnel broke through. The Global World awaits!\nYour leader crosses over with you.\nWood {wood}   Coal {coal}   Food {food}{countdown}",
         ),
         Lang::Ru => format!(
-            "День {day} — тоннель пробит. Глобальный мир ждёт!\nДерево {wood}   Уголь {coal}   Еда {food}{countdown}",
+            "День {day} — тоннель пробит. Глобальный мир ждёт!\nВаш лидер отправится с вами.\nДерево {wood}   Уголь {coal}   Еда {food}{countdown}",
         ),
     }
 }

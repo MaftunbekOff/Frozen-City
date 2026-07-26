@@ -143,7 +143,7 @@ fn caravan_accept_adds_survivors_and_costs_food() {
     // above the offer's count of 3 so nothing here is capacity-limited.
     for _ in 0..3 {
         let (x, y) = find_spot(&state, BuildingKind::Tent);
-        sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
+        sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y, facing: 0 });
     }
     // V0.8: bitmagan chodir joy bermaydi — maydonchalarni darhol bitiramiz.
     sim::finish_all_construction(&mut state);
@@ -227,7 +227,7 @@ fn caravan_accept_respects_capacity_and_food() {
     state2.stock.wood = 500.0;
     for _ in 0..3 {
         let (x, y) = find_spot(&state2, BuildingKind::Tent);
-        sim::apply_command(&mut state2, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
+        sim::apply_command(&mut state2, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y, facing: 0 });
     }
     // V0.8: bitmagan chodir joy bermaydi — maydonchalarni darhol bitiramiz.
     sim::finish_all_construction(&mut state2);

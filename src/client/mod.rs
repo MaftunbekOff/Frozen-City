@@ -336,6 +336,24 @@ impl GameView {
 #[derive(Resource, Default)]
 pub struct BuildMode(pub Option<BuildingKind>);
 
+/// V0.16: the CoC-style two-step placement. While `BuildMode` is set the ghost
+/// tracks the cursor (step 1, "positioning"); the first click on a valid tile
+/// drops it into `PendingPlace` (step 2, "confirm") — the ghost freezes there
+/// and the world-anchored ✓/✗/⟳ buttons appear (`ui::placement`). Nothing is
+/// sent to the server until ✓; ✗ returns to positioning, ⟳ spins `facing`, and
+/// a click on another valid tile re-drops the pending building there. `facing`
+/// (0..=3 quarter-turns) is purely visual — see `Building::facing`.
+#[derive(Resource, Default)]
+pub struct PendingPlace(pub Option<PendingPlaceData>);
+
+#[derive(Clone, Copy)]
+pub struct PendingPlaceData {
+    pub kind: BuildingKind,
+    pub tx: u8,
+    pub ty: u8,
+    pub facing: u8,
+}
+
 /// V0.14: the building currently being relocated, if any — set by the
 /// selection panel's "Relocate" button, cleared the moment a target tile is
 /// confirmed (or on cancel). Mutually exclusive with `BuildMode`: mirrors
@@ -515,6 +533,7 @@ impl Plugin for ClientPlugin {
             .init_resource::<menu::MenuOverlay>()
             .init_resource::<net_sync::Reconnecting>()
             .init_resource::<BuildMode>()
+            .init_resource::<PendingPlace>()
             .init_resource::<RelocateMode>()
             .init_resource::<ui::BuildPanelOpen>()
             .init_resource::<Selection>()
@@ -576,7 +595,10 @@ impl Plugin for ClientPlugin {
                 menu_fx::snow_fall.run_if(in_state(Screen::Menu)),
             )
             // Game lifecycle.
-            .add_systems(OnEnter(Screen::Game), (render::enter_game, ui::spawn_hud))
+            .add_systems(
+                OnEnter(Screen::Game),
+                (render::enter_game, ui::spawn_hud, ui::spawn_placement_controls),
+            )
             .add_systems(OnExit(Screen::Game), (teardown_game, teardown_social))
             // Snapshot intake + world sync (ordered).
             .add_systems(
@@ -599,6 +621,7 @@ impl Plugin for ClientPlugin {
                 (
                     render::animate_environment,
                     render::animate_effects,
+                    render::animate_meal_fire,
                     render::animate_smoke,
                     render::animate_survivors,
                     render::animate_survivor_legs,
@@ -647,6 +670,8 @@ impl Plugin for ClientPlugin {
                     ui::selection_panel_update,
                     ui::sync_selection_panel_position,
                     ui::selection_panel_buttons,
+                    ui::sync_placement_controls,
+                    ui::placement_buttons,
                     ui::game_over_ui,
                     ui::world_switch_button,
                     ui::transition_overlay,
@@ -735,11 +760,17 @@ fn teardown_game(
 fn teardown_social(
     mut avatars: ResMut<render::AvatarViz>,
     mut social_open: ResMut<social::SocialOpen>,
+    mut pending: ResMut<PendingPlace>,
+    mut relocate: ResMut<RelocateMode>,
 ) {
     *avatars = Default::default();
     // Close the social modal so a new game doesn't start with it stuck open
     // (which would silently swallow world/camera input, same as chat/research).
     *social_open = Default::default();
+    // Drop any half-committed CoC placement / relocation so the next game
+    // doesn't boot with a stray ghost + confirm buttons floating.
+    pending.0 = None;
+    relocate.0 = None;
 }
 
 /// In `--smoke` mode, exit automatically after a few seconds of rendering.

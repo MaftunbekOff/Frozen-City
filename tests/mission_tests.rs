@@ -26,9 +26,9 @@ fn building_tents_completes_the_first_mission_and_grants_reward() {
     sim::player_joined(&mut state, 1, "Owner");
 
     let (x1, y1) = find_spot(&state, BuildingKind::Tent);
-    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x: x1, y: y1 });
+    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x: x1, y: y1, facing: 0 });
     let (x2, y2) = find_spot(&state, BuildingKind::Tent);
-    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x: x2, y: y2 });
+    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x: x2, y: y2, facing: 0 });
 
     // V0.8: bitmagan maydoncha missiyaga sanalmaydi — avval shuni tasdiqlab,
     // keyin qurilishni yakunlaymiz.

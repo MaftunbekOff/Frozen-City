@@ -88,6 +88,7 @@ fn a_session_is_recorded_from_join_to_leave() {
         kind: BuildingKind::Tent,
         x: spot.0,
         y: spot.1,
+        facing: 0,
     }));
     wait_state(&aziz, |s| s.buildings.iter().any(|b| b.kind == BuildingKind::Tent));
 

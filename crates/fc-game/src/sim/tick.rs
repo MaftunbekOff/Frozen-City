@@ -496,18 +496,8 @@ pub fn tick(state: &mut GameState) {
     // client's building-vs-survivor click tie-break always favors the
     // building at that exact distance — see `input.rs`'s `resolve_world_click`).
     // Standing just outside reads as "waiting at the door" and keeps both
-    // working.
-    let kitchen_pos = state
-        .buildings
-        .iter()
-        .find(|b| b.kind == BuildingKind::Kitchen && !b.under_construction())
-        .map(|b| (b.x as f32 + 0.5, b.y as f32 + 1.15));
-    let tent_positions: Vec<(f32, f32)> = state
-        .buildings
-        .iter()
-        .filter(|b| b.kind == BuildingKind::Tent && !b.under_construction())
-        .map(|b| (b.x as f32 + 0.5, b.y as f32 + 1.15))
-        .collect();
+    // working. See `gather_points` for the shared formula.
+    let (kitchen_pos, tent_positions) = gather_points(state);
     // Snapshotted (not passed as `&GameState`) for the same borrow-splitting
     // reason as the lookups above — the survivors loop below holds `state`
     // mutably the whole time.
@@ -1074,6 +1064,65 @@ pub fn tick(state: &mut GameState) {
 
     state.rng = rng.0;
     state.event_rng = erng.0;
+}
+
+/// A Kitchen's meal-gathering point (if a finished one exists) and every
+/// finished Tent's bunk point — see `gather_points`.
+pub type GatherPoints = (Option<(f32, f32)>, Vec<(f32, f32)>);
+
+/// The Kitchen's meal-gathering point (if a finished one exists) and every
+/// finished Tent's bunk point, both offset just past the building's south
+/// edge — see the doc comment at this fn's call site in `tick` for why not
+/// the tile center. Shared by `routine_goal` (movement) and
+/// `survivor_is_at_meal` (V0.16 render-only pose query) so the two stay in
+/// exact sync — the client must ask exactly the same question `tick` asked
+/// when it originally sent a survivor here.
+pub fn gather_points(state: &GameState) -> GatherPoints {
+    let kitchen_pos = state
+        .buildings
+        .iter()
+        .find(|b| b.kind == BuildingKind::Kitchen && !b.under_construction())
+        .map(|b| (b.x as f32 + 0.5, b.y as f32 + 1.15));
+    let tent_positions: Vec<(f32, f32)> = state
+        .buildings
+        .iter()
+        .filter(|b| b.kind == BuildingKind::Tent && !b.under_construction())
+        .map(|b| (b.x as f32 + 0.5, b.y as f32 + 1.15))
+        .collect();
+    (kitchen_pos, tent_positions)
+}
+
+/// V0.16: client-only render query — is `s` *currently* sitting at the
+/// Kitchen's meal gathering point (arrived, not still walking there)? Reuses
+/// `gather_points`/`routine_goal`'s exact windows and idle-check so a seated
+/// pose only ever appears on the survivor `routine_goal` itself would have
+/// parked here — a render nicety, never a gameplay signal (no stockpile or
+/// assignment effect, mirroring `routine_goal`'s own doc comment below).
+pub fn survivor_is_at_meal(state: &GameState, s: &Survivor) -> bool {
+    survivor_is_at_meal_with(state, &gather_points(state), s)
+}
+
+/// The same query as [`survivor_is_at_meal`], against a `gather_points`
+/// result the caller already has. The client asks this for every survivor
+/// on every frame (`render::survivors`'s `sync_survivors`); rescanning the
+/// building list — and reallocating the tent vector — once per survivor is
+/// pure waste when they all see the same buildings.
+pub fn survivor_is_at_meal_with(state: &GameState, points: &GatherPoints, s: &Survivor) -> bool {
+    if s.move_target.is_some()
+        || s.chop_target.is_some()
+        || s.bury_target.is_some()
+        || s.assigned_building.is_some()
+    {
+        return false; // something else is telling them where to be
+    }
+    let (kitchen_pos, tent_positions) = (points.0, &points.1);
+    match routine_goal(state.time_of_day(), state.is_night(), s, kitchen_pos, tent_positions) {
+        Some((gx, gy)) => {
+            let (dx, dy) = (gx - s.x, gy - s.y);
+            (dx * dx + dy * dy).sqrt() <= ARRIVAL_EPSILON && Some((gx, gy)) == kitchen_pos
+        }
+        None => false,
+    }
 }
 
 /// V0.15: where an otherwise-idle survivor (nothing else in the movement

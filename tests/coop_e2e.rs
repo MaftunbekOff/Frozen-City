@@ -116,6 +116,7 @@ fn building_is_attributed() {
         kind: BuildingKind::Tent,
         x: spot.0,
         y: spot.1,
+        facing: 0,
     }));
 
     let seen = wait_state(&bob, |s| {
@@ -152,6 +153,7 @@ fn reconnect_resumes_identity() {
         kind: BuildingKind::Tent,
         x: spot.0,
         y: spot.1,
+        facing: 0,
     }));
     // Confirm the server actually applied (and attributed) the build before
     // we tear the connection down.

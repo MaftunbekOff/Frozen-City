@@ -57,12 +57,12 @@ fn leader_alive_boosts_production() {
     // clear it on the control so the comparison isolates the leader bonus.
     control.leader = None;
     let (x, y) = find_sawmill_spot_near_forest(&control);
-    sim::apply_command(&mut control, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    sim::apply_command(&mut control, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let control_id = control.buildings.last().unwrap().id;
     sim::apply_command(&mut control, 1, &PlayerCommand::AdjustWorkers { building: control_id, delta: 2 });
 
     let (x, y) = find_sawmill_spot_near_forest(&experiment);
-    sim::apply_command(&mut experiment, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    sim::apply_command(&mut experiment, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let exp_id = experiment.buildings.last().unwrap().id;
     sim::apply_command(&mut experiment, 1, &PlayerCommand::AdjustWorkers { building: exp_id, delta: 2 });
     experiment.leader = Some(experiment.survivors[0].id);
@@ -116,12 +116,12 @@ fn mourning_penalizes_production() {
         state.leader = None;
     }
     let (x, y) = find_sawmill_spot_near_forest(&control);
-    sim::apply_command(&mut control, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    sim::apply_command(&mut control, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let control_id = control.buildings.last().unwrap().id;
     sim::apply_command(&mut control, 1, &PlayerCommand::AdjustWorkers { building: control_id, delta: 2 });
 
     let (x, y) = find_sawmill_spot_near_forest(&experiment);
-    sim::apply_command(&mut experiment, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    sim::apply_command(&mut experiment, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let exp_id = experiment.buildings.last().unwrap().id;
     sim::apply_command(&mut experiment, 1, &PlayerCommand::AdjustWorkers { building: exp_id, delta: 2 });
     // Long enough (and mourning lasts a full in-game day) that the -15% gap

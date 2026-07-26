@@ -156,6 +156,7 @@ fn each_account_gets_its_own_isolated_and_persistent_world() {
         kind: BuildingKind::Tent,
         x: spot.0,
         y: spot.1,
+        facing: 0,
     }));
     wait_state(&aziz, |s| {
         s.buildings

@@ -114,6 +114,18 @@ pub struct FurnaceGlow {
 #[derive(Component)]
 pub struct FurnaceLight;
 
+/// V0.16: on a Kitchen's dining-cluster campfire, handle to the animated
+/// flame material — same idea as `FurnaceGlow`, but a distinct type so its
+/// flicker (`animate_meal_fire`) is independent of the player's Furnace
+/// on/off state (`animate_effects`'s `FurnaceGlow` loop).
+#[derive(Component)]
+pub struct MealFireGlow {
+    pub fire_mat: Handle<StandardMaterial>,
+}
+
+#[derive(Component)]
+pub struct MealFireLight;
+
 #[derive(Component)]
 pub struct SurvivorDot {
     pub id: u32,
@@ -129,6 +141,11 @@ pub struct SurvivorRig {
     /// Assigned to a building — shows the carried-resource prop
     /// (`SurvivorCarry`) while walking instead of strolling empty-handed.
     pub carrying: bool,
+    /// V0.16: arrived at the Kitchen's dining cluster during a meal window
+    /// (`fc_game::sim::survivor_is_at_meal`) — `animate_survivor_legs` folds
+    /// this into a seated pose instead of the idle/walk cycle. Render-only;
+    /// never affects sim state.
+    pub sitting: bool,
 }
 
 /// One of a survivor's two legs — a direct child of the [`SurvivorDot`]

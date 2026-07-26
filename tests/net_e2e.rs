@@ -77,6 +77,7 @@ fn two_clients_share_one_city() {
         kind: BuildingKind::Tent,
         x: spot.0,
         y: spot.1,
+        facing: 0,
     }));
     let seen = wait_state(&bob, |s| {
         s.buildings.iter().any(|b| b.kind == BuildingKind::Tent)
@@ -206,6 +207,7 @@ fn websocket_and_tcp_clients_share_one_city() {
             kind: BuildingKind::Tent,
             x: spot.0,
             y: spot.1,
+            facing: 0,
         }))
         .unwrap()
         .into(),

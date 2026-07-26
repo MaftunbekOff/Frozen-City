@@ -1,8 +1,10 @@
 //! Pure-simulation tests for V0.15: the daily meal/sleep routine
 //! (`sim::tick`'s private `routine_goal`, tested here through its
 //! observable effect on survivor movement — a cosmetic-only fallback
-//! reached only when nothing else claims a survivor's `goal`). No new
-//! persisted state, no save migration.
+//! reached only when nothing else claims a survivor's `goal`), plus V0.16's
+//! `sim::survivor_is_at_meal` — the render-only "has this survivor actually
+//! arrived at the Kitchen to eat" query the client uses to pick a seated
+//! pose. No new persisted state, no save migration.
 
 use frozen_city::game::sim;
 use frozen_city::game::types::*;
@@ -21,7 +23,7 @@ fn find_spot(state: &GameState, kind: BuildingKind) -> (u8, u8) {
 }
 
 fn place_and_finish(state: &mut GameState, kind: BuildingKind, x: u8, y: u8) -> u32 {
-    sim::apply_command(state, 1, &PlayerCommand::Place { kind, x, y });
+    sim::apply_command(state, 1, &PlayerCommand::Place { kind, x, y, facing: 0 });
     let id = state.buildings.last().unwrap().id;
     sim::finish_all_construction(state);
     id
@@ -140,6 +142,67 @@ fn outside_meal_and_sleep_windows_an_idle_survivor_stays_put() {
         dist(start_pos, new_pos) < 0.01,
         "an idle survivor outside every routine window should stay put: {start_pos:?} -> {new_pos:?}"
     );
+}
+
+#[test]
+fn survivor_is_at_meal_only_once_arrived_during_a_meal_window() {
+    let mut state = sim::new_game(SEED, 12);
+    state.stock.wood = 500.0;
+    let (kx, ky) = find_spot(&state, BuildingKind::Kitchen);
+    place_and_finish(&mut state, BuildingKind::Kitchen, kx, ky);
+    let kitchen_pos = (kx as f32 + 0.5, ky as f32 + 1.15);
+
+    seek_time_of_day(&mut state, BREAKFAST_WINDOW.0 + 0.01);
+    assert!(
+        !sim::survivor_is_at_meal(&state, &state.survivors[0]),
+        "just-started walking toward the Kitchen: not arrived yet"
+    );
+
+    // Teleport the survivor to just outside arrival range instead of
+    // simulating however many real ticks a cross-map walk would take: a
+    // multi-day simulation would risk starvation/cold/blizzard deaths that
+    // have nothing to do with what this test is checking (the "arrived"
+    // transition), and the walk itself is already covered by
+    // `idle_survivor_walks_toward_the_kitchen_during_breakfast` above. A
+    // handful of ticks, well inside the current ~30-tick window, is enough
+    // to close this short a gap.
+    state.survivors[0].x = kitchen_pos.0 + 0.2;
+    state.survivors[0].y = kitchen_pos.1;
+    for _ in 0..5 {
+        sim::tick(&mut state);
+    }
+    assert!(
+        sim::survivor_is_at_meal(&state, &state.survivors[0]),
+        "should read as at-meal once arrived at the Kitchen within the window"
+    );
+}
+
+#[test]
+fn survivor_is_at_meal_is_false_outside_meal_windows_and_for_working_survivors() {
+    let mut state = sim::new_game(SEED, 12);
+    state.stock.wood = 500.0;
+    let (kx, ky) = find_spot(&state, BuildingKind::Kitchen);
+    place_and_finish(&mut state, BuildingKind::Kitchen, kx, ky);
+
+    // Mid-afternoon: never at-meal, regardless of how long we simulate.
+    seek_time_of_day(&mut state, 0.60);
+    for _ in 0..10 {
+        sim::tick(&mut state);
+    }
+    assert!(!sim::survivor_is_at_meal(&state, &state.survivors[0]));
+
+    // An assigned survivor heads to their own workplace, not the Kitchen,
+    // even during breakfast — the routine never claims them.
+    let (sx, sy) = find_spot(&state, BuildingKind::Sawmill);
+    let sawmill = place_and_finish(&mut state, BuildingKind::Sawmill, sx, sy);
+    let survivor = state.survivors[0].id;
+    sim::apply_command(&mut state, 1, &PlayerCommand::AssignSurvivor { survivor, building: Some(sawmill) });
+    seek_time_of_day(&mut state, BREAKFAST_WINDOW.0 + 0.01);
+    for _ in 0..10 {
+        sim::tick(&mut state);
+    }
+    let s = state.survivors.iter().find(|s| s.id == survivor).unwrap();
+    assert!(!sim::survivor_is_at_meal(&state, s));
 }
 
 #[test]

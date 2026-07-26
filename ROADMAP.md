@@ -308,7 +308,12 @@ qoldirildi (quyida).
 - [x] **Hub-rejim**: bitta doimiy markaziy olam (`sim::new_game_central`,
       `GameState::central`): ochlik/o'lim/voqealar/g'alaba-mag'lubiyat yo'q,
       aholi faqat Tunnel orqali keladi (`extract_migrants`/`inject_migrants`,
-      akkauntga 5 tagacha, qaytib kirish nusxalamaydi — cap'gacha to'ldiradi),
+      akkauntga 5 tagacha, qaytib kirish nusxalamaydi — cap'gacha to'ldiradi;
+      ✅ V0.16 (2026-07-26): guruhni **yetakchi boshlaydi** — `extract_migrants`
+      avval `state.leader`ni oladi, keyin bo'sh, keyin biriktirilgan aholini,
+      shu sabab graduatsiya qilgan o'yinchi o'z yetakchisi bilan birga o'tadi;
+      "kamida bitta aholi qoladi" invarianti o'zgarmadi, shu sabab yolg'iz
+      aholili koloniyada hech kim ko'chmaydi),
       **har kim faqat o'z ko'chmanchilarini boshqaradi** (`can_issue`ning
       central-tarmog'i, roster ham faqat o'znikini ko'rsatadi), Owner roli
       yo'q. ✅ **Yengil avatar-rejim (2026-07-12)**: markaziy olamda har ulangan
@@ -470,7 +475,34 @@ edi (V0.6 → V1.0); alohida bosqich sifatida keyin qo'shildi.
       nishoni, cho'mich) — har biri ish joyining o'z materialini qayta
       ishlatadi (masalan o'tinchi boltasi arra zavodi tig'idan). Yurganda
       oyoqlar protsedural tebranadi (`animate_survivor_legs`); yuk
-      ko'targanda orqada taxta ko'rinadi. Qoldi: tutun sayqal, o'tishlar.
+      ko'targanda orqada taxta ko'rinadi. ✅ V0.16 kunlik tartib sahnasi
+      (2026-07-17): V0.15'ning "aholi Oshxonaga/Chodirga boradi" mantig'i
+      endi ko'rinadigan sahna — Oshxona yonida doimiy stol+3 kursi+tosh
+      halqali gulxan (`sync_buildings`ning Kitchen bo'limi,
+      `MealFireGlow`/`animate_meal_fire`, Furnace'dan mustaqil, doim yonib
+      turadi); nonushta/tushlik oynasida yetib kelgan aholi
+      (`fc_game::sim::survivor_is_at_meal` — `gather_points`/`routine_goal`
+      bilan bir xil formuladan, sim'ga hech narsa yozmaydi) 3 kursi bo'ylab
+      tarqaladi (`SurvivorRig::sitting`) va oyoqlari o'tirgan holatga
+      buriladi. Chodir yoniga ham kichik yashik juftligi + mo'yna gilam
+      qo'shildi (sof bezak). Yangi `tests/routine_tests.rs` testlari bilan.
+      Qoldi: tutun sayqal, o'tishlar.
+- [x] **Clash-of-Clans uslubidagi joylashtirish oqimi + bino yo'nalishi**
+      (V0.16, 2026-07-26): bino endi bosgan zahoti QURILMAYDI — birinchi bosish
+      uni `PendingPlace`ga tashlaydi (arvoh o'sha taylda muzlaydi, oldi tomonini
+      ko'rsatuvchi konus bilan), ustida olamga bog'langan ✓/⟳/✗ tugmalar paydo
+      bo'ladi (`ui/placement.rs`, har freym `world_to_viewport` bilan qayta
+      proyeksiya qilinadi — tanlov panelidagi andoza). Serverga faqat ✓ bosilganda
+      bitta `Place` ketadi va qurish rejimi o'chadi; ✗ bekor qiladi, ⟳ `facing`ni
+      chorak burchakka buradi, boshqa yaroqli taylga bosish esa kutayotgan binoni
+      o'sha yerga ko'chiradi (`facing` saqlanadi). Touch'da ham xuddi shunday
+      (tap = tashlash, ✓ = tasdiq). `Building.facing` (0..=3, FAQAT vizual —
+      `can_place`/`can_relocate` va butun geympley uni o'qimaydi) + yangi
+      `RotateBuilding` buyrug'i (bitgan binoni joyida burish; ko'chirish kabi
+      bepul, lekin `RELOCATE_WORKDAYS_FACTOR` chegirmali qayta-qurish vaqtini
+      oladi), tanlov panelida "Aylantirish" tugmasi. Saqlov **FCWORLD13**
+      (`legacy::BuildingV12` muzlatilgan nusxa orqali migratsiya, eski binolar
+      `facing: 0`). Testlar: `tests/rotation_tests.rs`, `persist::v12_save_migrates`.
 - [~] **Unumdorlik va deploy**: ✅ WebGPU, gzip serving + cache header, umumiy bino
       materiallari (draw-call kamaytirish), release `strip`, Cargo.lock tracked,
       build-web.sh wasm o'lchamini ko'rsatadi, ✅ wasm-opt (binaryen), ✅ delta-snapshot

@@ -412,6 +412,13 @@ pub fn spawn_hud(
                 .with_children(|b| {
                     b.spawn(theme::text(i18n_hud::relocate_label(lang), FS_SMALL, TEXT_PRIMARY));
                 });
+            // V0.16: Aylantirish — bir chorak burish (`RotateBuilding`); ko'chirish
+            // kabi bepul, lekin qayta-qurish vaqti oladi. Ko'rinishini
+            // `selection_panel_update` boshqaradi (relocate bilan bir xil shart).
+            p.spawn((theme::button(Val::Percent(100.0), 30.0, BTN), RotateBuildingBtn))
+                .with_children(|b| {
+                    b.spawn(theme::text(i18n_hud::rotate_label(lang), FS_SMALL, TEXT_PRIMARY));
+                });
             p.spawn((
                 theme::button(Val::Percent(100.0), 30.0, BTN_DANGER),
                 DemolishBtn,

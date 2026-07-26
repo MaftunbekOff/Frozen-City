@@ -88,6 +88,7 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
         // (`command.rs`).
         level: 1,
         build_left: FURNACE_LOGS_NEEDED as f32,
+        facing: 0,
     };
 
     // The Tunnel to the Global World — present (sealed-looking) from the
@@ -107,6 +108,7 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
         owner_account: None,
         level: 1,
         build_left: 0.0,
+        facing: 0,
     };
     next_id += 1;
 

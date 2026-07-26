@@ -12,8 +12,7 @@
 use bevy::input::touch::Touches;
 use bevy::prelude::*;
 
-use frozen_city::game::types::{GamePhase, PlayerCommand};
-use frozen_city::net::protocol::ClientMsg;
+use frozen_city::game::types::GamePhase;
 
 use super::input::{
     ground_from_screen, resolve_world_click, CamRig, MAX_DIST, MAX_PITCH, MIN_DIST, MIN_PITCH,
@@ -59,6 +58,7 @@ pub fn touch_control(
     view: Res<GameView>,
     net: Res<NetConn>,
     build: Res<BuildMode>,
+    mut pending: ResMut<PendingPlace>,
     mut selection: ResMut<Selection>,
     mut survivor_sel: ResMut<SurvivorSelection>,
     mut move_queue: ResMut<MoveOrderQueue>,
@@ -177,8 +177,12 @@ pub fn touch_control(
             continue;
         };
         if let Some(kind) = build.0 {
+            // V0.16 CoC flow: a tap drops (or moves) the pending building onto
+            // the tile — the on-screen ✓ button commits it (`ui::placement`),
+            // never the tap itself. `facing` carries across a re-drop.
             if state.can_place(kind, tx, ty).is_ok() {
-                net.send(ClientMsg::Cmd(PlayerCommand::Place { kind, x: tx, y: ty }));
+                let facing = pending.0.map(|p| p.facing).unwrap_or(0);
+                pending.0 = Some(PendingPlaceData { kind, tx, ty, facing });
             }
         } else {
             resolve_world_click(

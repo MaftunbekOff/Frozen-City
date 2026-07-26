@@ -293,6 +293,14 @@ pub struct Building {
     /// assigned crew works it down each tick and the building produces
     /// nothing / houses nobody until it reaches 0.
     pub build_left: f32,
+    /// V0.16: player-chosen orientation, 0..=3 = a quarter-turn each
+    /// (0 = default/south-facing). Purely visual — the footprint is a single
+    /// tile regardless, so `can_place`/`can_relocate` and every gameplay rule
+    /// ignore it; only `render::buildings` reads it (spins the building root a
+    /// multiple of 90°). Placed via the CoC-style confirm flow's rotate
+    /// button; migration default for pre-V0.16 saves is 0 (south-facing, how
+    /// every building already looked). See `PlayerCommand::Place`.
+    pub facing: u8,
 }
 
 impl Building {

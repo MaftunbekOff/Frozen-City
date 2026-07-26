@@ -208,6 +208,7 @@ fn tunnel_migration_ownership_and_restart() {
         kind: BuildingKind::Sawmill,
         x: spot.0,
         y: spot.1,
+        facing: 0,
     }));
     let with_sawmill = wait_state(&aziz, |s| {
         s.buildings.iter().any(|b| b.kind == BuildingKind::Sawmill)

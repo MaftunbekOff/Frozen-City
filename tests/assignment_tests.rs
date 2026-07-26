@@ -34,7 +34,7 @@ fn find_spot(state: &GameState, kind: BuildingKind) -> (u8, u8) {
 fn place(state: &mut GameState, kind: BuildingKind) -> u32 {
     state.stock.wood = 500.0;
     let (x, y) = find_spot(state, kind);
-    sim::apply_command(state, 1, &PlayerCommand::Place { kind, x, y });
+    sim::apply_command(state, 1, &PlayerCommand::Place { kind, x, y, facing: 0 });
     let id = state.buildings.last().unwrap().id;
     sim::finish_all_construction(state);
     let cur = state.find_building(id).unwrap().workers as i8;

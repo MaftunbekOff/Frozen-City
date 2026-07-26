@@ -94,6 +94,9 @@ pub struct GameAssets {
     pub hospital_cross_mat: Handle<StandardMaterial>,
     pub kitchen_stone_mat: Handle<StandardMaterial>,
     pub warehouse_plank_mat: Handle<StandardMaterial>,
+    /// V0.16: muted fur/pelt rug laid beside a Tent — decorative only, no
+    /// gameplay meaning (see `render::buildings`'s `BuildingKind::Tent` arm).
+    pub tent_pelt_mat: Handle<StandardMaterial>,
     /// Shared "dyed wool" material for the Tailor Shop's cloth prop and the
     /// Tailor survivor's spool prop — echoes `kind_color(TailorShop)`, same
     /// tool-echoes-workplace convention every other trade's material follows.
@@ -324,6 +327,11 @@ pub fn setup_camera_and_assets(
         warehouse_plank_mat: materials.add(StandardMaterial {
             base_color: Color::srgb(0.50, 0.38, 0.24),
             perceptual_roughness: 0.85,
+            ..default()
+        }),
+        tent_pelt_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.42, 0.34, 0.28),
+            perceptual_roughness: 0.95,
             ..default()
         }),
         tailor_cloth_mat: materials.add(StandardMaterial {

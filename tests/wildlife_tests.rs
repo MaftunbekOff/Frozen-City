@@ -14,7 +14,7 @@ const SEED: u64 = 12345;
 /// it to exactly `workers`, returning the new building's id. Mirrors
 /// `building_tests.rs`'s helper of the same name.
 fn place_and_staff(state: &mut GameState, kind: BuildingKind, x: u8, y: u8, workers: i8) -> u32 {
-    sim::apply_command(state, 1, &PlayerCommand::Place { kind, x, y });
+    sim::apply_command(state, 1, &PlayerCommand::Place { kind, x, y, facing: 0 });
     let id = state.buildings.last().unwrap().id;
     sim::finish_all_construction(state);
     let cur = state.find_building(id).unwrap().workers as i8;

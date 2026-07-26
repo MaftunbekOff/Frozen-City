@@ -36,7 +36,7 @@ fn can_issue_owner_may_do_everything() {
     assert!(state.is_owner(1));
 
     let (x, y) = find_spot(&state, BuildingKind::Tent);
-    assert!(state.can_issue(1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y }));
+    assert!(state.can_issue(1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y, facing: 0 }));
     assert!(state.can_issue(1, &PlayerCommand::AdjustWorkers { building: 0, delta: 1 }));
     assert!(state.can_issue(1, &PlayerCommand::Demolish { building: 0 }));
     assert!(state.can_issue(1, &PlayerCommand::SetFurnaceLevel { level: 2 }));
@@ -64,10 +64,11 @@ fn can_issue_guest_has_full_authority_including_others_buildings() {
         owner_account: None,
         level: 1,
         build_left: 0.0,
+        facing: 0,
     });
 
     let (x, y) = find_spot(&state, BuildingKind::Tent);
-    assert!(state.can_issue(2, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y }));
+    assert!(state.can_issue(2, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y, facing: 0 }));
     assert!(state.can_issue(2, &PlayerCommand::AdjustWorkers { building: 0, delta: 1 }));
     assert!(
         state.can_issue(2, &PlayerCommand::Demolish { building: 101 }),
@@ -104,7 +105,7 @@ fn can_issue_owner_less_world_allows_guest_everything() {
     assert!(!state.owner_present());
 
     let (x, y) = find_spot(&state, BuildingKind::Tent);
-    assert!(state.can_issue(2, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y }));
+    assert!(state.can_issue(2, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y, facing: 0 }));
     assert!(state.can_issue(2, &PlayerCommand::SetFurnaceLevel { level: 2 }));
 }
 
@@ -123,7 +124,7 @@ fn action_event_spam_does_not_evict_the_system_event() {
     // cosmetic (non-system) action events, well past the 12-event cap.
     for _ in 0..8 {
         let (x, y) = find_spot(&state, BuildingKind::Tent);
-        sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
+        sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y, facing: 0 });
         let id = state.buildings.last().unwrap().id;
         sim::apply_command(&mut state, 1, &PlayerCommand::Demolish { building: id });
     }

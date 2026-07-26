@@ -8,7 +8,10 @@ use super::{BuildingKind, Tech, TradeGood};
 /// Commands a player may issue; the server validates every one of them.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum PlayerCommand {
-    Place { kind: BuildingKind, x: u8, y: u8 },
+    /// Place a new building. `facing` (0..=3, quarter-turns) is the CoC-style
+    /// confirm flow's chosen orientation — purely visual (see `Building::facing`);
+    /// the server clamps it defensively but never lets it affect placement rules.
+    Place { kind: BuildingKind, x: u8, y: u8, facing: u8 },
     Demolish { building: u32 },
     AdjustWorkers { building: u32, delta: i8 },
     /// Assign (or, with `building: None`, unassign) one named survivor to
@@ -61,4 +64,11 @@ pub enum PlayerCommand {
     /// mechanism `UpgradeBuilding` reuses. `level` and any named worker
     /// assignments carry over unchanged; only `x`/`y` move.
     RelocateBuilding { building: u32, x: u8, y: u8 },
+    /// V0.16: turn a finished, buildable building a quarter-turn in place
+    /// (`Building::facing` += 1 mod 4). Purely visual, but modelled on
+    /// `RelocateBuilding`: free of wood yet it re-enters
+    /// `Building::build_left`/`under_construction` at the same discounted
+    /// duration (`RELOCATE_WORKDAYS_FACTOR`) — the crew has to re-square the
+    /// structure on its new heading. `level`/worker assignments carry over.
+    RotateBuilding { building: u32 },
 }

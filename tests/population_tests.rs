@@ -17,7 +17,7 @@ const SEED: u64 = 12345;
 /// it to exactly `workers`, returning the new building's id. Mirrors
 /// `building_tests.rs`'s helper of the same name.
 fn place_and_staff(state: &mut GameState, kind: BuildingKind, x: u8, y: u8, workers: i8) -> u32 {
-    sim::apply_command(state, 1, &PlayerCommand::Place { kind, x, y });
+    sim::apply_command(state, 1, &PlayerCommand::Place { kind, x, y, facing: 0 });
     let id = state.buildings.last().unwrap().id;
     sim::finish_all_construction(state);
     let cur = state.find_building(id).unwrap().workers as i8;
@@ -414,7 +414,7 @@ fn birth_can_occur_once_the_grace_period_and_thresholds_are_met() {
     // — build enough Tents that this never blocks the mechanic under test.
     for _ in 0..5 {
         let (x, y) = find_spot(&state, BuildingKind::Tent);
-        sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
+        sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y, facing: 0 });
     }
     sim::finish_all_construction(&mut state);
 
@@ -446,7 +446,7 @@ fn no_birth_before_the_grace_day_even_with_perfect_conditions() {
     state.stock.wood = 500.0;
     for _ in 0..5 {
         let (x, y) = find_spot(&state, BuildingKind::Tent);
-        sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
+        sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y, facing: 0 });
     }
     sim::finish_all_construction(&mut state);
 

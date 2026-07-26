@@ -50,7 +50,7 @@ fn central_building_is_owned_by_the_placing_account() {
     let mut state = sim::new_game_central(5);
     sim::player_joined_as(&mut state, 10, "Aziz", Some(1));
     let (x, y) = find_spot(&state, BuildingKind::Sawmill);
-    sim::apply_command(&mut state, 10, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    sim::apply_command(&mut state, 10, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
 
     let b = state.buildings.iter().find(|b| b.kind == BuildingKind::Sawmill).unwrap();
     assert_eq!(b.owner, Some(10), "session attribution unchanged");
@@ -63,7 +63,7 @@ fn only_the_owning_account_may_demolish_across_sessions() {
     // Aziz places a sawmill from player-session 10.
     sim::player_joined_as(&mut state, 10, "Aziz", Some(1));
     let (x, y) = find_spot(&state, BuildingKind::Sawmill);
-    sim::apply_command(&mut state, 10, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    sim::apply_command(&mut state, 10, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let sawmill = state.buildings.iter().find(|b| b.kind == BuildingKind::Sawmill).unwrap().id;
 
     // Aziz disconnects and reconnects as a NEW session id (11) — same
@@ -84,7 +84,7 @@ fn a_different_account_may_not_demolish_someone_elses_central_building() {
     sim::player_joined_as(&mut state, 10, "Aziz", Some(1));
     sim::player_joined_as(&mut state, 20, "Vali", Some(2));
     let (x, y) = find_spot(&state, BuildingKind::Sawmill);
-    sim::apply_command(&mut state, 10, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    sim::apply_command(&mut state, 10, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let sawmill = state.buildings.iter().find(|b| b.kind == BuildingKind::Sawmill).unwrap().id;
 
     assert!(
@@ -123,6 +123,7 @@ fn legacy_central_building_with_no_owner_account_stays_demolishable_by_placing_s
         owner_account: None, // migration default
         level: 1,
         build_left: 0.0,
+        facing: 0,
     });
     assert!(
         state.can_issue(10, &PlayerCommand::Demolish { building: 999 }),
@@ -143,7 +144,7 @@ fn personal_and_guest_world_owner_role_logic_is_untouched() {
     sim::player_joined(&mut state, 1, "Owner");
     sim::player_joined(&mut state, 2, "Guest");
     let (x, y) = find_spot(&state, BuildingKind::Tent);
-    sim::apply_command(&mut state, 2, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
+    sim::apply_command(&mut state, 2, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y, facing: 0 });
     let tent = state.buildings.iter().find(|b| b.kind == BuildingKind::Tent).unwrap();
     assert_eq!(tent.owner, Some(2));
     assert_eq!(tent.owner_account, None, "owner_account is a central-world-only concept");
@@ -168,7 +169,7 @@ fn placing_a_central_building_debits_the_account_ledger_for_wood_spent() {
     sim::player_joined_as(&mut state, 10, "Aziz", Some(1));
     let before_wood = state.stock.wood;
     let (x, y) = find_spot(&state, BuildingKind::Sawmill);
-    sim::apply_command(&mut state, 10, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    sim::apply_command(&mut state, 10, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
 
     let spent = before_wood - state.stock.wood;
     assert!(spent > 0.0, "sanity: a sawmill costs wood");
@@ -182,7 +183,7 @@ fn staffed_central_production_credits_the_owning_account() {
     let mut state = sim::new_game_central(5);
     sim::player_joined_as(&mut state, 10, "Aziz", Some(1));
     let (x, y) = find_spot(&state, BuildingKind::HunterHut);
-    sim::apply_command(&mut state, 10, &PlayerCommand::Place { kind: BuildingKind::HunterHut, x, y });
+    sim::apply_command(&mut state, 10, &PlayerCommand::Place { kind: BuildingKind::HunterHut, x, y, facing: 0 });
     let hut = state.buildings.iter().find(|b| b.kind == BuildingKind::HunterHut).unwrap().id;
     // V0.8: bu test bitgan binoning ledger-kreditini sinaydi — markaziy
     // olamda hali aholi yo'q (brigada 0), maydonchani darhol bitiramiz.
@@ -219,7 +220,7 @@ fn ledger_never_updates_outside_the_central_world() {
     let mut state = sim::new_game(5, 12);
     sim::player_joined(&mut state, 1, "Owner");
     let (x, y) = find_spot(&state, BuildingKind::Sawmill);
-    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let sawmill = state.buildings.iter().find(|b| b.kind == BuildingKind::Sawmill).unwrap().id;
     let first_survivor = state.survivors[0].id;
     sim::apply_command(
@@ -240,7 +241,7 @@ fn ledger_is_per_account_and_deterministic_across_replays() {
         sim::player_joined_as(&mut state, 10, "Aziz", Some(1));
         sim::player_joined_as(&mut state, 20, "Vali", Some(2));
         let (x1, y1) = find_spot(&state, BuildingKind::Sawmill);
-        sim::apply_command(&mut state, 10, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x: x1, y: y1 });
+        sim::apply_command(&mut state, 10, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x: x1, y: y1, facing: 0 });
         let sawmill = state.buildings.iter().find(|b| b.kind == BuildingKind::Sawmill).unwrap().id;
         sim::inject_migrants(&mut state, 1, "Aziz", vec![settler(1)]);
         let aziz_settler = state.survivors.iter().find(|s| s.owner == Some(1)).unwrap().id;
@@ -277,6 +278,7 @@ fn v2_mirror_migrates_to_v3_with_none_owner_account_and_empty_ledger() {
         owner_account: None,
         level: 1,
         build_left: 0.0,
+        facing: 0,
     });
     let v2 = GameStateV2 {
         tick: modern.tick,

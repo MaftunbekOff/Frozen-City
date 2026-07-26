@@ -149,6 +149,13 @@ pub struct DemolishBtn;
 #[derive(Component)]
 pub struct RelocateBtn;
 
+/// V0.16: turn the selected building a quarter-turn in place
+/// (`PlayerCommand::RotateBuilding`). Shown under the same condition as
+/// `RelocateBtn` (finished, buildable). Distinct from `placement::RotateBtn`,
+/// which spins a not-yet-placed ghost during the CoC confirm step.
+#[derive(Component)]
+pub struct RotateBuildingBtn;
+
 /// Assigns the survivor currently selected in the roster panel (`roster.rs`)
 /// to the building selected here. Only visible/enabled when both a building
 /// and a roster survivor are selected — logic lives in `roster.rs` since it

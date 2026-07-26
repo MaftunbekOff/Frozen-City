@@ -41,7 +41,7 @@ fn move_survivor_sets_target_and_unassigns_work() {
     let sawmill = {
         state.stock.wood = 500.0;
         let (x, y) = find_spot(&state, BuildingKind::Sawmill);
-        sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+        sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
         state.buildings.last().unwrap().id
     };
     // V0.8: maydonchani bitirib, avto-brigadani bo'shatamiz — test bitgan
@@ -158,7 +158,7 @@ fn assigned_survivor_walks_toward_their_building() {
     let mut state = sim::new_game(SEED, 12);
     state.stock.wood = 500.0;
     let (bx, by) = find_spot(&state, BuildingKind::Sawmill);
-    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x: bx, y: by });
+    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x: bx, y: by, facing: 0 });
     let sawmill = state.buildings.last().unwrap().id;
     // V0.8: bitirib, avto-brigadani bo'shatamiz — nomlangan biriktirma uchun
     // joy ochilsin.

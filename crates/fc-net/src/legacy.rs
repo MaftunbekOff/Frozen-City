@@ -248,6 +248,67 @@ impl From<&Building> for BuildingV4 {
     }
 }
 
+/// `Building`'s shape from V5 through V12 (unchanged across all of them — it
+/// only grew `facing` in V13). Every mirror from `GameStateV5` up to and
+/// including `GameStateV12` that used to reuse the live `Building` type
+/// directly now reuses this frozen copy instead, so old bytes (which lack the
+/// `facing` field) still deserialize positionally. `From` lifts one back to a
+/// live `Building`, defaulting `facing: 0` — every pre-V0.16 building loads
+/// south-facing, exactly how it already looked.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct BuildingV12 {
+    pub id: u32,
+    pub kind: fc_game::types::BuildingKind,
+    pub x: u8,
+    pub y: u8,
+    pub workers: u8,
+    pub progress: f32,
+    pub owner: Option<u64>,
+    pub owner_account: Option<i64>,
+    pub level: u8,
+    pub build_left: f32,
+}
+
+/// Convenience for tests fabricating pre-V13 (`FCWORLD5`..`FCWORLD12`) bytes
+/// from a live `GameState`: drops the `facing` field V13 added.
+impl From<&Building> for BuildingV12 {
+    fn from(b: &Building) -> BuildingV12 {
+        BuildingV12 {
+            id: b.id,
+            kind: b.kind,
+            x: b.x,
+            y: b.y,
+            workers: b.workers,
+            progress: b.progress,
+            owner: b.owner,
+            owner_account: b.owner_account,
+            level: b.level,
+            build_left: b.build_left,
+        }
+    }
+}
+
+impl From<BuildingV12> for Building {
+    fn from(b: BuildingV12) -> Building {
+        Building {
+            id: b.id,
+            kind: b.kind,
+            x: b.x,
+            y: b.y,
+            workers: b.workers,
+            progress: b.progress,
+            owner: b.owner,
+            owner_account: b.owner_account,
+            level: b.level,
+            build_left: b.build_left,
+            // V13 (V0.16) added player-chosen orientation; every older save
+            // predates it, so its buildings load in the default south-facing
+            // pose they were always drawn in.
+            facing: 0,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct GameStateV1 {
     pub tick: u64,
@@ -606,7 +667,7 @@ pub struct GameStateV5 {
     pub tick: u64,
     pub win_days: u32,
     pub tiles: Vec<Tile>,
-    pub buildings: Vec<Building>,
+    pub buildings: Vec<BuildingV12>,
     pub survivors: Vec<SurvivorV5>,
     pub stock: StockpileV7,
     pub furnace_level: u8,
@@ -647,7 +708,7 @@ impl From<GameStateV4> for GameStateV5 {
             buildings: v4
                 .buildings
                 .into_iter()
-                .map(|b| Building {
+                .map(|b| BuildingV12 {
                     id: b.id,
                     kind: b.kind,
                     x: b.x,
@@ -706,7 +767,7 @@ pub struct GameStateV6 {
     pub tick: u64,
     pub win_days: u32,
     pub tiles: Vec<Tile>,
-    pub buildings: Vec<Building>,
+    pub buildings: Vec<BuildingV12>,
     pub survivors: Vec<SurvivorV8>,
     pub stock: StockpileV7,
     pub furnace_level: u8,
@@ -811,7 +872,7 @@ pub struct GameStateV7 {
     pub tick: u64,
     pub win_days: u32,
     pub tiles: Vec<Tile>,
-    pub buildings: Vec<Building>,
+    pub buildings: Vec<BuildingV12>,
     pub survivors: Vec<SurvivorV8>,
     pub stock: StockpileV7,
     pub furnace_level: u8,
@@ -954,7 +1015,7 @@ pub struct GameStateV8 {
     pub tick: u64,
     pub win_days: u32,
     pub tiles: Vec<Tile>,
-    pub buildings: Vec<Building>,
+    pub buildings: Vec<BuildingV12>,
     pub survivors: Vec<SurvivorV8>,
     pub stock: StockpileV8,
     pub furnace_level: u8,
@@ -998,7 +1059,7 @@ pub struct GameStateV9 {
     pub tick: u64,
     pub win_days: u32,
     pub tiles: Vec<Tile>,
-    pub buildings: Vec<Building>,
+    pub buildings: Vec<BuildingV12>,
     pub survivors: Vec<Survivor>,
     pub stock: StockpileV10,
     pub furnace_level: u8,
@@ -1127,7 +1188,7 @@ pub struct GameStateV10 {
     pub tick: u64,
     pub win_days: u32,
     pub tiles: Vec<Tile>,
-    pub buildings: Vec<Building>,
+    pub buildings: Vec<BuildingV12>,
     pub survivors: Vec<Survivor>,
     pub stock: StockpileV10,
     pub furnace_level: u8,
@@ -1225,7 +1286,7 @@ pub struct GameStateV11 {
     pub tick: u64,
     pub win_days: u32,
     pub tiles: Vec<Tile>,
-    pub buildings: Vec<Building>,
+    pub buildings: Vec<BuildingV12>,
     pub survivors: Vec<Survivor>,
     pub stock: Stockpile,
     pub furnace_level: u8,
@@ -1331,7 +1392,9 @@ impl From<GameStateV11> for GameState {
             tick: v11.tick,
             win_days: v11.win_days,
             tiles: v11.tiles,
-            buildings: v11.buildings,
+            // V11 buildings predate the `facing` field (V13) — lift each
+            // frozen `BuildingV12` to a live south-facing `Building`.
+            buildings: v11.buildings.into_iter().map(Building::from).collect(),
             survivors: v11.survivors,
             stock: v11.stock,
             furnace_level: v11.furnace_level,
@@ -1366,6 +1429,100 @@ impl From<GameStateV11> for GameState {
             graves: v11.graves,
             livestock: v11.livestock,
             pending_caravan: v11.pending_caravan,
+        }
+    }
+}
+
+/// V12 (pre-`facing`, i.e. every field the live `GameState` has today, with
+/// `Building` in its pre-orientation shape) — what `persist.rs` wrote under
+/// the `FCWORLD12` header before V13 added `Building::facing`. Only `Building`
+/// changed shape in this hop, so every other field reuses its live type; just
+/// `buildings` is mirrored as [`BuildingV12`].
+#[derive(Serialize, Deserialize)]
+pub struct GameStateV12 {
+    pub tick: u64,
+    pub win_days: u32,
+    pub tiles: Vec<Tile>,
+    pub buildings: Vec<BuildingV12>,
+    pub survivors: Vec<Survivor>,
+    pub stock: Stockpile,
+    pub furnace_level: u8,
+    pub furnace_lit: bool,
+    pub cold_snap: bool,
+    pub players: Vec<PlayerInfo>,
+    pub phase: GamePhase,
+    pub events: Vec<GameEvent>,
+    pub total_events: u64,
+    pub chat: Vec<ChatLine>,
+    pub total_chat: u64,
+    pub pings: Vec<Ping>,
+    pub missions: Vec<Mission>,
+    pub tunnel: TunnelState,
+    pub graduated: bool,
+    pub central: bool,
+    pub techs: Vec<Tech>,
+    pub disease_until: u64,
+    pub blizzard_until: u64,
+    pub pending_event: Option<CaravanOffer>,
+    pub event_rng: u64,
+    pub owner_id: Option<u64>,
+    pub next_id: u32,
+    pub rng: u64,
+    pub central_ledger: Vec<LedgerEntry>,
+    pub leader: Option<u32>,
+    pub mourning_until: u64,
+    pub morale: f32,
+    pub pending_migrant: Option<TunnelMigrant>,
+    pub wildlife: Wildlife,
+    pub corpses: Vec<Corpse>,
+    pub graves: Vec<Grave>,
+    pub livestock: Livestock,
+    pub pending_caravan: Option<TradeCaravan>,
+}
+
+impl From<GameStateV12> for GameState {
+    fn from(v12: GameStateV12) -> GameState {
+        GameState {
+            tick: v12.tick,
+            win_days: v12.win_days,
+            tiles: v12.tiles,
+            // The only field that changed shape V12->V13: lift each frozen
+            // `BuildingV12` to a live south-facing `Building`.
+            buildings: v12.buildings.into_iter().map(Building::from).collect(),
+            survivors: v12.survivors,
+            stock: v12.stock,
+            furnace_level: v12.furnace_level,
+            furnace_lit: v12.furnace_lit,
+            cold_snap: v12.cold_snap,
+            players: v12.players,
+            phase: v12.phase,
+            events: v12.events,
+            total_events: v12.total_events,
+            chat: v12.chat,
+            total_chat: v12.total_chat,
+            pings: v12.pings,
+            missions: v12.missions,
+            tunnel: v12.tunnel,
+            graduated: v12.graduated,
+            central: v12.central,
+            techs: v12.techs,
+            disease_until: v12.disease_until,
+            blizzard_until: v12.blizzard_until,
+            pending_event: v12.pending_event,
+            event_rng: v12.event_rng,
+            owner_id: v12.owner_id,
+            next_id: v12.next_id,
+            rng: v12.rng,
+            central_ledger: v12.central_ledger,
+            leader: v12.leader,
+            mourning_until: v12.mourning_until,
+            morale: v12.morale,
+            pending_migrant: v12.pending_migrant,
+            wildlife: v12.wildlife,
+            corpses: v12.corpses,
+            graves: v12.graves,
+            livestock: v12.livestock,
+            pending_caravan: v12.pending_caravan,
         }
     }
 }

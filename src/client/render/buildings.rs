@@ -125,9 +125,26 @@ fn spawn_building(
             ..default()
         })
     });
+    // V0.16: the Kitchen's own always-lit campfire — a distinct handle from
+    // `fire_mat` above (created the same "up front, outside `with_children`"
+    // way, for the same reason) so its flicker is independent of the
+    // player's Furnace on/off state (`animate_meal_fire` in effects.rs, not
+    // `animate_effects`).
+    let meal_fire_mat = (b.kind == BuildingKind::Kitchen).then(|| {
+        materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.55, 0.15),
+            emissive: LinearRgba::rgb(4.0, 1.4, 0.3),
+            ..default()
+        })
+    });
+    // V0.16: the player-chosen orientation turns the whole building around its
+    // centre — every child (shape, props, the Kitchen's dining cluster, ...)
+    // rides along. `facing` is 0 for the fixtures (Furnace/Tunnel) and any
+    // pre-V0.16 save, so those keep their original south-facing pose.
     let root = commands
         .spawn((
-            Transform::from_translation(center),
+            Transform::from_translation(center)
+                .with_rotation(Quat::from_rotation_y(b.facing as f32 * std::f32::consts::FRAC_PI_2)),
             Visibility::Inherited,
             BuildingMarker,
             SpawnGrow { age: 0.0 },
@@ -320,6 +337,27 @@ fn spawn_building(
                     MeshMaterial3d(body.clone()),
                     Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::new(0.85, 0.6, 0.85)),
                 ));
+                // V0.16: a small stacked-crate pair (same idiom as the
+                // Warehouse's, below) and a flat fur pelt beside the tent —
+                // purely decorative "cozy home with storage" dressing.
+                // Tent's mesh is a closed solid prism with no interior, so
+                // nothing can go inside it — stays outside, same convention
+                // `sim::gather_points`'s offset already establishes for why
+                // survivors themselves wait just past the door rather than
+                // on the tile center.
+                let planks = assets.warehouse_plank_mat.clone();
+                for (dx, dz, h) in [(0.34, -0.30, 0.14), (0.48, -0.28, 0.18)] {
+                    p.spawn((
+                        Mesh3d(assets.cube.clone()),
+                        MeshMaterial3d(planks.clone()),
+                        Transform::from_xyz(dx, h * 0.5, dz).with_scale(Vec3::splat(h)),
+                    ));
+                }
+                p.spawn((
+                    Mesh3d(assets.cube.clone()),
+                    MeshMaterial3d(assets.tent_pelt_mat.clone()),
+                    Transform::from_xyz(-0.40, 0.015, 0.20).with_scale(Vec3::new(0.34, 0.03, 0.48)),
+                ));
                 roof_y = 0.7;
             }
             BuildingKind::Sawmill => {
@@ -424,10 +462,78 @@ fn spawn_building(
                 let stone = assets.kitchen_stone_mat.clone();
                 p.spawn((
                     Mesh3d(assets.cylinder.clone()),
-                    MeshMaterial3d(stone),
+                    MeshMaterial3d(stone.clone()),
                     Transform::from_xyz(0.22, 0.58, 0.0).with_scale(Vec3::new(0.16, 0.5, 0.16)),
                 ));
                 roof_y = 0.9;
+
+                // V0.16: dining/campfire cluster, at the same "just outside
+                // the door" spot `gather_points` parks meal-time survivors
+                // at (`by + 1.15` in tile-fractional world coords — here,
+                // relative to this 1x1 building's own centered local space,
+                // that's local Z ≈ +0.65; see `sim::gather_points`'s doc
+                // comment for why not the tile center). Makes the V0.15
+                // daily routine actually visible instead of people just
+                // standing at a bare point.
+                let planks = assets.warehouse_plank_mat.clone();
+                let meal_fire_mat = meal_fire_mat.clone().expect("kitchen meal-fire material");
+                let low_quality = low;
+                // The whole cluster hangs off a wrapper that cancels the
+                // root's `facing` rotation: `sim::gather_points` (and so the
+                // seat offsets in `render::survivors`) always parks diners at
+                // the building's SOUTH side, whatever way the player turned
+                // the Kitchen. Without this counter-rotation the stools would
+                // swing around the building while the survivors kept sitting
+                // in mid-air to the south.
+                p.spawn((
+                    Transform::from_rotation(Quat::from_rotation_y(
+                        -(b.facing as f32) * std::f32::consts::FRAC_PI_2,
+                    )),
+                    Visibility::Inherited,
+                ))
+                .with_children(|c| {
+                    c.spawn((
+                        Mesh3d(assets.cube.clone()),
+                        MeshMaterial3d(planks.clone()),
+                        Transform::from_xyz(0.0, 0.16, 0.75).with_scale(Vec3::new(0.52, 0.05, 0.30)),
+                    ));
+                    for (dx, dz) in [(-0.26, 0.62), (0.26, 0.62), (0.0, 0.94)] {
+                        c.spawn((
+                            Mesh3d(assets.cylinder.clone()),
+                            MeshMaterial3d(planks.clone()),
+                            Transform::from_xyz(dx, 0.09, dz).with_scale(Vec3::new(0.10, 0.18, 0.10)),
+                        ));
+                    }
+                    // A low stone ring holding a small flame — always lit (the
+                    // Kitchen is always "cooking"), independent of the player's
+                    // Furnace on/off state; see `meal_fire_mat` above and
+                    // `animate_meal_fire` in effects.rs.
+                    c.spawn((
+                        Mesh3d(assets.ring.clone()),
+                        MeshMaterial3d(stone),
+                        Transform::from_xyz(0.0, 0.01, 0.42)
+                            .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))
+                            .with_scale(Vec3::splat(0.14)),
+                    ));
+                    c.spawn((
+                        Mesh3d(assets.cone.clone()),
+                        MeshMaterial3d(meal_fire_mat.clone()),
+                        Transform::from_xyz(0.0, 0.07, 0.42).with_scale(Vec3::new(0.10, 0.14, 0.10)),
+                        MealFireGlow { fire_mat: meal_fire_mat.clone() },
+                    ));
+                    if !low_quality {
+                        c.spawn((
+                            PointLight {
+                                color: Color::srgb(1.0, 0.6, 0.25),
+                                intensity: 60_000.0,
+                                range: 2.5,
+                                ..default()
+                            },
+                            Transform::from_xyz(0.0, 0.25, 0.42),
+                            MealFireLight,
+                        ));
+                    }
+                });
             }
             BuildingKind::Warehouse => {
                 let body = building_mat(assets, b.kind);

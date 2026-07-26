@@ -102,13 +102,13 @@ fn placing_a_tent_costs_wood_and_blocks_the_spot() {
     let (x, y) = find_spot(&state, BuildingKind::Tent);
     let wood_before = state.stock.wood;
 
-    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
+    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y, facing: 0 });
     assert_eq!(state.buildings.len(), 3, "furnace + tunnel + tent");
     assert!((state.stock.wood - (wood_before - 15.0)).abs() < 0.001);
 
     // Same spot again: occupied, silently rejected, no wood spent.
     let wood_after = state.stock.wood;
-    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
+    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y, facing: 0 });
     assert_eq!(state.buildings.len(), 3);
     assert_eq!(state.stock.wood, wood_after);
 }
@@ -118,7 +118,7 @@ fn cannot_build_without_wood_or_on_bad_terrain() {
     let mut state = sim::new_game(5, 12);
     let (x, y) = find_spot(&state, BuildingKind::Tent);
     state.stock.wood = 3.0;
-    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
+    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y, facing: 0 });
     assert_eq!(state.buildings.len(), 2, "no wood -> no tent (furnace + tunnel only)");
 
     state.stock.wood = 100.0;
@@ -137,7 +137,7 @@ fn worker_assignment_is_clamped() {
     let mut state = sim::new_game_bootstrapped(5, 12);
     state.stock.wood = 200.0;
     let (x, y) = find_spot(&state, BuildingKind::Sawmill);
-    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let id = state.buildings.last().unwrap().id;
 
     // V0.8: qurilish paytida sig'im — brigada capi.
@@ -165,7 +165,7 @@ fn sawmill_produces_wood_and_eats_the_forest() {
     let mut state = sim::new_game(5, 12);
     state.stock.wood = 100.0;
     let (x, y) = find_sawmill_spot_near_forest(&state);
-    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let id = state.buildings.last().unwrap().id;
     sim::apply_command(&mut state, 1, &PlayerCommand::AdjustWorkers { building: id, delta: 2 });
 
@@ -190,7 +190,7 @@ fn sawmill_produces_wood_and_eats_the_forest() {
 fn demolish_refunds_and_furnace_is_protected() {
     let mut state = sim::new_game(5, 12);
     let (x, y) = find_spot(&state, BuildingKind::Tent);
-    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
+    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y, facing: 0 });
     let id = state.buildings.last().unwrap().id;
     let wood = state.stock.wood;
     sim::apply_command(&mut state, 1, &PlayerCommand::Demolish { building: id });
@@ -251,7 +251,7 @@ fn commands_after_game_end_are_ignored() {
     let mut state = sim::new_game(5, 12);
     state.phase = GamePhase::Lost;
     let (x, y) = find_spot(&state, BuildingKind::Tent);
-    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
+    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y, facing: 0 });
     assert_eq!(state.buildings.len(), 2, "furnace + tunnel only, the game already ended");
 }
 
@@ -295,12 +295,12 @@ fn protocol_frames_roundtrip() {
         }
     }
 
-    let cmd = ClientMsg::Cmd(PlayerCommand::Place { kind: BuildingKind::Sawmill, x: 10, y: 20 });
+    let cmd = ClientMsg::Cmd(PlayerCommand::Place { kind: BuildingKind::Sawmill, x: 10, y: 20, facing: 0 });
     let mut buf = Vec::new();
     write_frame(&mut buf, &cmd).unwrap();
     let back: ClientMsg = read_frame(&mut Cursor::new(buf)).unwrap();
     match back {
-        ClientMsg::Cmd(PlayerCommand::Place { kind, x, y }) => {
+        ClientMsg::Cmd(PlayerCommand::Place { kind, x, y, .. }) => {
             assert_eq!(kind, BuildingKind::Sawmill);
             assert_eq!((x, y), (10, 20));
         }
@@ -331,7 +331,7 @@ fn attribution_on_place_credits_the_player() {
     sim::player_joined(&mut state, 7, "Zara");
     let (x, y) = find_spot(&state, BuildingKind::Tent);
 
-    sim::apply_command(&mut state, 7, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
+    sim::apply_command(&mut state, 7, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y, facing: 0 });
 
     let built = state.buildings.last().unwrap();
     assert_eq!(built.owner, Some(7));
@@ -348,7 +348,7 @@ fn attribution_on_demolish_credits_the_player() {
     let mut state = sim::new_game(5, 12);
     sim::player_joined(&mut state, 7, "Zara");
     let (x, y) = find_spot(&state, BuildingKind::Tent);
-    sim::apply_command(&mut state, 7, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y });
+    sim::apply_command(&mut state, 7, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y, facing: 0 });
     let id = state.buildings.last().unwrap().id;
 
     sim::apply_command(&mut state, 7, &PlayerCommand::Demolish { building: id });

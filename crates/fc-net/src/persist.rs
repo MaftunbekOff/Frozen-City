@@ -54,6 +54,10 @@ const MAGIC_V9: &[u8; 8] = b"FCWORLD9";
 const MAGIC_V10: &[u8; 9] = b"FCWORLD10";
 const MAGIC_V11: &[u8; 9] = b"FCWORLD11";
 const MAGIC_V12: &[u8; 9] = b"FCWORLD12";
+// V13 (V0.16): `Building` grew a `facing` byte. See `legacy::BuildingV12` /
+// `legacy::GameStateV12` for the frozen pre-`facing` mirror old saves load
+// through.
+const MAGIC_V13: &[u8; 9] = b"FCWORLD13";
 
 fn resolve_path() -> String {
     std::env::var("FC_WORLD_SAVE").unwrap_or_else(|_| DEFAULT_SAVE_PATH.to_string())
@@ -83,8 +87,8 @@ pub fn save_at(state: &GameState, path: &str) -> io::Result<()> {
     }
     let body =
         bincode::serialize(state).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    let mut bytes = Vec::with_capacity(MAGIC_V12.len() + body.len());
-    bytes.extend_from_slice(MAGIC_V12);
+    let mut bytes = Vec::with_capacity(MAGIC_V13.len() + body.len());
+    bytes.extend_from_slice(MAGIC_V13);
     bytes.extend_from_slice(&body);
     // Write to a sibling temp file and rename over the target: a kill mid-write
     // (the exact moment this feature exists to survive) leaves the previous,
@@ -106,8 +110,15 @@ pub fn load_at(path: &str) -> Option<GameState> {
 
 fn load_at_raw(path: &str) -> Option<GameState> {
     let bytes = fs::read(path).ok()?;
-    if let Some(body) = bytes.strip_prefix(MAGIC_V12.as_slice()) {
+    if let Some(body) = bytes.strip_prefix(MAGIC_V13.as_slice()) {
         return bincode::deserialize(body).ok();
+    }
+    if let Some(body) = bytes.strip_prefix(MAGIC_V12.as_slice()) {
+        // V12 (pre-`facing`): decode through the frozen V12 mirror and migrate
+        // one hop to V13. The next autosave rewrites it as V13.
+        return bincode::deserialize::<crate::legacy::GameStateV12>(body)
+            .ok()
+            .map(GameState::from);
     }
     if let Some(body) = bytes.strip_prefix(MAGIC_V11.as_slice()) {
         // V11 (pre-guest-permission-removal): decode through the frozen V11
@@ -667,7 +678,7 @@ mod tests {
             tick: modern.tick,
             win_days: modern.win_days,
             tiles: modern.tiles.clone(),
-            buildings: modern.buildings.clone(),
+            buildings: modern.buildings.iter().map(crate::legacy::BuildingV12::from).collect(),
             survivors: modern.survivors.iter().map(SurvivorV5::from).collect(),
             stock: crate::legacy::StockpileV7 {
                 wood: modern.stock.wood,
@@ -751,7 +762,7 @@ mod tests {
             tick: modern.tick,
             win_days: modern.win_days,
             tiles: modern.tiles.clone(),
-            buildings: modern.buildings.clone(),
+            buildings: modern.buildings.iter().map(crate::legacy::BuildingV12::from).collect(),
             survivors: modern.survivors.iter().map(SurvivorV8::from).collect(),
             stock: crate::legacy::StockpileV7 {
                 wood: modern.stock.wood,
@@ -836,7 +847,7 @@ mod tests {
             tick: modern.tick,
             win_days: modern.win_days,
             tiles: modern.tiles.clone(),
-            buildings: modern.buildings.clone(),
+            buildings: modern.buildings.iter().map(crate::legacy::BuildingV12::from).collect(),
             survivors: modern.survivors.iter().map(SurvivorV8::from).collect(),
             stock: crate::legacy::StockpileV7 {
                 wood: modern.stock.wood,
@@ -930,7 +941,7 @@ mod tests {
             tick: modern.tick,
             win_days: modern.win_days,
             tiles: modern.tiles.clone(),
-            buildings: modern.buildings.clone(),
+            buildings: modern.buildings.iter().map(crate::legacy::BuildingV12::from).collect(),
             survivors: modern.survivors.iter().map(SurvivorV8::from).collect(),
             stock: StockpileV8 {
                 wood: modern.stock.wood,
@@ -1010,7 +1021,7 @@ mod tests {
             tick: modern.tick,
             win_days: modern.win_days,
             tiles: modern.tiles.clone(),
-            buildings: modern.buildings.clone(),
+            buildings: modern.buildings.iter().map(crate::legacy::BuildingV12::from).collect(),
             survivors: modern.survivors.clone(),
             stock: StockpileV10 {
                 wood: modern.stock.wood,
@@ -1089,7 +1100,7 @@ mod tests {
             tick: modern.tick,
             win_days: modern.win_days,
             tiles: modern.tiles.clone(),
-            buildings: modern.buildings.clone(),
+            buildings: modern.buildings.iter().map(crate::legacy::BuildingV12::from).collect(),
             survivors: modern.survivors.clone(),
             stock: StockpileV10 {
                 wood: modern.stock.wood,
@@ -1174,7 +1185,7 @@ mod tests {
             tick: modern.tick,
             win_days: modern.win_days,
             tiles: modern.tiles.clone(),
-            buildings: modern.buildings.clone(),
+            buildings: modern.buildings.iter().map(crate::legacy::BuildingV12::from).collect(),
             survivors: modern.survivors.clone(),
             stock: modern.stock,
             furnace_level: modern.furnace_level,
@@ -1234,6 +1245,92 @@ mod tests {
         // And once re-saved (V12, with header), it round-trips as-is.
         save_at(&loaded, &path).unwrap();
         assert_eq!(load_at(&path).expect("V12 reload"), loaded);
+        fs::remove_file(&path).ok();
+    }
+
+    /// A world saved under `FCWORLD12` (pre-`facing`: `Building` had no
+    /// orientation byte at all) must load and migrate one hop to V13, with
+    /// every building landing in the default south-facing pose it was always
+    /// drawn in — same "never collapses to None" guarantee as V1..V11. The
+    /// live state deliberately carries a rotated building (`facing: 2`) that
+    /// the V12 mirror drops, so a `facing` that survived by coincidence
+    /// instead of by migration would show up as a mismatch.
+    #[test]
+    fn v12_save_migrates() {
+        use crate::legacy::GameStateV12;
+
+        let path = throwaway_path("v12-migrate");
+        let mut modern = sim::new_game(112, 12);
+        sim::player_joined(&mut modern, 15, "Nodira");
+        modern.graduated = true;
+        modern.buildings[0].facing = 2;
+        let v12 = GameStateV12 {
+            tick: modern.tick,
+            win_days: modern.win_days,
+            tiles: modern.tiles.clone(),
+            buildings: modern.buildings.iter().map(crate::legacy::BuildingV12::from).collect(),
+            survivors: modern.survivors.clone(),
+            stock: modern.stock,
+            furnace_level: modern.furnace_level,
+            furnace_lit: modern.furnace_lit,
+            cold_snap: modern.cold_snap,
+            players: modern.players.clone(),
+            phase: modern.phase,
+            events: modern.events.clone(),
+            total_events: modern.total_events,
+            chat: modern.chat.clone(),
+            total_chat: modern.total_chat,
+            pings: modern.pings.clone(),
+            missions: modern.missions.clone(),
+            tunnel: modern.tunnel,
+            graduated: modern.graduated,
+            central: modern.central,
+            techs: modern.techs.clone(),
+            disease_until: modern.disease_until,
+            blizzard_until: modern.blizzard_until,
+            pending_event: modern.pending_event,
+            event_rng: modern.event_rng,
+            owner_id: modern.owner_id,
+            next_id: modern.next_id,
+            rng: modern.rng,
+            central_ledger: modern.central_ledger.clone(),
+            leader: modern.leader,
+            mourning_until: modern.mourning_until,
+            morale: modern.morale,
+            pending_migrant: modern.pending_migrant,
+            wildlife: modern.wildlife,
+            corpses: modern.corpses.clone(),
+            graves: modern.graves.clone(),
+            livestock: modern.livestock,
+            pending_caravan: modern.pending_caravan.clone(),
+        };
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(MAGIC_V12);
+        bytes.extend_from_slice(&bincode::serialize(&v12).unwrap());
+        fs::write(&path, bytes).unwrap();
+
+        let loaded = load_at(&path).expect("V12 save must migrate, never wipe");
+        assert!(
+            loaded.buildings.iter().all(|b| b.facing == 0),
+            "pre-V13 buildings load south-facing"
+        );
+        assert_eq!(loaded.survivors, modern.survivors);
+        assert_eq!(loaded.players, modern.players);
+        assert!(loaded.graduated, "graduation must survive migration");
+        assert_eq!(loaded.stock, modern.stock);
+        assert_eq!(loaded.buildings.len(), modern.buildings.len());
+        for (got, want) in loaded.buildings.iter().zip(&modern.buildings) {
+            assert_eq!((got.id, got.kind, got.x, got.y), (want.id, want.kind, want.x, want.y));
+            assert_eq!((got.level, got.workers), (want.level, want.workers));
+        }
+        assert_eq!(loaded.wildlife, modern.wildlife);
+        assert_eq!(loaded.livestock, modern.livestock);
+        assert_eq!(loaded.graves, modern.graves);
+        assert_eq!(loaded.pending_caravan, modern.pending_caravan);
+
+        // And once re-saved (V13, with header), it round-trips as-is.
+        save_at(&loaded, &path).unwrap();
+        assert_eq!(load_at(&path).expect("V13 reload"), loaded);
         fs::remove_file(&path).ok();
     }
 

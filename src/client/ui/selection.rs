@@ -25,6 +25,7 @@ pub fn selection_panel_update(
         Query<(&mut Node, &mut BackgroundColor), With<UpgradeBtn>>,
         Query<&mut Node, With<CaravanRow>>,
         Query<&mut Node, With<RelocateBtn>>,
+        Query<&mut Node, With<RotateBuildingBtn>>,
     )>,
     mut texts: Query<(&mut Text, &SelText)>,
 ) {
@@ -109,6 +110,13 @@ pub fn selection_panel_update(
         Display::None
     };
     for mut node in &mut nodes.p6() {
+        if node.display != relocate_display {
+            node.display = relocate_display;
+        }
+    }
+    // V0.16: rotating shares the exact same gate as relocating (finished,
+    // buildable) — reuse `relocate_display`.
+    for mut node in &mut nodes.p7() {
         if node.display != relocate_display {
             node.display = relocate_display;
         }
@@ -349,6 +357,7 @@ pub fn selection_panel_buttons(
     upgrade: Query<&Interaction, (Changed<Interaction>, With<UpgradeBtn>)>,
     demolish: Query<&Interaction, (Changed<Interaction>, With<DemolishBtn>)>,
     relocate_btn: Query<&Interaction, (Changed<Interaction>, With<RelocateBtn>)>,
+    rotate_btn: Query<&Interaction, (Changed<Interaction>, With<RotateBuildingBtn>)>,
 ) {
     let Some(id) = selection.0 else { return };
     if minus.iter().any(|i| *i == Interaction::Pressed) {
@@ -403,5 +412,11 @@ pub fn selection_panel_buttons(
     // dispatch happens once the player picks a target tile (`input::build_input`).
     if relocate_btn.iter().any(|i| *i == Interaction::Pressed) {
         relocate.0 = Some(id);
+    }
+    // V0.16: rotate in place — validated server-side (`can_rotate`), reflected
+    // next snapshot; the building re-enters construction at the discounted
+    // timer, same as relocating.
+    if rotate_btn.iter().any(|i| *i == Interaction::Pressed) {
+        net.send(ClientMsg::Cmd(PlayerCommand::RotateBuilding { building: id }));
     }
 }

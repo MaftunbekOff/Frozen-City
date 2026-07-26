@@ -19,7 +19,7 @@ fn find_spot(state: &GameState, kind: BuildingKind) -> (u8, u8) {
 }
 
 fn place_and_staff(state: &mut GameState, kind: BuildingKind, x: u8, y: u8, workers: i8) -> u32 {
-    sim::apply_command(state, 1, &PlayerCommand::Place { kind, x, y });
+    sim::apply_command(state, 1, &PlayerCommand::Place { kind, x, y, facing: 0 });
     let id = state.buildings.last().unwrap().id;
     // V0.8: bu testlar bitgan bino effektini sinaydi — maydonchani darhol
     // bitirib, so'ralgan ishchi soniga keltiramiz.

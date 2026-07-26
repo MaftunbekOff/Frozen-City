@@ -156,6 +156,7 @@ fn same_account_different_devices_shares_one_world() {
         kind: BuildingKind::Tent,
         x: spot.0,
         y: spot.1,
+        facing: 0,
     }));
     let after_build = wait_state(&device1, |s| {
         s.buildings
@@ -195,6 +196,7 @@ fn same_account_different_devices_shares_one_world() {
         kind: BuildingKind::Tent,
         x: spot2.0,
         y: spot2.1,
+        facing: 0,
     }));
     let after_second_build = wait_state(&device2, |s| {
         s.buildings.iter().filter(|b| b.kind == BuildingKind::Tent).count() == 2

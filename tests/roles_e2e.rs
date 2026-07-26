@@ -93,6 +93,7 @@ fn guest_can_place_by_default() {
         kind: BuildingKind::Tent,
         x: spot.0,
         y: spot.1,
+        facing: 0,
     }));
 
     let seen = wait_state(&bob, |s| {

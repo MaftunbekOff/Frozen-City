@@ -72,7 +72,7 @@ fn matching_profession_boosts_production() {
     }
 
     let (x, y) = find_sawmill_spot_near_forest(&control);
-    sim::apply_command(&mut control, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    sim::apply_command(&mut control, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let control_id = control.buildings.last().unwrap().id;
     // V0.8: maydonchani bitirib, avto-brigadani bo'shatamiz — test aynan
     // 1 ishchilik farqni o'lchaydi.
@@ -87,7 +87,7 @@ fn matching_profession_boosts_production() {
     sim::apply_command(&mut control, 1, &PlayerCommand::AdjustWorkers { building: control_id, delta: 1 });
 
     let (x, y) = find_sawmill_spot_near_forest(&experiment);
-    sim::apply_command(&mut experiment, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    sim::apply_command(&mut experiment, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let exp_id = experiment.buildings.last().unwrap().id;
     sim::finish_all_construction(&mut experiment);
     let cur = experiment.find_building(exp_id).unwrap().workers as i8;
@@ -134,7 +134,7 @@ fn tailor_matches_tailor_shop_for_profession_bonus() {
     }
 
     let (x, y) = find_spot(&control, BuildingKind::TailorShop);
-    sim::apply_command(&mut control, 1, &PlayerCommand::Place { kind: BuildingKind::TailorShop, x, y });
+    sim::apply_command(&mut control, 1, &PlayerCommand::Place { kind: BuildingKind::TailorShop, x, y, facing: 0 });
     let control_id = control.buildings.last().unwrap().id;
     sim::finish_all_construction(&mut control);
     let cur = control.find_building(control_id).unwrap().workers as i8;
@@ -147,7 +147,7 @@ fn tailor_matches_tailor_shop_for_profession_bonus() {
     sim::apply_command(&mut control, 1, &PlayerCommand::AdjustWorkers { building: control_id, delta: 1 });
 
     let (x, y) = find_spot(&experiment, BuildingKind::TailorShop);
-    sim::apply_command(&mut experiment, 1, &PlayerCommand::Place { kind: BuildingKind::TailorShop, x, y });
+    sim::apply_command(&mut experiment, 1, &PlayerCommand::Place { kind: BuildingKind::TailorShop, x, y, facing: 0 });
     let exp_id = experiment.buildings.last().unwrap().id;
     sim::finish_all_construction(&mut experiment);
     let cur = experiment.find_building(exp_id).unwrap().workers as i8;
@@ -189,7 +189,7 @@ fn mismatched_profession_gets_no_bonus() {
     }
 
     let (x, y) = find_sawmill_spot_near_forest(&baseline);
-    sim::apply_command(&mut baseline, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    sim::apply_command(&mut baseline, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let baseline_id = baseline.buildings.last().unwrap().id;
     // V0.8: bitirish + brigada tozalash (yuqoridagi test bilan bir sabab).
     sim::finish_all_construction(&mut baseline);
@@ -198,7 +198,7 @@ fn mismatched_profession_gets_no_bonus() {
     sim::apply_command(&mut baseline, 1, &PlayerCommand::AdjustWorkers { building: baseline_id, delta: 1 });
 
     let (x, y) = find_sawmill_spot_near_forest(&mismatched);
-    sim::apply_command(&mut mismatched, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    sim::apply_command(&mut mismatched, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let mismatched_id = mismatched.buildings.last().unwrap().id;
     sim::finish_all_construction(&mut mismatched);
     let cur = mismatched.find_building(mismatched_id).unwrap().workers as i8;
@@ -239,7 +239,7 @@ fn leader_gets_the_profession_match_bonus_at_any_building() {
     }
 
     let (x, y) = find_sawmill_spot_near_forest(&baseline);
-    sim::apply_command(&mut baseline, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    sim::apply_command(&mut baseline, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let baseline_id = baseline.buildings.last().unwrap().id;
     sim::finish_all_construction(&mut baseline);
     let cur = baseline.find_building(baseline_id).unwrap().workers as i8;
@@ -247,7 +247,7 @@ fn leader_gets_the_profession_match_bonus_at_any_building() {
     sim::apply_command(&mut baseline, 1, &PlayerCommand::AdjustWorkers { building: baseline_id, delta: 1 });
 
     let (x, y) = find_sawmill_spot_near_forest(&led);
-    sim::apply_command(&mut led, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    sim::apply_command(&mut led, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let led_id = led.buildings.last().unwrap().id;
     sim::finish_all_construction(&mut led);
     let cur = led.find_building(led_id).unwrap().workers as i8;

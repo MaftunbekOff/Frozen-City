@@ -21,6 +21,7 @@ pub fn build_buttons(
     ff: Res<theme::FormFactor>,
     time: Res<Time>,
     mut build: ResMut<BuildMode>,
+    mut pending: ResMut<PendingPlace>,
     mut open: ResMut<BuildPanelOpen>,
     clicked: Query<(&Interaction, &BuildBtn), Changed<Interaction>>,
     mut all: Query<(&Interaction, &BuildBtn, &mut BackgroundColor)>,
@@ -57,6 +58,11 @@ pub fn build_buttons(
             } else {
                 Some(btn.0)
             };
+            // V0.16: switching (or clearing) the armed kind drops any
+            // half-dropped pending building, exactly like the keyboard
+            // hotkeys in `input::build_input` — otherwise the frozen ghost
+            // and its ✓ button would still commit the OLD kind.
+            pending.0 = None;
             // Bino tanlandi — modal yopiladi, joylashtirish uchun olam ochiq
             // bo'lsin (bekor qilish bosishida esa ochiq qoladi).
             if build.0.is_some() {

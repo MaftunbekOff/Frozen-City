@@ -94,21 +94,41 @@ pub fn enter_game(
         DespawnOnExit(Screen::Game),
     ));
 
-    // Build placement ghost.
+    // Build placement ghost. The `GhostMarker` root carries only
+    // translation+rotation (no scale) so `input::build_input` can spin it by
+    // the pending `facing` cleanly; the footprint box and a small "front"
+    // arrow are children that ride that rotation. The arrow is what makes the
+    // V0.16 ⟳ rotate visible on an otherwise near-square box.
     let ghost_mat = materials.add(StandardMaterial {
         base_color: Color::srgba(0.3, 0.9, 0.4, 0.45),
         unlit: true,
         alpha_mode: AlphaMode::Blend,
         ..default()
     });
-    commands.spawn((
-        Mesh3d(assets.cube.clone()),
-        MeshMaterial3d(ghost_mat.clone()),
-        Transform::from_xyz(0.0, 0.25, 0.0).with_scale(Vec3::new(0.95, 0.5, 0.95)),
-        Visibility::Hidden,
-        GhostMarker { mat: ghost_mat },
-        DespawnOnExit(Screen::Game),
-    ));
+    commands
+        .spawn((
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            Visibility::Hidden,
+            GhostMarker { mat: ghost_mat.clone() },
+            DespawnOnExit(Screen::Game),
+        ))
+        .with_children(|g| {
+            g.spawn((
+                Mesh3d(assets.cube.clone()),
+                MeshMaterial3d(ghost_mat.clone()),
+                Transform::from_xyz(0.0, 0.25, 0.0).with_scale(Vec3::new(0.95, 0.5, 0.95)),
+            ));
+            // Front marker: a cone laid flat pointing +Z (the building's
+            // default south face — see `sim::gather_points`), just past the
+            // footprint's front edge.
+            g.spawn((
+                Mesh3d(assets.cone.clone()),
+                MeshMaterial3d(ghost_mat.clone()),
+                Transform::from_xyz(0.0, 0.12, 0.62)
+                    .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2))
+                    .with_scale(Vec3::new(0.20, 0.34, 0.20)),
+            ));
+        });
 
     // Snowfall volume around the camera focus. Phones get far fewer flakes —
     // each is a translucent draw and mobile GPUs are fill-rate bound.

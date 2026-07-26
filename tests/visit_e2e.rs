@@ -314,6 +314,7 @@ fn invite_and_visit_flow() {
         kind: BuildingKind::Tent,
         x: spot.0,
         y: spot.1,
+        facing: 0,
     }));
     let built_state = wait_state(&guestly_visit, |s| {
         s.buildings

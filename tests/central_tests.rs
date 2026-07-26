@@ -134,7 +134,7 @@ fn extract_prefers_idle_and_frees_staffed_slots() {
     // (V0.8: joylash maydoncha ochadi — bu test bitgan binoning slotlarini
     // sinaydi, shuning uchun darhol bitirib, avto-brigadani bo'shatamiz.)
     let (x, y) = find_spot(&state, BuildingKind::Sawmill);
-    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let sawmill = state.buildings.iter().find(|b| b.kind == BuildingKind::Sawmill).unwrap().id;
     sim::finish_all_construction(&mut state);
     let cur = state.find_building(sawmill).unwrap().workers as i8;
@@ -147,7 +147,11 @@ fn extract_prefers_idle_and_frees_staffed_slots() {
     // pinned one would never actually need to be reached. Two pinned makes
     // the fallback-into-the-assigned-pool path unavoidable once idle runs
     // low, so it's still exercised under the new floor.
-    let pinned: Vec<u32> = state.survivors.iter().take(2).map(|s| s.id).collect();
+    // Pin the LAST two survivors, not the first: V0.16 extracts the leader
+    // (the starting leader is `survivors[0]`, see `mapgen`) first, so pinning
+    // the leader here would collide with that. Leaving the leader idle keeps
+    // this test focused on the idle-before-assigned preference it exists for.
+    let pinned: Vec<u32> = state.survivors.iter().rev().take(2).map(|s| s.id).collect();
     for &id in &pinned {
         sim::apply_command(&mut state, 1, &PlayerCommand::AssignSurvivor { survivor: id, building: Some(sawmill) });
     }
@@ -175,6 +179,30 @@ fn extract_prefers_idle_and_frees_staffed_slots() {
         "falls back to the assigned pool once idle runs out"
     );
     assert!(rest.iter().all(|s| s.assigned_building.is_none()));
+}
+
+#[test]
+fn extract_takes_the_leader_first_so_they_cross_with_the_player() {
+    // V0.16: crossing to the Global World brings the player's leader along.
+    let mut state = sim::new_game_bootstrapped(7, 12);
+    sim::player_joined(&mut state, 1, "Owner");
+
+    // Appoint an ASSIGNED survivor as leader: assigned survivors are normally
+    // extracted only after the whole idle pool, so this proves the leader
+    // jumps the queue rather than merely happening to be idle.
+    let (x, y) = find_spot(&state, BuildingKind::Sawmill);
+    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
+    let sawmill = state.buildings.iter().find(|b| b.kind == BuildingKind::Sawmill).unwrap().id;
+    sim::finish_all_construction(&mut state);
+    let boss = state.survivors.last().unwrap().id;
+    sim::apply_command(&mut state, 1, &PlayerCommand::AssignSurvivor { survivor: boss, building: Some(sawmill) });
+    sim::apply_command(&mut state, 1, &PlayerCommand::SetLeader { survivor: boss });
+    assert_eq!(state.leader, Some(boss));
+
+    let taken = sim::extract_migrants(&mut state, 1);
+    assert_eq!(taken.len(), 1);
+    assert_eq!(taken[0].id, boss, "the leader heads the migration group");
+    assert_eq!(state.leader, None, "the leader vacated the personal city on crossing");
 }
 
 #[test]
@@ -224,12 +252,12 @@ fn central_authority_follows_settler_ownership() {
     assert!(!state.can_issue(10, &PlayerCommand::InvestTunnel));
     assert!(!state.can_issue(10, &PlayerCommand::Research { tech: Tech::Tools }));
     assert!(!state.can_issue(10, &PlayerCommand::RespondEvent { accept: true }));
-    assert!(state.can_issue(10, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x: 1, y: 1 }));
+    assert!(state.can_issue(10, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x: 1, y: 1, facing: 0 }));
 
     // And the full apply path respects it: Vali's settler stays put when Aziz
     // tries to move him onto a building.
     let (x, y) = find_spot(&state, BuildingKind::Sawmill);
-    sim::apply_command(&mut state, 10, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y });
+    sim::apply_command(&mut state, 10, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let sawmill = state.buildings.iter().find(|b| b.kind == BuildingKind::Sawmill).unwrap().id;
     sim::apply_command(
         &mut state,

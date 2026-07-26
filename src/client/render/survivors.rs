@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use frozen_city::game::rng::Rng;
+use frozen_city::game::sim;
 use frozen_city::game::types::{xp_level, Profession, TUNNEL_X, TUNNEL_Y};
 
 use super::*;
@@ -15,6 +16,40 @@ use crate::client::*;
 /// renders where the sim says they are.
 fn survivor_sim_world(s: &frozen_city::game::types::Survivor) -> Vec3 {
     tilef_to_world((s.x, s.y))
+}
+
+/// V0.16: small per-survivor offset so every survivor `sim::survivor_is_at_meal`
+/// reports as eating doesn't render stacked on the exact single gather point
+/// `sim::gather_points` sends them all to — spreads them around the dining
+/// cluster's stools (`render::buildings`'s `BuildingKind::Kitchen` arm; the
+/// stool-local offsets there must stay in sync with these). Purely a render
+/// nicety: `Wander::sim_pos` is a render-layer value, so sim's authoritative
+/// `Survivor.x/y` (and therefore click hit-testing, which reads that field
+/// directly — see `input.rs`'s `resolve_world_click`) is untouched. All
+/// offsets here stay inside `input::SURVIVOR_PICK_RADIUS` (0.6) of the gather
+/// point, so a seated/standing survivor is still clickable at their drawn spot.
+const MEAL_SEAT_OFFSETS: [(f32, f32); 3] = [(-0.26, -0.03), (0.26, -0.03), (0.0, 0.29)];
+
+/// Standing spots for the fourth-and-later hungry survivor, who has no free
+/// stool — a small fan just behind the fire so they neither sink into a seated
+/// pose over thin air nor stack on an occupied stool (`id % 3` used to do the
+/// latter once four+ survivors ate at once). Cycles if even these fill up.
+const MEAL_STAND_OFFSETS: [(f32, f32); 4] =
+    [(-0.45, -0.30), (0.45, -0.30), (-0.20, -0.48), (0.20, -0.48)];
+
+/// Render placement for a hungry survivor of arrival `rank` (0 = first to
+/// claim a seat; see `sync_survivors`'s stable lowest-id ordering) at the
+/// Kitchen dining cluster: the first three sit on the three stools, the rest
+/// stand in the fan behind them. Returns the world-space offset from the
+/// shared gather point and whether to fold into the seated leg pose.
+fn meal_slot(rank: usize) -> (Vec3, bool) {
+    if rank < MEAL_SEAT_OFFSETS.len() {
+        let (dx, dz) = MEAL_SEAT_OFFSETS[rank];
+        (Vec3::new(dx, 0.0, dz), true)
+    } else {
+        let (dx, dz) = MEAL_STAND_OFFSETS[(rank - MEAL_SEAT_OFFSETS.len()) % MEAL_STAND_OFFSETS.len()];
+        (Vec3::new(dx, 0.0, dz), false)
+    }
 }
 
 pub fn sync_survivors(
@@ -33,6 +68,22 @@ pub fn sync_survivors(
     }
     *seen = view.version;
 
+    // Once per snapshot, not once per survivor — every survivor below is
+    // asked the same `survivor_is_at_meal` question against the same
+    // buildings (see `sim::survivor_is_at_meal_with`). The sorted id list of
+    // everyone currently at the Kitchen doubles as a stable seat assignment:
+    // a survivor's `binary_search` rank (0,1,2,…) picks its stool/stand spot
+    // (`meal_slot`), so seating stays consistent frame-to-frame and no two
+    // share a stool.
+    let gather = sim::gather_points(state);
+    let mut hungry: Vec<u32> = state
+        .survivors
+        .iter()
+        .filter(|s| sim::survivor_is_at_meal_with(state, &gather, s))
+        .map(|s| s.id)
+        .collect();
+    hungry.sort_unstable();
+
     for s in &state.survivors {
         let is_leader = state.leader == Some(s.id);
         if let Some(entry) = viz.0.get(&s.id) {
@@ -45,7 +96,11 @@ pub fn sync_survivors(
             commands.entity(entry.entity).despawn();
             viz.0.remove(&s.id);
         }
-        let pos = survivor_sim_world(s);
+        let (meal_off, sitting) = match hungry.binary_search(&s.id) {
+            Ok(rank) => meal_slot(rank),
+            Err(_) => (Vec3::ZERO, false),
+        };
+        let pos = survivor_sim_world(s) + meal_off;
         let variant = Profession::ALL
             .iter()
             .position(|&p| p == s.profession)
@@ -60,6 +115,7 @@ pub fn sync_survivors(
                 SurvivorDot { id: s.id },
                 SurvivorRig {
                     carrying: s.assigned_building.is_some(),
+                    sitting,
                 },
                 Wander {
                     sim_pos: pos,
@@ -152,16 +208,23 @@ pub fn sync_survivors(
         }
     }
 
-    // Refresh each entity's sim-position goal and hauling state.
+    // Refresh each entity's sim-position goal and hauling/sitting state.
     for (dot, mut wander, mut rig) in &mut dots {
         if let Some(s) = state.survivors.iter().find(|s| s.id == dot.id) {
-            let pos = survivor_sim_world(s);
+            let (meal_off, sitting) = match hungry.binary_search(&s.id) {
+                Ok(rank) => meal_slot(rank),
+                Err(_) => (Vec3::ZERO, false),
+            };
+            let pos = survivor_sim_world(s) + meal_off;
             if wander.sim_pos.distance(pos) > 0.001 {
                 wander.sim_pos = pos;
             }
             let carrying = s.assigned_building.is_some();
             if rig.carrying != carrying {
                 rig.carrying = carrying;
+            }
+            if rig.sitting != sitting {
+                rig.sitting = sitting;
             }
         }
     }
@@ -474,24 +537,35 @@ fn spawn_survivor_body(
 /// actively walking (`Wander::moving`), settling back to neutral otherwise —
 /// the one bit of procedural "gait" standing in for the skeletal animation a
 /// glTF rig would have carried. Legs are direct children of the
-/// `SurvivorDot` root, so a single `ChildOf` hop finds `Wander`.
+/// `SurvivorDot` root, so a single `ChildOf` hop finds `Wander`/`SurvivorRig`.
+///
+/// V0.16: while `SurvivorRig::sitting` (arrived at the Kitchen's dining
+/// cluster during a meal window), both legs instead settle into a fixed
+/// forward tilt — a low-poly "seated at the table" cue, in keeping with how
+/// abstract the rest of this rig already is. Deliberately a partial tilt
+/// (`SIT_TILT`, well short of the 90° a literal bent knee would need) since
+/// each leg capsule rotates around its own center, not a hip joint — a full
+/// right angle would swing half the capsule below the floor.
 pub fn animate_survivor_legs(
     time: Res<Time>,
     parents: Query<&ChildOf>,
-    walkers: Query<&Wander, With<SurvivorDot>>,
+    walkers: Query<(&Wander, &SurvivorRig), With<SurvivorDot>>,
     mut legs: Query<(Entity, &mut Transform, &SurvivorLeg)>,
 ) {
     const SWING_SPEED: f32 = 9.0;
     const MAX_SWING: f32 = 0.55;
+    const SIT_TILT: f32 = 0.85;
     let t = time.elapsed_secs();
     let blend = 1.0 - (-10.0 * time.delta_secs()).exp();
     for (e, mut tr, leg) in &mut legs {
-        let moving = parents
+        let (moving, sitting) = parents
             .get(e)
             .and_then(|co| walkers.get(co.parent()))
-            .map(|w| w.moving)
-            .unwrap_or(false);
-        let target = if moving {
+            .map(|(w, rig)| (w.moving, rig.sitting))
+            .unwrap_or((false, false));
+        let target = if sitting {
+            Quat::from_rotation_x(SIT_TILT)
+        } else if moving {
             Quat::from_rotation_x((t * SWING_SPEED + leg.phase).sin() * MAX_SWING)
         } else {
             Quat::IDENTITY
