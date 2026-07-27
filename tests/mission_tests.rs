@@ -86,6 +86,8 @@ fn population_mission_completes() {
             carrying_wood: false,
             thirst: 0.0,
             bury_target: None,
+            fatigue: 0.0,
+            sick_left: 0.0,
         });
         next_id += 1;
     }

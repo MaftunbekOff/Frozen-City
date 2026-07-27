@@ -585,7 +585,14 @@ pub(crate) fn survivor_contribution(s: &Survivor, kind: BuildingKind, leader: Op
     } else {
         1.0
     };
-    profession_factor * level_factor
+    // V0.17: condition factors — tiredness scales the share down past
+    // `FATIGUE_TIRED`, illness cuts it hard (a sick survivor stays at their
+    // post but gets little done). Both are 1.0 for a rested, healthy
+    // survivor, so every pre-V0.17 balance expectation is unchanged on a
+    // colony that sleeps and stays well.
+    let condition_factor =
+        s.fatigue_factor() * if s.is_sick() { SICK_WORK_FACTOR } else { 1.0 };
+    profession_factor * level_factor * condition_factor
 }
 // `xp_level` endi `types`da yashaydi (klient ko'rinish-darajalari ham xuddi
 // shu funksiyani ishlatadi) — bu yerdagi chaqiruvlar `use crate::types::*`

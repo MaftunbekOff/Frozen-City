@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use frozen_city::game::types::PlayerCommand;
+use frozen_city::game::types::{PlayerCommand, FATIGUE_EXHAUSTED, FATIGUE_TIRED};
 use frozen_city::net::protocol::ClientMsg;
 
 use super::super::chat::ChatState;
@@ -215,13 +215,27 @@ pub(crate) fn update_roster(
                     None if s.move_target.is_some() => i18n_panels::status_moving(lang).to_string(),
                     None => i18n_panels::status_idle(lang).to_string(),
                 };
+                // V0.17: compact health suffix — sick outranks fatigue (a
+                // more urgent state), rested survivors get no suffix at all
+                // so a healthy roster stays uncluttered. Full detail (percent,
+                // days left) lives on the detail card (`card.rs`); this row
+                // is width-constrained, so just the tag.
+                let health_tag = if s.is_sick() {
+                    format!(" · {}", i18n_panels::sick_tag(lang))
+                } else if s.fatigue >= FATIGUE_EXHAUSTED {
+                    format!(" · {}", i18n_panels::fatigue_tier_exhausted(lang))
+                } else if s.fatigue >= FATIGUE_TIRED {
+                    format!(" · {}", i18n_panels::fatigue_tier_tired(lang))
+                } else {
+                    String::new()
+                };
                 // Leader gets its own status word ahead of the workplace —
                 // the settlement's one leader is always worth flagging in the
                 // list, not just on the detail card.
                 if state.leader == Some(s.id) {
-                    format!("{} — {}, {workplace}", profession_level_tag(s, lang), i18n_panels::status_leader(lang))
+                    format!("{} — {}, {workplace}{health_tag}", profession_level_tag(s, lang), i18n_panels::status_leader(lang))
                 } else {
-                    format!("{} — {workplace}", profession_level_tag(s, lang))
+                    format!("{} — {workplace}{health_tag}", profession_level_tag(s, lang))
                 }
             })
             .unwrap_or_default();

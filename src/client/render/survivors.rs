@@ -60,6 +60,7 @@ pub fn sync_survivors(
     mut dots: Query<(&SurvivorDot, &mut Wander, &mut SurvivorRig)>,
     mut gear: Query<(&SurvivorGear, &mut Visibility), Without<SurvivorCarry>>,
     mut carry: Query<(&SurvivorCarry, &mut Visibility), Without<SurvivorGear>>,
+    mut heads: Query<(&SurvivorHead, &mut MeshMaterial3d<StandardMaterial>)>,
     mut seen: Local<u64>,
 ) {
     let Some(state) = view.ready() else { return };
@@ -83,6 +84,11 @@ pub fn sync_survivors(
         .map(|s| s.id)
         .collect();
     hungry.sort_unstable();
+    // V0.17: same once-per-snapshot snapshot trick for the sleeping-in-a-bunk
+    // query (`sim::survivor_is_resting_with`) — every survivor asks it
+    // against the same bunk-holder set instead of each recomputing
+    // `GameState::bunked_ids` (an O(buildings) scan) themselves.
+    let bunked = state.bunked_ids();
 
     for s in &state.survivors {
         let is_leader = state.leader == Some(s.id);
@@ -100,6 +106,7 @@ pub fn sync_survivors(
             Ok(rank) => meal_slot(rank),
             Err(_) => (Vec3::ZERO, false),
         };
+        let sleeping = sim::survivor_is_resting_with(state, &gather, &bunked, s);
         let pos = survivor_sim_world(s) + meal_off;
         let variant = Profession::ALL
             .iter()
@@ -116,6 +123,7 @@ pub fn sync_survivors(
                 SurvivorRig {
                     carrying: s.assigned_building.is_some(),
                     sitting,
+                    sleeping,
                 },
                 Wander {
                     sim_pos: pos,
@@ -196,6 +204,27 @@ pub fn sync_survivors(
         }
     }
 
+    // V0.17: sick tint — swap the shared skin material handle (never a new
+    // `StandardMaterial` per survivor/frame; see `GameAssets::
+    // survivor_skin_sick_mat`'s doc comment), same id-keyed lookup the gear/
+    // carry loops above use.
+    for (h, mut mat) in &mut heads {
+        let sick = state
+            .survivors
+            .iter()
+            .find(|s| s.id == h.id)
+            .map(|s| s.is_sick())
+            .unwrap_or(false);
+        let want = if sick {
+            assets.survivor_skin_sick_mat.clone()
+        } else {
+            assets.survivor_skin_mat.clone()
+        };
+        if mat.0 != want {
+            mat.0 = want;
+        }
+    }
+
     let gone: Vec<u32> = viz
         .0
         .keys()
@@ -225,6 +254,10 @@ pub fn sync_survivors(
             }
             if rig.sitting != sitting {
                 rig.sitting = sitting;
+            }
+            let sleeping = sim::survivor_is_resting_with(state, &gather, &bunked, s);
+            if rig.sleeping != sleeping {
+                rig.sleeping = sleeping;
             }
         }
     }
@@ -345,11 +378,13 @@ fn spawn_survivor_body(
         MeshMaterial3d(coat),
         Transform::from_xyz(0.0, 0.34, 0.0).with_scale(Vec3::splat(0.62)),
     ));
-    // Head.
+    // Head. `SurvivorHead` lets `sync_survivors` retint it while sick,
+    // without a full rebuild of the rest of the body.
     p.spawn((
         Mesh3d(assets.sphere.clone()),
         MeshMaterial3d(assets.survivor_skin_mat.clone()),
         Transform::from_xyz(0.0, 0.52, 0.0).with_scale(Vec3::splat(0.19)),
+        SurvivorHead { id },
     ));
 
     if is_leader {
@@ -546,6 +581,13 @@ fn spawn_survivor_body(
 /// (`SIT_TILT`, well short of the 90° a literal bent knee would need) since
 /// each leg capsule rotates around its own center, not a hip joint — a full
 /// right angle would swing half the capsule below the floor.
+///
+/// V0.17: while `SurvivorRig::sleeping` (asleep in a Tent bunk — see
+/// `fc_game::sim::survivor_is_resting_with`), the same trick tilts further
+/// still (`SLEEP_TILT`) than the seated pose, reading as reclined rather
+/// than sitting up, checked ahead of `sitting` since the two never overlap
+/// in practice (meal windows are daytime, bunks are night-only) but a lying
+/// pose should win if they ever did.
 pub fn animate_survivor_legs(
     time: Res<Time>,
     parents: Query<&ChildOf>,
@@ -555,15 +597,18 @@ pub fn animate_survivor_legs(
     const SWING_SPEED: f32 = 9.0;
     const MAX_SWING: f32 = 0.55;
     const SIT_TILT: f32 = 0.85;
+    const SLEEP_TILT: f32 = 1.2;
     let t = time.elapsed_secs();
     let blend = 1.0 - (-10.0 * time.delta_secs()).exp();
     for (e, mut tr, leg) in &mut legs {
-        let (moving, sitting) = parents
+        let (moving, sitting, sleeping) = parents
             .get(e)
             .and_then(|co| walkers.get(co.parent()))
-            .map(|(w, rig)| (w.moving, rig.sitting))
-            .unwrap_or((false, false));
-        let target = if sitting {
+            .map(|(w, rig)| (w.moving, rig.sitting, rig.sleeping))
+            .unwrap_or((false, false, false));
+        let target = if sleeping {
+            Quat::from_rotation_x(SLEEP_TILT)
+        } else if sitting {
             Quat::from_rotation_x(SIT_TILT)
         } else if moving {
             Quat::from_rotation_x((t * SWING_SPEED + leg.phase).sin() * MAX_SWING)

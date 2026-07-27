@@ -52,6 +52,8 @@ fn central_settlers_never_hunger_or_die() {
         carrying_wood: false,
         thirst: 119.0, // would die of thirst in one bad day anywhere else
         bury_target: None,
+        fatigue: 0.0,
+        sick_left: 0.0,
     }];
     sim::inject_migrants(&mut state, 42, "Aziz", migrants);
     state.stock.food = 0.0;
@@ -88,6 +90,8 @@ fn inject_reids_sets_owner_and_caps_per_account() {
         carrying_wood: false,
         thirst: 10.0,
         bury_target: None,
+        fatigue: 0.0,
+        sick_left: 0.0,
     };
 
     // Two batches from "different personal worlds" with clashing ids.
@@ -228,6 +232,8 @@ fn central_authority_follows_settler_ownership() {
         carrying_wood: false,
         thirst: 10.0,
         bury_target: None,
+        fatigue: 0.0,
+        sick_left: 0.0,
     };
     sim::inject_migrants(&mut state, 1, "Aziz", vec![mk(1)]);
     sim::inject_migrants(&mut state, 2, "Vali", vec![mk(2)]);

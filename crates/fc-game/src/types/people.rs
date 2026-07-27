@@ -164,6 +164,45 @@ pub struct Survivor {
     /// role as a walk-then-act errand. Overrides the assigned-building walk
     /// goal but never `move_target`.
     pub bury_target: Option<u32>,
+    /// V0.17: 0..=100 tiredness. Climbs while awake (faster while assigned to
+    /// a building than while idle) and falls back overnight — fast in a Tent
+    /// bunk, slowly for anyone sleeping rough because housing ran out (see
+    /// `FATIGUE_*` in `types.rs` and the fatigue block in `sim::tick`).
+    /// Above `FATIGUE_TIRED` it scales this survivor's production share down
+    /// (see `survivor_contribution`), so Tents now buy work throughput on top
+    /// of the population cap they always gated.
+    ///
+    /// IMPORTANT: bincode serializes this struct positionally — every field
+    /// added from here on must stay APPENDED at the very end, or every
+    /// already-persisted world decodes its survivors as garbage. Old saves
+    /// load through `legacy::SurvivorV13` (the frozen pre-V0.17 mirror).
+    pub fatigue: f32,
+    /// V0.17: remaining ticks of an individual illness, 0 when healthy —
+    /// "remaining work" shape, same as `Building.build_left`, so a staffed
+    /// Hospital can burn it down faster than the natural course (see
+    /// `SICKNESS_TICKS`, `HOSPITAL_RECOVERY_PER_UNIT_DAY`). Replaces V0.3's
+    /// colony-wide flat HP drain: an outbreak (`GameState.disease_until`)
+    /// now infects individuals, who then carry and spread it themselves.
+    pub sick_left: f32,
+}
+
+impl Survivor {
+    /// V0.17: true while this survivor is carrying an illness.
+    pub fn is_sick(&self) -> bool {
+        self.sick_left > 0.0
+    }
+
+    /// V0.17: production scale from tiredness — 1.0 up to `FATIGUE_TIRED`,
+    /// then falling linearly to `FATIGUE_MIN_FACTOR` at a full 100. Shared by
+    /// `survivor_contribution` (the sim) and the roster card (the client), so
+    /// the number a player reads is the number the sim applies.
+    pub fn fatigue_factor(&self) -> f32 {
+        if self.fatigue <= super::FATIGUE_TIRED {
+            return 1.0;
+        }
+        let t = ((self.fatigue - super::FATIGUE_TIRED) / (100.0 - super::FATIGUE_TIRED)).clamp(0.0, 1.0);
+        1.0 - t * (1.0 - super::FATIGUE_MIN_FACTOR)
+    }
 }
 
 /// V0.11: a dead survivor's remains, left at the death location until a

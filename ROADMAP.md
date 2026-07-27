@@ -1,7 +1,7 @@
 # FROZEN CITY — Yo'l xaritasi (Roadmap)
 
 > Dolzarb rivojlanish rejasi. Dastlabki dizayn-hujjat: [PLAN.md](PLAN.md).
-> Yangilangan: 2026-07-12.
+> Yangilangan: 2026-07-27.
 
 ## Hozirgi holat (V0.1–V0.7 — barchasi tayyor; keyingisi V1.0)
 
@@ -487,6 +487,48 @@ edi (V0.6 → V1.0); alohida bosqich sifatida keyin qo'shildi.
       buriladi. Chodir yoniga ham kichik yashik juftligi + mo'yna gilam
       qo'shildi (sof bezak). Yangi `tests/routine_tests.rs` testlari bilan.
       Qoldi: tutun sayqal, o'tishlar.
+- [x] **Aholi hayoti: charchoq/uyqu va shaxsiy kasallik** (V0.17, 2026-07-27):
+      ikki yangi survivor o'lchagichi — `Survivor::fatigue` (0..=100) va
+      `Survivor::sick_left` (qolgan kasallik tiklari, `Building.build_left`
+      shaklida).
+      **Charchoq:** kunduzi to'planadi (biriktirilgan ishchi
+      `FATIGUE_WORK_PER_DAY`, bo'sh turgan kishi ancha sekin), kechasi
+      tushadi — Chodir joyi bor kishi tez (`FATIGUE_TENT_REST_PER_DAY`),
+      joy yetmagani esa yotgan yerida sekin (`FATIGUE_ROUGH_REST_PER_DAY`).
+      Kim joy oladi — `GameState::bunked_ids` (ro'yxat tartibida, birinchi
+      `housing_capacity()` kishi), ayni shu to'plamdan yurish maqsadi ham
+      olinadi, shuning uchun ko'rinish va mexanika hech qachon ajralmaydi.
+      `FATIGUE_TIRED`dan yuqorida ishlab chiqarish ulushi chiziqli tushadi
+      (`Survivor::fatigue_factor`, `FATIGUE_MIN_FACTOR` gacha) — endi Chodir
+      faqat aholi shiftini emas, ish unumini ham sotib oladi. **Kechki
+      smena uyquga boradi:** yurish ustuvorligida uyqu maqsadi
+      biriktirilgan binodan YUQORI turadi (ishlab chiqarish `workers`
+      soniga bog'liq, joylashuvga emas — koloniya hech narsa yo'qotmaydi),
+      faqat yog'och ko'tarib ketayotgan yoki pech hali yonmagan holat
+      istisno (ochilish inqirozi to'xtab qolmasin).
+      **Kasallik endi shaxsiy:** V0.3'ning `disease_until` voqeasi butun
+      koloniyaning HP'sini bir tekis so'rmaydi — u faqat kunlik yuqish
+      o'lchovini ochadi; kasallangan odam o'zi HP yo'qotadi
+      (`SICK_HP_PER_DAY`), `SICK_WORK_FACTOR` bilan zo'rg'a ishlaydi va
+      atrofdagilarga yuqtiradi (`CONTAGION_CHANCE_PER_SICK_PER_DAY`),
+      ya'ni epidemiya rasmiy "tugagan"idan keyin ham aylanib yurishi
+      mumkin. Holdan toygan odam osonroq kasal bo'ladi
+      (`EXHAUSTION_SICK_MULTIPLIER`) — ikki tizim bir-birini oziqlantiradi.
+      Ishchili Kasalxona tabiiy kechishni tezlashtiradi
+      (`HOSPITAL_RECOVERY_PER_UNIT_DAY`; o'lchov — Medic/XP bonusi bilan
+      birga `survivor_contribution` birliklari, ya'ni tayyorlangan Medic
+      sezilarli tez davolaydi): parvarishsiz ~2 kun, ishchili Kasalxona
+      bilan ~0.8 kun. Ikkalasi ham morale'ga qo'shimcha bosim beradi
+      (`MORALE_EXHAUSTION_PER_DAY`, `MORALE_SICK_PER_DAY`).
+      Yuqish tanlovi alohida `GameState::illness_rng` oqimidan olinadi —
+      mavjud `rng`/`event_rng` ketma-ketliklari (kelish, tug'ilish, ob-havo)
+      hech qachon siljimaydi. Saqlov **FCWORLD14** (`legacy::SurvivorV13` +
+      `legacy::GameStateV13` muzlatilgan nusxalari orqali migratsiya; eski
+      olamlar dam olgan va sog'lom holda yuklanadi, illness oqimi olamning
+      `rng`idan deterministik urug'lanadi). Testlar:
+      `tests/fatigue_tests.rs`, `tests/illness_tests.rs`,
+      `persist::v13_save_migrates`; balans zondi:
+      `examples/v017_balance.rs`.
 - [x] **Clash-of-Clans uslubidagi joylashtirish oqimi + bino yo'nalishi**
       (V0.16, 2026-07-26): bino endi bosgan zahoti QURILMAYDI — birinchi bosish
       uni `PendingPlace`ga tashlaydi (arvoh o'sha taylda muzlaydi, oldi tomonini

@@ -72,3 +72,9 @@ pub struct CardUnassignBtn;
 
 #[derive(Component)]
 pub struct CardUnassignLabel;
+
+/// V0.17: fatigue-bar fill inside the detail card — width driven as a
+/// percent of `Survivor::fatigue`, color banded by the same three tiers the
+/// card's fatigue text line uses. Mirrors `ui::MoraleBarFill`.
+#[derive(Component)]
+pub struct CardFatigueFill;

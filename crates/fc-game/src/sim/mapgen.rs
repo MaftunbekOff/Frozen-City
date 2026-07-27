@@ -169,6 +169,7 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
         graves: Vec::new(),
         livestock: Livestock { cow: COW_START, sheep: SHEEP_START },
         pending_caravan: None,
+        illness_rng: Rng::new(seed.rotate_left(37) ^ ILLNESS_RNG_SEED).0,
     };
     push_event(
         &mut state,
@@ -296,6 +297,11 @@ pub(crate) fn new_survivor(rng: &mut Rng, next_id: &mut u32) -> Survivor {
         chop_target: None,
         carrying_wood: false,
         bury_target: None,
+        // V0.17: everyone starts rested and healthy — a newcomer walking in
+        // out of the cold is the one moment the colony's own conditions
+        // haven't touched them yet.
+        fatigue: 0.0,
+        sick_left: 0.0,
     }
 }
 

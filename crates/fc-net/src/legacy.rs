@@ -163,6 +163,87 @@ impl From<&Survivor> for SurvivorV8 {
     }
 }
 
+/// `Survivor`'s shape through V13 — every field the live `Survivor` has
+/// today except `fatigue`/`sick_left`, added in V14 (V0.17) for the
+/// fatigue/illness systems. `GameStateV9`..`GameStateV12` all predate that
+/// change and so mirror their survivors as this frozen type instead of
+/// reusing the live one (same reasoning as `SurvivorV8`/`StockpileV8`).
+#[derive(Serialize, Deserialize, Clone)]
+pub struct SurvivorV13 {
+    pub id: u32,
+    pub name: String,
+    pub hp: f32,
+    pub hunger: f32,
+    pub assigned_building: Option<u32>,
+    pub owner: Option<i64>,
+    pub x: f32,
+    pub y: f32,
+    pub move_target: Option<(u8, u8)>,
+    pub profession: Profession,
+    pub xp: f32,
+    pub trained_kind: Option<fc_game::types::BuildingKind>,
+    pub chop_target: Option<(u8, u8)>,
+    pub carrying_wood: bool,
+    pub thirst: f32,
+    pub bury_target: Option<u32>,
+}
+
+impl From<SurvivorV13> for Survivor {
+    fn from(s: SurvivorV13) -> Survivor {
+        Survivor {
+            id: s.id,
+            name: s.name,
+            hp: s.hp,
+            hunger: s.hunger,
+            assigned_building: s.assigned_building,
+            owner: s.owner,
+            x: s.x,
+            y: s.y,
+            move_target: s.move_target,
+            profession: s.profession,
+            xp: s.xp,
+            trained_kind: s.trained_kind,
+            chop_target: s.chop_target,
+            carrying_wood: s.carrying_wood,
+            thirst: s.thirst,
+            bury_target: s.bury_target,
+            // Pre-V0.17 worlds carry no tiredness or illness history — the
+            // same "fresh start, no retroactive penalty" default every
+            // earlier hop used for a newly-added meter (see `thirst` in the
+            // V8 -> V9 hop). Zero is the SAFE state for both: a rested,
+            // healthy colony, never a colony that wakes up exhausted and
+            // bedridden because its save predated the mechanic.
+            fatigue: 0.0,
+            sick_left: 0.0,
+        }
+    }
+}
+
+/// Convenience for tests fabricating legacy bytes from a live `GameState` —
+/// drops exactly the two fields V13 predates.
+impl From<&Survivor> for SurvivorV13 {
+    fn from(s: &Survivor) -> SurvivorV13 {
+        SurvivorV13 {
+            id: s.id,
+            name: s.name.clone(),
+            hp: s.hp,
+            hunger: s.hunger,
+            assigned_building: s.assigned_building,
+            owner: s.owner,
+            x: s.x,
+            y: s.y,
+            move_target: s.move_target,
+            profession: s.profession,
+            xp: s.xp,
+            trained_kind: s.trained_kind,
+            chop_target: s.chop_target,
+            carrying_wood: s.carrying_wood,
+            thirst: s.thirst,
+            bury_target: s.bury_target,
+        }
+    }
+}
+
 /// `Stockpile`'s shape through V8 — five f32s, no `water` (added in V9 for
 /// the thirst/Well system). Bincode is positional, so once the live
 /// `Stockpile` grew a field, `GameStateV8` (which predates V9) needed its
@@ -1060,7 +1141,7 @@ pub struct GameStateV9 {
     pub win_days: u32,
     pub tiles: Vec<Tile>,
     pub buildings: Vec<BuildingV12>,
-    pub survivors: Vec<Survivor>,
+    pub survivors: Vec<SurvivorV13>,
     pub stock: StockpileV10,
     pub furnace_level: u8,
     pub furnace_lit: bool,
@@ -1105,7 +1186,7 @@ impl From<GameStateV8> for GameStateV9 {
             survivors: v8
                 .survivors
                 .into_iter()
-                .map(|s| Survivor {
+                .map(|s| SurvivorV13 {
                     id: s.id,
                     name: s.name,
                     hp: s.hp,
@@ -1189,7 +1270,7 @@ pub struct GameStateV10 {
     pub win_days: u32,
     pub tiles: Vec<Tile>,
     pub buildings: Vec<BuildingV12>,
-    pub survivors: Vec<Survivor>,
+    pub survivors: Vec<SurvivorV13>,
     pub stock: StockpileV10,
     pub furnace_level: u8,
     pub furnace_lit: bool,
@@ -1287,7 +1368,7 @@ pub struct GameStateV11 {
     pub win_days: u32,
     pub tiles: Vec<Tile>,
     pub buildings: Vec<BuildingV12>,
-    pub survivors: Vec<Survivor>,
+    pub survivors: Vec<SurvivorV13>,
     pub stock: Stockpile,
     pub furnace_level: u8,
     pub furnace_lit: bool,
@@ -1395,7 +1476,9 @@ impl From<GameStateV11> for GameState {
             // V11 buildings predate the `facing` field (V13) — lift each
             // frozen `BuildingV12` to a live south-facing `Building`.
             buildings: v11.buildings.into_iter().map(Building::from).collect(),
-            survivors: v11.survivors,
+            // V14 (V0.17) appended `fatigue`/`sick_left` — lift each frozen
+            // `SurvivorV13` to a live, rested-and-healthy `Survivor`.
+            survivors: v11.survivors.into_iter().map(Survivor::from).collect(),
             stock: v11.stock,
             furnace_level: v11.furnace_level,
             furnace_lit: v11.furnace_lit,
@@ -1429,6 +1512,12 @@ impl From<GameStateV11> for GameState {
             graves: v11.graves,
             livestock: v11.livestock,
             pending_caravan: v11.pending_caravan,
+            // Pre-V0.17 saves have no illness stream of their own. Seeded
+            // deterministically off the world's existing `rng` (the same
+            // rotate/xor `mapgen::new_game` uses), so a given save always
+            // migrates to the same stream instead of every server restart
+            // re-rolling the colony's illness future.
+            illness_rng: fc_game::rng::Rng::new(v11.rng.rotate_left(37) ^ fc_game::types::ILLNESS_RNG_SEED).0,
         }
     }
 }
@@ -1444,7 +1533,7 @@ pub struct GameStateV12 {
     pub win_days: u32,
     pub tiles: Vec<Tile>,
     pub buildings: Vec<BuildingV12>,
-    pub survivors: Vec<Survivor>,
+    pub survivors: Vec<SurvivorV13>,
     pub stock: Stockpile,
     pub furnace_level: u8,
     pub furnace_lit: bool,
@@ -1489,7 +1578,9 @@ impl From<GameStateV12> for GameState {
             // The only field that changed shape V12->V13: lift each frozen
             // `BuildingV12` to a live south-facing `Building`.
             buildings: v12.buildings.into_iter().map(Building::from).collect(),
-            survivors: v12.survivors,
+            // V14 (V0.17) appended `fatigue`/`sick_left` — lift each frozen
+            // `SurvivorV13` to a live, rested-and-healthy `Survivor`.
+            survivors: v12.survivors.into_iter().map(Survivor::from).collect(),
             stock: v12.stock,
             furnace_level: v12.furnace_level,
             furnace_lit: v12.furnace_lit,
@@ -1523,6 +1614,12 @@ impl From<GameStateV12> for GameState {
             graves: v12.graves,
             livestock: v12.livestock,
             pending_caravan: v12.pending_caravan,
+            // Pre-V0.17 saves have no illness stream of their own. Seeded
+            // deterministically off the world's existing `rng` (the same
+            // rotate/xor `mapgen::new_game` uses), so a given save always
+            // migrates to the same stream instead of every server restart
+            // re-rolling the colony's illness future.
+            illness_rng: fc_game::rng::Rng::new(v12.rng.rotate_left(37) ^ fc_game::types::ILLNESS_RNG_SEED).0,
         }
     }
 }
@@ -1613,5 +1710,101 @@ impl From<GameStateV2> for GameState {
 impl From<GameStateV1> for GameState {
     fn from(v1: GameStateV1) -> GameState {
         GameStateV2::from(v1).into()
+    }
+}
+
+/// V13 (pre-fatigue/illness) — every field the live `GameState` has today
+/// except `illness_rng`, with survivors in their pre-V0.17 shape. What
+/// `persist.rs` wrote under the `FCWORLD13` header before V14 (V0.17) added
+/// `Survivor::fatigue`/`sick_left` and the isolated illness RNG stream.
+/// `Building` is unchanged in this hop (V13 is the first version WITH
+/// `facing`), so it reuses the live type.
+#[derive(Serialize, Deserialize)]
+pub struct GameStateV13 {
+    pub tick: u64,
+    pub win_days: u32,
+    pub tiles: Vec<Tile>,
+    pub buildings: Vec<Building>,
+    pub survivors: Vec<SurvivorV13>,
+    pub stock: Stockpile,
+    pub furnace_level: u8,
+    pub furnace_lit: bool,
+    pub cold_snap: bool,
+    pub players: Vec<PlayerInfo>,
+    pub phase: GamePhase,
+    pub events: Vec<GameEvent>,
+    pub total_events: u64,
+    pub chat: Vec<ChatLine>,
+    pub total_chat: u64,
+    pub pings: Vec<Ping>,
+    pub missions: Vec<Mission>,
+    pub tunnel: TunnelState,
+    pub graduated: bool,
+    pub central: bool,
+    pub techs: Vec<Tech>,
+    pub disease_until: u64,
+    pub blizzard_until: u64,
+    pub pending_event: Option<CaravanOffer>,
+    pub event_rng: u64,
+    pub owner_id: Option<u64>,
+    pub next_id: u32,
+    pub rng: u64,
+    pub central_ledger: Vec<LedgerEntry>,
+    pub leader: Option<u32>,
+    pub mourning_until: u64,
+    pub morale: f32,
+    pub pending_migrant: Option<TunnelMigrant>,
+    pub wildlife: Wildlife,
+    pub corpses: Vec<Corpse>,
+    pub graves: Vec<Grave>,
+    pub livestock: Livestock,
+    pub pending_caravan: Option<TradeCaravan>,
+}
+
+impl From<GameStateV13> for GameState {
+    fn from(v13: GameStateV13) -> GameState {
+        GameState {
+            tick: v13.tick,
+            win_days: v13.win_days,
+            tiles: v13.tiles,
+            buildings: v13.buildings,
+            survivors: v13.survivors.into_iter().map(Survivor::from).collect(),
+            stock: v13.stock,
+            furnace_level: v13.furnace_level,
+            furnace_lit: v13.furnace_lit,
+            cold_snap: v13.cold_snap,
+            players: v13.players,
+            phase: v13.phase,
+            events: v13.events,
+            total_events: v13.total_events,
+            chat: v13.chat,
+            total_chat: v13.total_chat,
+            pings: v13.pings,
+            missions: v13.missions,
+            tunnel: v13.tunnel,
+            graduated: v13.graduated,
+            central: v13.central,
+            techs: v13.techs,
+            disease_until: v13.disease_until,
+            blizzard_until: v13.blizzard_until,
+            pending_event: v13.pending_event,
+            event_rng: v13.event_rng,
+            owner_id: v13.owner_id,
+            next_id: v13.next_id,
+            rng: v13.rng,
+            central_ledger: v13.central_ledger,
+            leader: v13.leader,
+            mourning_until: v13.mourning_until,
+            morale: v13.morale,
+            pending_migrant: v13.pending_migrant,
+            wildlife: v13.wildlife,
+            corpses: v13.corpses,
+            graves: v13.graves,
+            livestock: v13.livestock,
+            pending_caravan: v13.pending_caravan,
+            // See the identical note on the V12 hop: a deterministic
+            // stream seeded off this world's existing `rng`.
+            illness_rng: fc_game::rng::Rng::new(v13.rng.rotate_left(37) ^ fc_game::types::ILLNESS_RNG_SEED).0,
+        }
     }
 }

@@ -106,6 +106,15 @@ pub struct GameState {
     /// V0.13: a trade caravan currently on the road through the Tunnel, if
     /// any — see [`TradeCaravan`], `PlayerCommand::DispatchTradeCaravan`.
     pub pending_caravan: Option<TradeCaravan>,
+    /// V0.17: RNG stream for the once-daily infection roll (see
+    /// `ILLNESS_TICK`). Deliberately its own stream rather than a few extra
+    /// draws from `rng`/`event_rng`: illness rolls happen on days those two
+    /// streams already drive arrivals, births and weather, and sharing one
+    /// would silently re-sequence every existing deterministic outcome.
+    ///
+    /// IMPORTANT: bincode serializes this struct positionally — new fields
+    /// stay APPENDED here at the end (same rule as `Survivor`).
+    pub illness_rng: u64,
 }
 
 impl GameState {
@@ -469,6 +478,28 @@ impl GameState {
 
     pub fn idle_workers(&self) -> u32 {
         (self.survivors.len() as u32).saturating_sub(self.total_workers())
+    }
+
+    /// V0.17: how many survivors are currently ill.
+    pub fn sick_count(&self) -> usize {
+        self.survivors.iter().filter(|s| s.is_sick()).count()
+    }
+
+    /// V0.17: how many survivors are at or past `FATIGUE_EXHAUSTED`.
+    pub fn exhausted_count(&self) -> usize {
+        self.survivors.iter().filter(|s| s.fatigue >= FATIGUE_EXHAUSTED).count()
+    }
+
+    /// V0.17: ids of the survivors who have a Tent bunk tonight — the first
+    /// `housing_capacity()` of them in roster order, which is stable across
+    /// ticks (ids only ever grow, and the roster is never reordered), so a
+    /// survivor doesn't lose and regain their bed from one tick to the next.
+    /// Everyone else sleeps rough where they stand: the sim uses this to pick
+    /// the rest rate, and `routine_goal` uses it to decide who even walks to
+    /// a Tent, so the picture and the mechanic can never disagree.
+    pub fn bunked_ids(&self) -> std::collections::HashSet<u32> {
+        let cap = self.housing_capacity();
+        self.survivors.iter().take(cap).map(|s| s.id).collect()
     }
 
     pub fn housing_capacity(&self) -> usize {

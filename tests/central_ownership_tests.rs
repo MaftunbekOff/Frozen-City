@@ -40,6 +40,8 @@ fn settler(id: u32) -> Survivor {
         carrying_wood: false,
         thirst: 10.0,
         bury_target: None,
+        fatigue: 0.0,
+        sick_left: 0.0,
     }
 }
 

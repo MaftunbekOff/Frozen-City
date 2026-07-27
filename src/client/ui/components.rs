@@ -22,6 +22,10 @@ pub enum HudField {
     /// four tiers, plus a short "Mourning -15%" indicator while the city
     /// mourns a dead leader (`GameState::mourning_active`).
     Morale,
+    /// V0.17: compact "Kasal N   Holdan toygan M" alert (`GameState::
+    /// sick_count`/`exhausted_count`) — empty text, so effectively invisible,
+    /// while both counts are zero.
+    Health,
 }
 
 #[derive(Component)]

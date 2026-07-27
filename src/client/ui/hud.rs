@@ -517,6 +517,14 @@ fn spawn_top_bar_desktop(commands: &mut Commands, ff: theme::FormFactor, lang: L
             res_chip(p, RES_WATER, i18n_hud::hud_water(0, lang), HudField::Water);
             res_chip(p, RES_GOLD, i18n_hud::hud_gold(0, lang), HudField::Gold);
             res_chip(p, theme::ACCENT_ICE, i18n_hud::hud_pop(0, 0, lang), HudField::Pop);
+            // V0.17: sick/exhausted alert — plain text (no chip/dot) so an
+            // empty string, the common case, truly takes up no row space,
+            // same convention the Clock/Temp entries below already use.
+            p.spawn((
+                theme::text("", FS_SMALL, theme::DANGER),
+                TextLayout::new(Justify::Left, LineBreak::NoWrap),
+                HudField::Health,
+            ));
             p.spawn(Node {
                 flex_grow: 1.0,
                 ..default()
@@ -797,6 +805,9 @@ fn spawn_top_bar_mobile(commands: &mut Commands, lang: Lang) {
                     ..default()
                 });
                 row.spawn((hud_text_mobile(i18n_hud::hud_pop(0, 0, lang), TEXT_PRIMARY), HudField::Pop));
+                // V0.17: sick/exhausted alert, mirrors the desktop entry —
+                // empty text while both counts are zero.
+                row.spawn((hud_text_mobile("", theme::DANGER), HudField::Health));
             });
             // Row 2: clock, temp, furnace, morale, world-switch, Menu.
             p.spawn(Node {
@@ -933,6 +944,8 @@ pub(crate) struct HudCache {
     furnace: Option<(u8, bool, Lang)>,
     events: Option<u64>,
     morale: Option<(i32, bool, Lang)>,
+    /// V0.17: (sick count, exhausted count, lang) backing `HudField::Health`.
+    health: Option<(usize, usize, Lang)>,
 }
 
 pub fn hud_update(
@@ -1078,6 +1091,13 @@ pub fn hud_update(
                     }
                     let mourn_tag = if mourning { i18n_hud::hud_mourning_tag(lang) } else { "" };
                     text.0 = i18n_hud::hud_morale(state.morale, tier, mourn_tag, lang);
+                }
+            }
+            HudField::Health => {
+                let key = (state.sick_count(), state.exhausted_count(), lang);
+                if cache.health != Some(key) {
+                    cache.health = Some(key);
+                    text.0 = i18n_hud::hud_health_alert(key.0, key.1, lang);
                 }
             }
             HudField::Events => {

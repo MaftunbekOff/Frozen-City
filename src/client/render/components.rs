@@ -146,6 +146,10 @@ pub struct SurvivorRig {
     /// this into a seated pose instead of the idle/walk cycle. Render-only;
     /// never affects sim state.
     pub sitting: bool,
+    /// V0.17: asleep in a Tent bunk right now (`fc_game::sim::
+    /// survivor_is_resting_with`) — `animate_survivor_legs` folds this into a
+    /// deeper reclined pose, same render-only convention as `sitting`.
+    pub sleeping: bool,
 }
 
 /// One of a survivor's two legs — a direct child of the [`SurvivorDot`]
@@ -162,6 +166,16 @@ pub struct SurvivorLeg {
 /// id-keyed visibility toggle, driven from `sync_survivors`).
 #[derive(Component)]
 pub struct SurvivorCarry {
+    pub id: u32,
+}
+
+/// On a survivor's head mesh: `sync_survivors` swaps its material between
+/// `GameAssets::survivor_skin_mat` and the pale `survivor_skin_sick_mat`
+/// depending on `Survivor::is_sick()` — same id-keyed per-frame refresh
+/// trick as [`SurvivorCarry`], just swapping a material handle instead of
+/// toggling `Visibility`.
+#[derive(Component)]
+pub struct SurvivorHead {
     pub id: u32,
 }
 

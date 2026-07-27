@@ -62,6 +62,29 @@ pub fn hud_pop(pop: usize, idle: u32, l: Lang) -> String {
     }
 }
 
+/// V0.17: compact top-bar health alert — "Kasal N" / "Holdan toygan M", each
+/// half omitted while its count (`GameState::sick_count`/`exhausted_count`)
+/// is zero, and the whole string empty when both are — so this HUD field
+/// only ever takes up space while the colony actually has a problem.
+pub fn hud_health_alert(sick: usize, exhausted: usize, l: Lang) -> String {
+    let mut parts = Vec::new();
+    if sick > 0 {
+        parts.push(match l {
+            Lang::Uz => format!("Kasal {sick}"),
+            Lang::En => format!("Sick {sick}"),
+            Lang::Ru => format!("Болен {sick}"),
+        });
+    }
+    if exhausted > 0 {
+        parts.push(match l {
+            Lang::Uz => format!("Holdan toygan {exhausted}"),
+            Lang::En => format!("Exhausted {exhausted}"),
+            Lang::Ru => format!("Изнурены {exhausted}"),
+        });
+    }
+    parts.join("   ")
+}
+
 /// `day`/`win_days` — current/target day; `hh`/`mm` — in-game clock.
 pub fn hud_clock(day: u32, win_days: u32, hh: u32, mm: u32, l: Lang) -> String {
     match l {

@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use frozen_city::game::types::PlayerCommand;
+use frozen_city::game::types::{PlayerCommand, FATIGUE_EXHAUSTED, FATIGUE_TIRED, TICKS_PER_DAY};
 use frozen_city::net::protocol::ClientMsg;
 
 use super::super::i18n::Lang;
@@ -70,6 +70,23 @@ pub(crate) fn spawn_card(mut commands: Commands) {
                 });
             });
             p.spawn((theme::text("", theme::FS_SMALL, theme::TEXT_MUTED), CardText::Stats));
+            // V0.17: fatigue bar — same `stat_bar_track` widget the bottom-
+            // center morale bar uses (`ui::hud::spawn_morale_bar`), just
+            // sized to the card's own width; `update_card` drives the
+            // fill's percent width and tier color.
+            p.spawn(theme::stat_bar_track(Val::Px(216.0), 8.0))
+                .with_children(|track| {
+                    track.spawn((
+                        Node {
+                            width: Val::Percent(0.0),
+                            height: Val::Percent(100.0),
+                            border_radius: BorderRadius::MAX,
+                            ..default()
+                        },
+                        BackgroundColor(theme::SUCCESS),
+                        CardFatigueFill,
+                    ));
+                });
             p.spawn((
                 Button,
                 Node {
@@ -134,6 +151,7 @@ pub(crate) fn update_card(
         &mut Text,
         (With<CardUnassignLabel>, Without<CardText>, Without<CardLeaderLabel>),
     >,
+    mut fatigue_fill: Query<(&mut Node, &mut BackgroundColor), (With<CardFatigueFill>, Without<CardRoot>)>,
 ) {
     let lang = *lang;
     let Some(state) = view.state.as_ref() else { return };
@@ -158,6 +176,16 @@ pub(crate) fn update_card(
     }
     let Some(s) = survivor else { return };
 
+    // V0.17: fatigue tier — same three-way banding for the card's text tag
+    // and its bar's fill color, computed once here so both stay in sync.
+    let (fatigue_tag, fatigue_color) = if s.fatigue >= FATIGUE_EXHAUSTED {
+        (i18n_panels::fatigue_tier_exhausted(lang), theme::DANGER)
+    } else if s.fatigue >= FATIGUE_TIRED {
+        (i18n_panels::fatigue_tier_tired(lang), theme::ACCENT_WARM)
+    } else {
+        (i18n_panels::fatigue_tier_rested(lang), theme::SUCCESS)
+    };
+
     for (mut t, kind) in &mut texts {
         let new = match kind {
             CardText::Name => s.name.clone(),
@@ -171,16 +199,36 @@ pub(crate) fn update_card(
                     None => i18n_panels::status_idle(lang).to_string(),
                 };
                 let leader_tag = if state.leader == Some(s.id) { i18n_panels::leader_tag(lang) } else { "" };
+                // Sick line only appears while `is_sick()` — `sick_left`
+                // (ticks) converted to in-game days for the player, same unit
+                // the rest of the UI reasons in (`GameState::day`, TICKS_PER_DAY).
+                let sick_line = if s.is_sick() {
+                    let days_left = s.sick_left / TICKS_PER_DAY as f32;
+                    format!("\n{}", i18n_panels::card_sick_line(days_left, lang))
+                } else {
+                    String::new()
+                };
                 format!(
-                    "{}{leader_tag}\n{}\n{}",
+                    "{}{leader_tag}\n{}\n{}{sick_line}\n{}",
                     profession_level_tag(s, lang),
                     i18n_panels::card_stats_line(s.hp, s.hunger, lang),
+                    i18n_panels::card_fatigue_line(s.fatigue, fatigue_tag, lang),
                     i18n_panels::card_working(&workplace, lang),
                 )
             }
         };
         if t.0 != new {
             t.0 = new;
+        }
+    }
+
+    if let Ok((mut node, mut bg)) = fatigue_fill.single_mut() {
+        let w = Val::Percent(s.fatigue.clamp(0.0, 100.0));
+        if node.width != w {
+            node.width = w;
+        }
+        if bg.0 != fatigue_color {
+            bg.0 = fatigue_color;
         }
     }
 

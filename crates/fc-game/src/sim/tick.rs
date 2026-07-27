@@ -453,7 +453,6 @@ pub fn tick(state: &mut GameState) {
         0.0
     };
     let mut deaths: Vec<(u32, String, &'static str)> = Vec::new();
-    let disease = state.disease_active();
 
     // --- Movement + XP accrual: needs a building lookup snapshot taken
     // before the loop below (can't borrow `state.buildings` immutably while
@@ -498,11 +497,17 @@ pub fn tick(state: &mut GameState) {
     // Standing just outside reads as "waiting at the door" and keeps both
     // working. See `gather_points` for the shared formula.
     let (kitchen_pos, tent_positions) = gather_points(state);
+    // V0.17: who has a bunk tonight — snapshotted before the survivors loop
+    // for the same borrow-splitting reason as the lookups above.
+    let bunked = state.bunked_ids();
     // Snapshotted (not passed as `&GameState`) for the same borrow-splitting
     // reason as the lookups above — the survivors loop below holds `state`
     // mutably the whole time.
     let routine_time_of_day = state.time_of_day();
     let routine_is_night = state.is_night();
+    // V0.17: nobody sleeps while the furnace is still dark — the whole colony
+    // is one survivor and one errand at that point (see the sleep leg below).
+    let routine_furnace_lit = state.furnace_lit;
     // Deferred mutations the chop/carry cycle collects instead of touching
     // `state.tiles`/`state.buildings`/`state.stock` directly from inside the
     // survivors loop (applied once the loop's mutable borrow of
@@ -524,14 +529,26 @@ pub fn tick(state: &mut GameState) {
         let goal = s.move_target.map(|(x, y)| (x as f32 + 0.5, y as f32 + 0.5))
             .or_else(|| s.chop_target.map(|(x, y)| (x as f32 + 0.5, y as f32 + 0.5)))
             .or_else(|| s.bury_target.and_then(|id| corpse_lookup.get(&id)).copied())
+            // V0.17: the night shift goes to bed. Placed ABOVE the assigned
+            // building on purpose — this is the only way an assigned
+            // survivor's `fatigue` ever gets the fast Tent recovery rate,
+            // and it costs the colony no output at all (production reads
+            // `Building.workers`, never survivor positions).
+            .or_else(|| {
+                // Never while carrying a log home to an unlit furnace: that
+                // errand IS the opening crisis, and parking the carrier in a
+                // Tent overnight would stall it until morning.
+                if s.carrying_wood || !routine_furnace_lit {
+                    return None;
+                }
+                sleep_goal(routine_is_night, bunked.contains(&s.id), s, &tent_positions)
+            })
             .or_else(|| {
                 s.assigned_building
                     .and_then(|id| building_lookup.get(&id))
                     .map(|(_, bx, by, _)| (*bx as f32 + 0.5, *by as f32 + 0.5))
             })
-            .or_else(|| {
-                routine_goal(routine_time_of_day, routine_is_night, s, kitchen_pos, &tent_positions)
-            });
+            .or_else(|| routine_goal(routine_time_of_day, kitchen_pos));
         let mut arrived_at_chop_target = false;
         let mut arrived_carrying_home = false;
         if let Some((gx, gy)) = goal {
@@ -691,7 +708,52 @@ pub fn tick(state: &mut GameState) {
 
     let mut starving_present = false;
     let mut thirsty_present = false;
+    // V0.17: colony-wide condition flags for the morale block below, plus the
+    // names of everyone whose illness ended this tick (pushed as events after
+    // the loop, which needs `state` back).
+    let mut exhausted_present = false;
+    let mut sick_present = false;
+    let mut recoveries: Vec<String> = Vec::new();
+    // V0.17: hospital care now does two jobs — the flat HP top-up it always
+    // did (`care_per_tick`, computed above) and burning illness down faster
+    // than its natural course. Both draw on the same staffed-hospital units.
+    let illness_recovery_per_tick =
+        1.0 + hospital_units * HOSPITAL_RECOVERY_PER_UNIT_DAY / TICKS_PER_DAY as f32;
+    let fatigue_night = state.is_night();
     for (i, s) in state.survivors.iter_mut().enumerate() {
+        // --- V0.17: fatigue. Awake work/idle accrual by day, recovery by
+        // night at one of two rates depending on whether this survivor holds
+        // a Tent bunk (`bunked`, the same set the sleep walk above used).
+        let fatigue_per_day = if fatigue_night {
+            if bunked.contains(&s.id) {
+                -FATIGUE_TENT_REST_PER_DAY
+            } else {
+                -FATIGUE_ROUGH_REST_PER_DAY
+            }
+        } else if s.assigned_building.is_some() {
+            FATIGUE_WORK_PER_DAY
+        } else {
+            FATIGUE_IDLE_PER_DAY
+        };
+        s.fatigue = (s.fatigue + fatigue_per_day / TICKS_PER_DAY as f32).clamp(0.0, 100.0);
+        if s.fatigue >= FATIGUE_EXHAUSTED {
+            exhausted_present = true;
+        }
+
+        // --- V0.17: illness runs its course (faster with a staffed
+        // Hospital), draining HP the whole time. Recovery is logged once,
+        // on the tick it completes.
+        if s.is_sick() {
+            sick_present = true;
+            s.sick_left = (s.sick_left - illness_recovery_per_tick).max(0.0);
+            // Per DAY, unlike the hunger/thirst/cold drains just below, which
+            // are all written as per-hour rates against `tph`.
+            s.hp -= SICK_HP_PER_DAY / TICKS_PER_DAY as f32;
+            if !s.is_sick() {
+                recoveries.push(s.name.clone());
+            }
+        }
+
         s.hunger = (s.hunger + hunger_per_tick).min(120.0);
         if s.hunger >= 25.0 && state.stock.food >= portion {
             state.stock.food -= portion;
@@ -739,9 +801,10 @@ pub fn tick(state: &mut GameState) {
         if care_per_tick > 0.0 {
             s.hp = (s.hp + care_per_tick).min(100.0);
         }
-        if disease {
-            s.hp -= DISEASE_HP_PER_DAY / TICKS_PER_DAY as f32;
-        }
+        // V0.17: an active outbreak no longer drains everyone's HP directly —
+        // `disease_until` is now just the window during which the infection
+        // roll below fires; the HP cost lands on the people who actually fell
+        // ill (`sick_left`, handled at the top of this loop).
         if s.hp <= 0.0 {
             // Attribute the death to the most likely cause for the event
             // log — thirst checked first since it's calibrated to become
@@ -750,7 +813,9 @@ pub fn tick(state: &mut GameState) {
                 "died of thirst"
             } else if s.hunger >= 80.0 {
                 "starved"
-            } else if disease {
+            } else if s.is_sick() {
+                // V0.17: attributed to THIS survivor's own illness, not to a
+                // colony-wide outbreak flag they may never have caught.
                 "succumbed to illness"
             } else {
                 "froze to death"
@@ -777,6 +842,15 @@ pub fn tick(state: &mut GameState) {
         }
         if state.blizzard_active() {
             delta -= per_tick(MORALE_BLIZZARD_PER_DAY);
+        }
+        // V0.17: an exhausted or bedridden colony is a miserable one — both
+        // stack additively with the hunger/thirst/blizzard penalties above,
+        // the same way those already stack with each other.
+        if exhausted_present {
+            delta -= per_tick(MORALE_EXHAUSTION_PER_DAY);
+        }
+        if sick_present {
+            delta -= per_tick(MORALE_SICK_PER_DAY);
         }
         if kitchen_staffed {
             delta += per_tick(MORALE_KITCHEN_PER_DAY);
@@ -846,6 +920,49 @@ pub fn tick(state: &mut GameState) {
         // Still needed as a fallback for anonymous-only overflow (shouldn't
         // normally trigger now that every named slot above is freed first).
         clamp_workers(state);
+    }
+
+    // --- V0.17: recoveries. Logged after the death block so someone who
+    // shook off the illness and then died of the cold in the same tick isn't
+    // announced as recovered — `retain` above already dropped them.
+    for name in recoveries {
+        if state.survivors.iter().any(|s| s.name == name) {
+            push_event(state, format!("{} has recovered.", name));
+        }
+    }
+
+    // --- V0.17: the once-daily infection roll. Draws from `illness_rng`, a
+    // stream of its own, so it can never re-sequence the existing
+    // `rng`/`event_rng` outcomes (arrivals, births, weather). Two sources
+    // compose: the outbreak window (`disease_until`, V0.3's event, which now
+    // only opens the door instead of draining everyone's HP) and contagion
+    // from each survivor already carrying it — so an illness can keep
+    // circulating after the outbreak officially "fades".
+    if state.tick % TICKS_PER_DAY == ILLNESS_TICK && !state.survivors.is_empty() {
+        let mut irng = Rng(state.illness_rng);
+        let outbreak = state.disease_active();
+        let sick_now = state.sick_count();
+        if outbreak || sick_now > 0 {
+            let base = if outbreak { OUTBREAK_INFECT_CHANCE_PER_DAY } else { 0.0 }
+                + sick_now as f32 * CONTAGION_CHANCE_PER_SICK_PER_DAY;
+            let mut fell_ill: Vec<String> = Vec::new();
+            for s in state.survivors.iter_mut() {
+                if s.is_sick() {
+                    continue;
+                }
+                let exhausted = s.fatigue >= FATIGUE_EXHAUSTED;
+                let chance = (base * if exhausted { EXHAUSTION_SICK_MULTIPLIER } else { 1.0 })
+                    .min(MAX_INFECT_CHANCE_PER_DAY);
+                if irng.chance(chance) {
+                    s.sick_left = SICKNESS_TICKS;
+                    fell_ill.push(s.name.clone());
+                }
+            }
+            for name in fell_ill {
+                push_event(state, format!("{} has fallen ill.", name));
+            }
+        }
+        state.illness_rng = irng.0;
     }
 
     // --- V0.11: corpse decay -> Grave, Grave fade ---
@@ -1115,8 +1232,8 @@ pub fn survivor_is_at_meal_with(state: &GameState, points: &GatherPoints, s: &Su
     {
         return false; // something else is telling them where to be
     }
-    let (kitchen_pos, tent_positions) = (points.0, &points.1);
-    match routine_goal(state.time_of_day(), state.is_night(), s, kitchen_pos, tent_positions) {
+    let kitchen_pos = points.0;
+    match routine_goal(state.time_of_day(), kitchen_pos) {
         Some((gx, gy)) => {
             let (dx, dy) = (gx - s.x, gy - s.y);
             (dx * dx + dy * dy).sqrt() <= ARRIVAL_EPSILON && Some((gx, gy)) == kitchen_pos
@@ -1134,13 +1251,13 @@ pub fn survivor_is_at_meal_with(state: &GameState, points: &GatherPoints, s: &Su
 /// there like any other idle survivor until the window passes or something
 /// else (a player command, a work assignment) claims them. Returns `None`
 /// outside those windows, or when there's nowhere fitting to go yet.
-fn routine_goal(
-    time_of_day: f32,
-    is_night: bool,
-    s: &Survivor,
-    kitchen: Option<(f32, f32)>,
-    tents: &[(f32, f32)],
-) -> Option<(f32, f32)> {
+///
+/// V0.17: the overnight leg moved out into [`sleep_goal`], which now applies
+/// to WORKING survivors too (see `tick`'s movement chain) — production is
+/// headcount-based, not presence-based, so walking a night shift home to bed
+/// costs the colony nothing and is what makes `Survivor::fatigue` recoverable.
+/// What's left here is the meal leg, still idle-only.
+fn routine_goal(time_of_day: f32, kitchen: Option<(f32, f32)>) -> Option<(f32, f32)> {
     let mealtime = (BREAKFAST_WINDOW.0..BREAKFAST_WINDOW.1).contains(&time_of_day)
         || (LUNCH_WINDOW.0..LUNCH_WINDOW.1).contains(&time_of_day);
     if mealtime {
@@ -1148,14 +1265,70 @@ fn routine_goal(
             return Some(pos);
         }
     }
-    if is_night {
-        return tents.iter().copied().min_by(|a, b| {
-            let da = (a.0 - s.x).powi(2) + (a.1 - s.y).powi(2);
-            let db = (b.0 - s.x).powi(2) + (b.1 - s.y).powi(2);
-            da.total_cmp(&db)
-        });
-    }
+    // The overnight leg lives in `sleep_goal` and is dispatched from `tick`'s
+    // movement chain instead — it needs to know whether this survivor holds a
+    // bunk (`bunked_ids`), which is colony-wide state this fn has no view of.
+    // Answering "go to the nearest Tent" here too would walk a bunkless
+    // survivor to a bed they don't have while the sim rested them at the
+    // rough rate.
     None
+}
+
+/// V0.17: the Tent bunk a survivor heads to overnight — their nearest
+/// finished Tent, but only if they hold one of the colony's
+/// `housing_capacity()` bunks (`has_bunk`, from `GameState::bunked_ids`).
+/// Someone with no bed sleeps rough wherever they stand, which is exactly
+/// what the slower `FATIGUE_ROUGH_REST_PER_DAY` recovery rate models — the
+/// picture and the mechanic come from this one predicate.
+pub fn sleep_goal(
+    is_night: bool,
+    has_bunk: bool,
+    s: &Survivor,
+    tents: &[(f32, f32)],
+) -> Option<(f32, f32)> {
+    if !is_night || !has_bunk {
+        return None;
+    }
+    tents.iter().copied().min_by(|a, b| {
+        let da = (a.0 - s.x).powi(2) + (a.1 - s.y).powi(2);
+        let db = (b.0 - s.x).powi(2) + (b.1 - s.y).powi(2);
+        da.total_cmp(&db)
+    })
+}
+
+/// V0.17: client-only render query (sibling of [`survivor_is_at_meal`]) —
+/// is `s` asleep in a Tent bunk right now, i.e. night, they hold a bunk, and
+/// they've arrived at it? Nothing else may be claiming them (a player walk,
+/// a chop or burial errand); an assigned building does NOT disqualify them,
+/// since the night shift walks home too.
+pub fn survivor_is_resting(state: &GameState, s: &Survivor) -> bool {
+    survivor_is_resting_with(state, &gather_points(state), &state.bunked_ids(), s)
+}
+
+/// The same query as [`survivor_is_resting`], against snapshots the caller
+/// already has — the client asks it per survivor per frame, same reason
+/// `survivor_is_at_meal_with` exists.
+pub fn survivor_is_resting_with(
+    state: &GameState,
+    points: &GatherPoints,
+    bunked: &std::collections::HashSet<u32>,
+    s: &Survivor,
+) -> bool {
+    if s.move_target.is_some()
+        || s.chop_target.is_some()
+        || s.bury_target.is_some()
+        || s.carrying_wood
+        || !state.furnace_lit
+    {
+        return false; // mirrors `tick`'s own sleep-leg guards exactly
+    }
+    match sleep_goal(state.is_night(), bunked.contains(&s.id), s, &points.1) {
+        Some((gx, gy)) => {
+            let (dx, dy) = (gx - s.x, gy - s.y);
+            (dx * dx + dy * dy).sqrt() <= ARRIVAL_EPSILON
+        }
+        None => false,
+    }
 }
 
 /// After deaths, make sure assigned workers never exceed the population.

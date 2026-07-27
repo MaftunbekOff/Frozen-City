@@ -118,6 +118,65 @@ pub fn card_working(workplace: &str, l: Lang) -> String {
     }
 }
 
+/// V0.17: fatigue state tags — one of three tiers the caller picks by
+/// comparing `Survivor::fatigue` against `FATIGUE_TIRED`/`FATIGUE_EXHAUSTED`
+/// (`fc_game::types`); shared by the detail card's fatigue line and the
+/// roster row's compact suffix.
+pub fn fatigue_tier_rested(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Tetik",
+        Lang::En => "Rested",
+        Lang::Ru => "Бодрый",
+    }
+}
+
+pub fn fatigue_tier_tired(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Charchagan",
+        Lang::En => "Tired",
+        Lang::Ru => "Усталый",
+    }
+}
+
+pub fn fatigue_tier_exhausted(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Holdan toygan",
+        Lang::En => "Exhausted",
+        Lang::Ru => "Изнурён",
+    }
+}
+
+/// Detail-karta charchoq qatori: "Charchoq {fatigue}%   [{tier}]" —
+/// `i18n_hud::hud_morale`'ning qiymat+qavs-teg naqshini takrorlaydi.
+pub fn card_fatigue_line(fatigue: f32, tier: &str, l: Lang) -> String {
+    match l {
+        Lang::Uz => format!("Charchoq {fatigue:.0}%   [{tier}]"),
+        Lang::En => format!("Fatigue {fatigue:.0}%   [{tier}]"),
+        Lang::Ru => format!("Усталость {fatigue:.0}%   [{tier}]"),
+    }
+}
+
+/// Roster qatoridagi ixcham "Kasal" so'zi — `fatigue_tier_*`ga o'xshab
+/// qatorning oxiriga " · {tag}" shaklida qo'shiladi.
+pub fn sick_tag(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Kasal",
+        Lang::En => "Sick",
+        Lang::Ru => "Болен",
+    }
+}
+
+/// Detail-karta "KASAL" belgisi + qolgan kunlar — `event_sickness`'ning katta
+/// harfli ogohlantirish uslubini takrorlaydi. `days_left` allaqachon
+/// `sick_left / TICKS_PER_DAY`ga aylantirilgan.
+pub fn card_sick_line(days_left: f32, l: Lang) -> String {
+    match l {
+        Lang::Uz => format!("KASAL — yana {days_left:.1} kun"),
+        Lang::En => format!("SICK — {days_left:.1} more days"),
+        Lang::Ru => format!("БОЛЕН — ещё {days_left:.1} дн."),
+    }
+}
+
 // --------------------------------------------------------------- social.rs
 
 pub fn social_title(l: Lang) -> &'static str {

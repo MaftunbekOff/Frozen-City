@@ -48,7 +48,7 @@ fn no_events_before_grace_day() {
 }
 
 #[test]
-fn disease_eventually_strikes_and_drains_hp() {
+fn disease_eventually_strikes_but_no_longer_drains_hp_directly() {
     // Part 1: confirm the real (event_rng-driven) trigger path can actually
     // fire within a reasonable window, across a spread of seeds. This is the
     // one guard that would catch the trigger logic being missing entirely.
@@ -82,7 +82,18 @@ fn disease_eventually_strikes_and_drains_hp() {
     // Part 2: direct-set effect check, isolated from RNG entirely, so it's
     // robust regardless of trigger timing. Both worlds start warm (furnace
     // lit at level 1, new_game's default) and are kept well-fed; only the
-    // experiment gets a disease.
+    // experiment has an active outbreak window.
+    //
+    // V0.17: `disease_until` merely being active no longer drains HP by
+    // itself — it only opens the door for the once-daily `ILLNESS_TICK` roll
+    // to actually infect individuals (`Survivor::sick_left`), who THEN lose
+    // HP at `SICK_HP_PER_DAY` (see `illness_tests.rs`'s
+    // `a_sick_survivor_loses_extra_hp_at_sick_hp_per_day`, which replaces
+    // this test's old direct-drain assertion). Retired along with it:
+    // `DISEASE_HP_PER_DAY`, the colony-wide flat drain this individual-HP
+    // model replaces. Over these few in-game hours nobody has necessarily
+    // caught anything yet, so the two worlds' total HP should track each
+    // other closely — this asserts the RETIREMENT, not a drain.
     let mut control = sim::new_game(SEED, 12);
     let mut experiment = sim::new_game(SEED, 12);
     control.stock.food = 1000.0;
@@ -97,9 +108,12 @@ fn disease_eventually_strikes_and_drains_hp() {
 
     let control_hp: f32 = control.survivors.iter().map(|s| s.hp).sum();
     let experiment_hp: f32 = experiment.survivors.iter().map(|s| s.hp).sum();
+    // Small slack, not zero: it's still possible (if unlikely, this early
+    // and this briefly) for the real ILLNESS_TICK roll to have caught
+    // someone in the experiment world, which WOULD cost a little HP.
     assert!(
-        experiment_hp < control_hp - 0.5,
-        "a disease should drain HP faster than the healthy control: control_hp={control_hp}, experiment_hp={experiment_hp}"
+        (experiment_hp - control_hp).abs() < 2.0,
+        "an active outbreak alone (nobody necessarily infected yet) should no longer drain HP directly: control_hp={control_hp}, experiment_hp={experiment_hp}"
     );
 }
 

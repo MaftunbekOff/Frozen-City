@@ -58,6 +58,11 @@ const MAGIC_V12: &[u8; 9] = b"FCWORLD12";
 // `legacy::GameStateV12` for the frozen pre-`facing` mirror old saves load
 // through.
 const MAGIC_V13: &[u8; 9] = b"FCWORLD13";
+// V14 (V0.17): `Survivor` grew `fatigue`/`sick_left` and `GameState` grew the
+// isolated `illness_rng` stream. See `legacy::SurvivorV13` /
+// `legacy::GameStateV13` for the frozen pre-V0.17 mirror old saves load
+// through.
+const MAGIC_V14: &[u8; 9] = b"FCWORLD14";
 
 fn resolve_path() -> String {
     std::env::var("FC_WORLD_SAVE").unwrap_or_else(|_| DEFAULT_SAVE_PATH.to_string())
@@ -87,8 +92,8 @@ pub fn save_at(state: &GameState, path: &str) -> io::Result<()> {
     }
     let body =
         bincode::serialize(state).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    let mut bytes = Vec::with_capacity(MAGIC_V13.len() + body.len());
-    bytes.extend_from_slice(MAGIC_V13);
+    let mut bytes = Vec::with_capacity(MAGIC_V14.len() + body.len());
+    bytes.extend_from_slice(MAGIC_V14);
     bytes.extend_from_slice(&body);
     // Write to a sibling temp file and rename over the target: a kill mid-write
     // (the exact moment this feature exists to survive) leaves the previous,
@@ -110,8 +115,15 @@ pub fn load_at(path: &str) -> Option<GameState> {
 
 fn load_at_raw(path: &str) -> Option<GameState> {
     let bytes = fs::read(path).ok()?;
-    if let Some(body) = bytes.strip_prefix(MAGIC_V13.as_slice()) {
+    if let Some(body) = bytes.strip_prefix(MAGIC_V14.as_slice()) {
         return bincode::deserialize(body).ok();
+    }
+    if let Some(body) = bytes.strip_prefix(MAGIC_V13.as_slice()) {
+        // V13 (pre-fatigue/illness): decode through the frozen V13 mirror and
+        // migrate one hop to V14. The next autosave rewrites it as V14.
+        return bincode::deserialize::<crate::legacy::GameStateV13>(body)
+            .ok()
+            .map(GameState::from);
     }
     if let Some(body) = bytes.strip_prefix(MAGIC_V12.as_slice()) {
         // V12 (pre-`facing`): decode through the frozen V12 mirror and migrate
@@ -1022,7 +1034,7 @@ mod tests {
             win_days: modern.win_days,
             tiles: modern.tiles.clone(),
             buildings: modern.buildings.iter().map(crate::legacy::BuildingV12::from).collect(),
-            survivors: modern.survivors.clone(),
+            survivors: modern.survivors.iter().map(crate::legacy::SurvivorV13::from).collect(),
             stock: StockpileV10 {
                 wood: modern.stock.wood,
                 coal: modern.stock.coal,
@@ -1101,7 +1113,7 @@ mod tests {
             win_days: modern.win_days,
             tiles: modern.tiles.clone(),
             buildings: modern.buildings.iter().map(crate::legacy::BuildingV12::from).collect(),
-            survivors: modern.survivors.clone(),
+            survivors: modern.survivors.iter().map(crate::legacy::SurvivorV13::from).collect(),
             stock: StockpileV10 {
                 wood: modern.stock.wood,
                 coal: modern.stock.coal,
@@ -1186,7 +1198,7 @@ mod tests {
             win_days: modern.win_days,
             tiles: modern.tiles.clone(),
             buildings: modern.buildings.iter().map(crate::legacy::BuildingV12::from).collect(),
-            survivors: modern.survivors.clone(),
+            survivors: modern.survivors.iter().map(crate::legacy::SurvivorV13::from).collect(),
             stock: modern.stock,
             furnace_level: modern.furnace_level,
             furnace_lit: modern.furnace_lit,
@@ -1248,6 +1260,103 @@ mod tests {
         fs::remove_file(&path).ok();
     }
 
+
+    /// A world saved under `FCWORLD13` (pre-V0.17: survivors had no
+    /// `fatigue`/`sick_left`, and there was no isolated `illness_rng` stream)
+    /// must load and migrate one hop to V14 — every survivor arriving rested
+    /// and healthy, and the illness stream seeded deterministically off the
+    /// world's existing `rng` rather than left at 0. The live state
+    /// deliberately carries an exhausted, sick survivor that the V13 mirror
+    /// drops, so a value that survived by coincidence instead of by migration
+    /// would show up as a mismatch.
+    #[test]
+    fn v13_save_migrates() {
+        use crate::legacy::GameStateV13;
+
+        let path = throwaway_path("v13-migrate");
+        let mut modern = sim::new_game(113, 12);
+        sim::player_joined(&mut modern, 16, "Sardor");
+        modern.graduated = true;
+        modern.survivors[0].fatigue = 95.0;
+        modern.survivors[0].sick_left = 400.0;
+        let v13 = GameStateV13 {
+            tick: modern.tick,
+            win_days: modern.win_days,
+            tiles: modern.tiles.clone(),
+            buildings: modern.buildings.clone(),
+            survivors: modern.survivors.iter().map(crate::legacy::SurvivorV13::from).collect(),
+            stock: modern.stock,
+            furnace_level: modern.furnace_level,
+            furnace_lit: modern.furnace_lit,
+            cold_snap: modern.cold_snap,
+            players: modern.players.clone(),
+            phase: modern.phase,
+            events: modern.events.clone(),
+            total_events: modern.total_events,
+            chat: modern.chat.clone(),
+            total_chat: modern.total_chat,
+            pings: modern.pings.clone(),
+            missions: modern.missions.clone(),
+            tunnel: modern.tunnel,
+            graduated: modern.graduated,
+            central: modern.central,
+            techs: modern.techs.clone(),
+            disease_until: modern.disease_until,
+            blizzard_until: modern.blizzard_until,
+            pending_event: modern.pending_event,
+            event_rng: modern.event_rng,
+            owner_id: modern.owner_id,
+            next_id: modern.next_id,
+            rng: modern.rng,
+            central_ledger: modern.central_ledger.clone(),
+            leader: modern.leader,
+            mourning_until: modern.mourning_until,
+            morale: modern.morale,
+            pending_migrant: modern.pending_migrant,
+            wildlife: modern.wildlife,
+            corpses: modern.corpses.clone(),
+            graves: modern.graves.clone(),
+            livestock: modern.livestock,
+            pending_caravan: modern.pending_caravan.clone(),
+        };
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(MAGIC_V13);
+        bytes.extend_from_slice(&bincode::serialize(&v13).unwrap());
+        fs::write(&path, bytes).unwrap();
+
+        let loaded = load_at(&path).expect("V13 save must migrate, never wipe");
+        assert!(
+            loaded.survivors.iter().all(|s| s.fatigue == 0.0 && !s.is_sick()),
+            "pre-V14 survivors load rested and healthy, never mid-illness"
+        );
+        assert_ne!(loaded.illness_rng, 0, "the illness stream must be seeded, not left at 0");
+        assert_eq!(
+            loaded.survivors.len(),
+            modern.survivors.len(),
+            "migration must never drop people"
+        );
+        for (got, want) in loaded.survivors.iter().zip(&modern.survivors) {
+            assert_eq!((got.id, &got.name, got.profession), (want.id, &want.name, want.profession));
+            assert_eq!((got.hp, got.hunger, got.thirst), (want.hp, want.hunger, want.thirst));
+        }
+        assert_eq!(loaded.players, modern.players);
+        assert!(loaded.graduated, "graduation must survive migration");
+        assert_eq!(loaded.stock, modern.stock);
+        assert_eq!(loaded.buildings, modern.buildings, "V13 already has `facing`");
+        assert_eq!(loaded.wildlife, modern.wildlife);
+        assert_eq!(loaded.livestock, modern.livestock);
+
+        // Re-seeding is a pure function of the save, not of the clock: loading
+        // the same bytes twice must land on the same illness future.
+        let again = load_at(&path).expect("V13 reload");
+        assert_eq!(again.illness_rng, loaded.illness_rng);
+
+        // And once re-saved (V14, with header), it round-trips as-is.
+        save_at(&loaded, &path).unwrap();
+        assert_eq!(load_at(&path).expect("V14 reload"), loaded);
+        fs::remove_file(&path).ok();
+    }
+
     /// A world saved under `FCWORLD12` (pre-`facing`: `Building` had no
     /// orientation byte at all) must load and migrate one hop to V13, with
     /// every building landing in the default south-facing pose it was always
@@ -1269,7 +1378,7 @@ mod tests {
             win_days: modern.win_days,
             tiles: modern.tiles.clone(),
             buildings: modern.buildings.iter().map(crate::legacy::BuildingV12::from).collect(),
-            survivors: modern.survivors.clone(),
+            survivors: modern.survivors.iter().map(crate::legacy::SurvivorV13::from).collect(),
             stock: modern.stock,
             furnace_level: modern.furnace_level,
             furnace_lit: modern.furnace_lit,

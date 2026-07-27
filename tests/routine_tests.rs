@@ -77,6 +77,15 @@ fn idle_survivor_walks_toward_the_nearest_tent_at_night() {
     let (tx, ty) = find_spot(&state, BuildingKind::Tent);
     place_and_finish(&mut state, BuildingKind::Tent, tx, ty);
     let tent_pos = (tx as f32 + 0.5, ty as f32 + 1.15);
+    // V0.17: the night walk to bed (which this test predates) is gated on
+    // the furnace having been lit at least once — nobody sleeps while the
+    // opening chop-and-carry crisis is still unresolved (see `sim::tick`'s
+    // sleep leg and `sleep_goal`'s doc comment). `new_game`'s lone starting
+    // survivor never builds it in this test, so light it directly; the
+    // night-walk mechanic itself is what's under test here, not the furnace
+    // bootstrap (covered separately by `furnace_bootstrap_tests.rs`).
+    state.furnace_lit = true;
+    state.furnace_level = 1;
 
     seek_time_of_day(&mut state, 0.90); // well inside `is_night`'s !(0.25..0.75)
     assert!(state.is_night(), "sanity: 0.90 should read as night");

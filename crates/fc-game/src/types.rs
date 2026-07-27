@@ -210,7 +210,11 @@ pub const EVENT_GRACE_DAY: u32 = 3;
 /// Per-day chance a sickness breaks out, and how long/hard it hits.
 pub const DISEASE_CHANCE: f32 = 0.16;
 pub const DISEASE_TICKS: u64 = 2 * TICKS_PER_DAY;
-/// Extra HP lost per in-game day while a disease is active (offset by hospitals).
+/// Retired in V0.17: an outbreak used to drain this much HP per day from
+/// EVERY survivor at once. Illness is now individual — `disease_until` only
+/// opens the daily infection roll, and the HP cost lands on whoever actually
+/// caught it (`SICK_HP_PER_DAY`). Kept as a named constant so the old balance
+/// figure stays greppable next to its replacement; nothing reads it.
 pub const DISEASE_HP_PER_DAY: f32 = 6.0;
 
 /// Per-day chance of a blizzard, its duration, and the extra cold it brings.
@@ -376,6 +380,72 @@ pub const RELOCATE_WORKDAYS_FACTOR: f32 = 0.4;
 /// unconditionally elsewhere in `tick`, wherever a survivor happens to be.
 pub const BREAKFAST_WINDOW: (f32, f32) = (0.27, 0.31);
 pub const LUNCH_WINDOW: (f32, f32) = (0.48, 0.52);
+
+// --- V0.17: aholi hayoti — charchoq/uyqu va shaxsiy kasallik ---
+
+/// Fatigue gained per in-game day by a survivor assigned to a building
+/// (working a post) versus one with nothing to do. Both only accrue while
+/// awake — see the night branch below.
+pub const FATIGUE_WORK_PER_DAY: f32 = 70.0;
+pub const FATIGUE_IDLE_PER_DAY: f32 = 26.0;
+/// Fatigue shed per in-game day while asleep in a Tent bunk, versus sleeping
+/// rough (colony housing ran out, so this survivor has no bunk to walk to and
+/// dozes wherever they are). Night is exactly half the day
+/// (`GameState::is_night`), so a bunked worker nets roughly -40/day while an
+/// unbunked one nets about +20/day and drifts into the tired band within a
+/// few days: Tents now buy throughput, not just population headroom.
+pub const FATIGUE_TENT_REST_PER_DAY: f32 = 110.0;
+pub const FATIGUE_ROUGH_REST_PER_DAY: f32 = 30.0;
+/// Fatigue below this costs nothing; above it, production falls linearly to
+/// `FATIGUE_MIN_FACTOR` at 100 (see `Survivor::fatigue_factor`).
+pub const FATIGUE_TIRED: f32 = 60.0;
+pub const FATIGUE_MIN_FACTOR: f32 = 0.55;
+/// Fatigue at which a survivor reads as "exhausted" — the roster/HUD tag,
+/// the colony-wide morale penalty below, and the raised illness risk in
+/// `sim::tick`'s infection roll all key off this one threshold.
+pub const FATIGUE_EXHAUSTED: f32 = 90.0;
+/// Colony-wide morale penalty per day while anyone is exhausted — same shape
+/// and magnitude as `MORALE_BLIZZARD_PER_DAY` (a grinding background misery,
+/// milder than starvation/thirst).
+pub const MORALE_EXHAUSTION_PER_DAY: f32 = 2.0;
+/// Colony-wide morale penalty per day while anyone is sick.
+pub const MORALE_SICK_PER_DAY: f32 = 2.0;
+
+/// Natural course of an individual illness, in ticks — how long
+/// `Survivor::sick_left` takes to burn down with no hospital care at all.
+pub const SICKNESS_TICKS: f32 = 2.0 * TICKS_PER_DAY as f32;
+/// HP a sick survivor loses per in-game day. Above V0.3's colony-wide
+/// `DISEASE_HP_PER_DAY` (which it replaces) because it now hits only the
+/// people who actually caught it, not everyone at once.
+pub const SICK_HP_PER_DAY: f32 = 10.0;
+/// Production scale for a sick survivor — they stay at their post but get
+/// little done. Composes multiplicatively with `fatigue_factor`.
+pub const SICK_WORK_FACTOR: f32 = 0.35;
+/// Extra illness ticks a staffed Hospital burns down per hospital worker-unit
+/// per in-game day, on top of the natural 1-tick-per-tick course. Measured in
+/// the same profession/XP-boosted "units" `survivor_contribution` returns, so
+/// a trained Medic cures visibly faster than a conscript.
+pub const HOSPITAL_RECOVERY_PER_UNIT_DAY: f32 = 600.0;
+/// Tick-of-day the once-daily infection roll happens (see `ILLNESS_RNG_SEED`
+/// on the isolated stream it draws from). Late morning, after arrivals.
+pub const ILLNESS_TICK: u64 = ARRIVAL_TICK + 120;
+/// Per-day chance a healthy survivor catches the bug while an outbreak
+/// (`GameState.disease_until`) is running.
+pub const OUTBREAK_INFECT_CHANCE_PER_DAY: f32 = 0.30;
+/// Per-day chance each already-sick survivor passes it to a given healthy
+/// one — the outbreak window can end while the illness keeps circulating.
+pub const CONTAGION_CHANCE_PER_SICK_PER_DAY: f32 = 0.04;
+/// Infection-chance multiplier for an exhausted survivor
+/// (`fatigue >= FATIGUE_EXHAUSTED`) — the fatigue and illness systems feed
+/// each other rather than running side by side.
+pub const EXHAUSTION_SICK_MULTIPLIER: f32 = 2.0;
+/// Ceiling on the composed per-day infection chance, so a big outbreak in a
+/// big colony can never round up to "everyone falls ill tonight".
+pub const MAX_INFECT_CHANCE_PER_DAY: f32 = 0.75;
+/// Seed offset for `GameState.illness_rng` — a stream of its own so the
+/// infection rolls can never shift the existing `rng`/`event_rng` sequences
+/// (and so every pre-V0.17 save migrates to a deterministic, non-zero seed).
+pub const ILLNESS_RNG_SEED: u64 = 0x5EED_1117;
 
 pub fn tile_index(x: u8, y: u8) -> usize {
     y as usize * MAP_W + x as usize

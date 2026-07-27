@@ -80,6 +80,12 @@ pub struct GameAssets {
     /// Shared skin tone for every survivor's head — the headwear above it is
     /// what carries the per-trade distinction.
     pub survivor_skin_mat: Handle<StandardMaterial>,
+    /// V0.17: pale/sickly override for `survivor_skin_mat`, swapped onto a
+    /// survivor's head while `Survivor::is_sick()`
+    /// (`render::survivors::sync_survivors`'s `SurvivorHead` loop) — shared,
+    /// so every sick survivor still batches into one draw call, same trick
+    /// `leader_coat_mat` uses for leadership.
+    pub survivor_skin_sick_mat: Handle<StandardMaterial>,
     /// One body material per `BuildingKind` (see `ALL_KINDS`), shared so
     /// every building of the same kind batches into one draw call.
     pub building_mats: [Handle<StandardMaterial>; 15],
@@ -265,6 +271,11 @@ pub fn setup_camera_and_assets(
         }),
         survivor_skin_mat: materials.add(StandardMaterial {
             base_color: Color::srgb(0.80, 0.62, 0.48),
+            perceptual_roughness: 0.8,
+            ..default()
+        }),
+        survivor_skin_sick_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.64, 0.70, 0.58),
             perceptual_roughness: 0.8,
             ..default()
         }),
