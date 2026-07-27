@@ -182,7 +182,14 @@ fn assigned_survivor_walks_toward_their_building() {
         &PlayerCommand::AssignSurvivor { survivor: survivor_id, building: Some(sawmill) },
     );
 
-    let goal = (bx as f32 + 0.5, by as f32 + 0.5);
+    // V0.22: an assigned survivor heads for their own STATION inside the
+    // room (the stove, the workbench), not the building's corner tile — a
+    // 3x3 workshop would otherwise stack its whole crew on one square. The
+    // first worker takes the first fitting's station.
+    let goal = state
+        .find_building(sawmill)
+        .expect("the sawmill is standing")
+        .worker_station(0);
     let mut arrived = false;
     for _ in 0..2000 {
         sim::tick(&mut state);
@@ -192,5 +199,5 @@ fn assigned_survivor_walks_toward_their_building() {
             break;
         }
     }
-    assert!(arrived, "an assigned survivor should walk to their building's location");
+    assert!(arrived, "an assigned survivor should walk to their station inside the building");
 }

@@ -341,6 +341,94 @@ impl WorldManager {
         Ok((central, id, out_rx))
     }
 
+    /// V0.18 — the way BACK (`ClientMsg::ReturnHome`): brings `account_id`'s
+    /// settlers out of the central world, settles them in that account's own
+    /// personal world, and joins it. The exact mirror of [`Self::enter_central`],
+    /// and deliberately forgiving where that one is strict:
+    ///
+    /// * No graduation check. Having settlers centrally IS the proof, and an
+    ///   account with none there is simply going home alone — which is what
+    ///   joining your own world already means, so it can never fail for that.
+    /// * A central world that isn't running, or answers nothing, is not fatal
+    ///   either: there is then nobody to bring back, and the join proceeds.
+    ///   The one thing that must never happen is settlers being extracted and
+    ///   then lost because the personal world couldn't take them — so the
+    ///   extraction only happens once that world is confirmed spawned, and
+    ///   anyone who doesn't fit (`MAX_POPULATION`, or the personal world
+    ///   currently sitting Won/Lost — see `sim::inject_returnees`) is put
+    ///   straight back.
+    pub fn return_home(
+        self: &Arc<Self>,
+        account_id: i64,
+        name: String,
+        token: Option<u64>,
+    ) -> Option<(Sender<ToServer>, u64, Receiver<ServerMsg>)> {
+        // Serialized against `enter_central` on the same lock: an account
+        // must never be migrating both ways at once.
+        let _entry = self.central_entry.lock().unwrap();
+        let personal = self.get_or_spawn(account_id)?;
+        // Only touch the central world if it's ALREADY running — spawning the
+        // shared world just to check whether someone left people there would
+        // be a lot of work to discover an empty list.
+        let central = {
+            let worlds = self.worlds.lock().unwrap();
+            worlds.get(&CENTRAL_KEY).map(|h| h.tx.clone())
+        };
+        if let Some(central) = central {
+            let (reply_tx, reply_rx) = channel();
+            if central
+                .send(ToServer::ExtractSettlers { account: account_id, reply: reply_tx })
+                .is_ok()
+            {
+                if let Ok(settlers) = reply_rx.recv_timeout(MIGRATE_REPLY_TIMEOUT) {
+                    if !settlers.is_empty() {
+                        let sent = settlers.len();
+                        let (n_tx, n_rx) = channel();
+                        let settlers_for_home = settlers.clone();
+                        if personal
+                            .send(ToServer::InjectReturnees {
+                                survivors: settlers_for_home,
+                                reply: n_tx,
+                            })
+                            .is_ok()
+                        {
+                            let settled = n_rx.recv_timeout(MIGRATE_REPLY_TIMEOUT).unwrap_or(0);
+                            // Anyone the home colony had no room for goes
+                            // straight back to the shared city rather than
+                            // vanishing between two worlds.
+                            if settled < sent {
+                                let leftover: Vec<_> = settlers.into_iter().skip(settled).collect();
+                                let _ = central.send(ToServer::InjectMigrants {
+                                    account: account_id,
+                                    name: name.clone(),
+                                    survivors: leftover,
+                                });
+                            }
+                        } else {
+                            // The personal world died between spawn and send:
+                            // put everyone back where they came from.
+                            let _ = central.send(ToServer::InjectMigrants {
+                                account: account_id,
+                                name: name.clone(),
+                                survivors: settlers,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        match join(&personal, name.clone(), token, Some(account_id)) {
+            Some((id, out_rx)) => Some((personal, id, out_rx)),
+            None => {
+                // Same stale-handle fallback `join_account` uses.
+                self.worlds.lock().unwrap().remove(&account_id);
+                let tx = self.get_or_spawn(account_id)?;
+                let (id, out_rx) = join(&tx, name, token, Some(account_id))?;
+                Some((tx, id, out_rx))
+            }
+        }
+    }
+
     /// One CountOwned round-trip against the central world; `None` when the
     /// handle is stale (send or reply channel already closed) or the reply
     /// timed out.

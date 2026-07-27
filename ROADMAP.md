@@ -529,6 +529,201 @@ edi (V0.6 → V1.0); alohida bosqich sifatida keyin qo'shildi.
       `tests/fatigue_tests.rs`, `tests/illness_tests.rs`,
       `persist::v13_save_migrates`; balans zondi:
       `examples/v017_balance.rs`.
+- [x] **V0.21 — Ishlab chiqarish jihozdan keladi** (2026-07-27). V0.20 jihozni
+      binoning ustiga qo'yilgan bonus qilib qo'ygan edi: bino baribir o'zi
+      ishlab chiqarardi, jihoz esa foizni oshirardi. Endi **ish stoli — bu
+      ishlab chiqaruvchining o'zi**: jihozsiz xonada asbob yo'q va u hech
+      narsa bermaydi.
+
+      Har jihozning o'z **sikli** bor (`FurnishingCycle`): bir siklda nima
+      chiqadi va u necha tik davom etadi. Panel aynan shu raqamlarni
+      o'qiydi ("Production 1", "Time 7.8s"), ya'ni ekrandagi son bilan sim
+      qo'llaydigan son — bitta qiymat, bir qoidaning ikki tavsifi emas.
+
+      **Qaysi resurs** chiqishi baribir binoniki bo'lib qoladi (arraxona
+      yaqin o'rmonni, ko'mir koni o'z taylini, ovchi kulbasi yovvoyi
+      hayvonlarni yeydi — bu cheklovlar binoga tegishli). Jihoz **tezlikni**
+      belgilaydi, kasbni emas.
+
+      **Balans qasddan siljimadi:** 1-darajali ish stoli binoning avvaldan
+      bor bo'lgan `production_per_worker_day` tezligini aynan tiklaydi —
+      birinchi stolni sotib olish savdoni *ishlatadi*, uni odatdagidan
+      yaxshiroq qilmaydi. Har keyingi daraja siklni qisqartiradi (o'sha +8%,
+      endi vaqt sifatida ifodalangan).
+
+      `sim::finish_all_construction` (test/vosita yorlig'i) endi bepul
+      1-darajali ish stolini ham qo'yadi — uning shartnomasi "menga
+      ishlaydigan bino ber", yangi modelda esa bu jihozni ham anglatadi.
+      `furnishing_tests` bundan mustasno: u aynan ichki qismni sinaydi, shu
+      sabab bo'm-bo'sh xonadan boshlaydi va hamma narsani haqiqiy narxda
+      sotib oladi.
+- [x] **V0.20 — Bino ichki jihozlari** (2026-07-27). Bino "yaxshilash" bitta
+      anonim tugma edi: `UpgradeBuilding` yog'och yeydi, daraja bir pog'ona
+      ko'tariladi, tamom. Endi o'sha bitta raqam **xonaning ichidagi
+      narsalarga** bo'linadi — ish stoli, stol-stul, pechka, javon — har biri
+      alohida sotib olinadi, alohida yangilanadi (`FurnishingKind`,
+      `Building::furnishings`, `PlayerCommand::UpgradeFurnishing`).
+
+      **Har jihoz boshqa tizimga ulanadi** — bezak bo'lib qolmasligi uchun:
+      ish stoli o'z binosining ishlab chiqarishini, stol-stul koloniya
+      kayfiyatini, pechka **o'sha binoda ishlayotganlarning** charchashini,
+      javon esa ularning XP tezligini o'zgartiradi. Bo'sh xonada har bir
+      ko'paytma aynan 1.0 — ya'ni V0.20'gacha bo'lgan balans tegilmagan
+      (buni test qulflaydi).
+
+      **Jihoz binoning o'sishini boshqaradi:** `UpgradeBuilding` endi
+      `furnishings_keep_pace()`ni talab qiladi — xonaning har bir jihozi
+      binoning joriy darajasiga yetgan bo'lishi kerak. Ya'ni jihozsiz xona
+      1-darajadan nariga o'tolmaydi. Jihoz shifti `FURNISHING_MAX_LEVEL`=3,
+      shu sabab bu **erta o'yin** cheklovi: 3-darajaga yetgach eshik butunlay
+      ochiladi va bino odatdagi yog'och-va-vaqt bilan 10 gacha o'sadi.
+      Ataylab: jihozlar birinchi bir necha yangilanishga shakl bersin, birinchi
+      o'n pog'onaning yonida ikkinchi o'n pog'onali narvon bo'lib qolmasin.
+
+      Jihoz **turlari umumiy so'z boyligi** — har bino uchun alohida ro'yxat
+      emas. Oshxonaning stol-stuli bilan Kasalxonaning stol-stuli bir xil
+      narsa; ularni ikki enum varianti, ikki nom va ikki tarjima qilish 40 ta
+      ot o'ylab topishga olib borardi. Xilma-xillik **qaysi** jihozni qaysi
+      xona olishida: ko'mir koni asbob va pechka oladi, oshxona esa asosan
+      o'tirgichdan iborat.
+
+      Faqat **ichida odam ishlaydigan** xonalarda: Chodir uxlash joyi, Devor
+      esa yerdagi chiziq — ikkalasida ham jihozlanadigan ish o'rni yo'q.
+
+      Saqlov **FCWORLD17** (`legacy::BuildingV16` muzlatilgan ko'zgu). Eski
+      olamning binolari jihozsiz yuklanadi va **darajasi tushirilmaydi** —
+      qoida keyingi yangilashda tekshiriladi, ya'ni eski koloniya
+      qozonganini saqlab qoladi va shunchaki oldinga o'sishdan avval
+      xonalarini jihozlashi kerak bo'ladi. Teskarisi allaqachon sarflangan
+      yog'ochni qaytarib olish bo'lardi.
+
+      Testlar: `tests/furnishing_tests.rs`, `persist::v16_save_migrates`.
+- [x] **V0.19 — Yo'llar va qor** (2026-07-27). Shu paytgacha yer bir xil edi:
+      har tayl bir tezlikda kechilardi, qor bo'roni esa faqat harorat hodisasi
+      edi. Endi ob-havo xaritada iz qoldiradi (`Tile.road`, `Tile.snow`).
+
+      **Qor hech qachon to'smaydi — faqat vaqt yeydi.** Bu balans tanlovi
+      emas, invariant: xaritada yo'l-topish yo'q (`types.rs`ning "to'siqsiz"
+      izohiga qarang), shu sabab o'tib bo'lmaydigan tayl odamni yotoqxonasi
+      bilan ish joyi orasida qamab qo'yishi va o'yinchi buning sababini
+      ko'ra olmasligi mumkin edi. Narx har doim chekli, demak har tayl har
+      doim yetib boriladigan; bo'ron koloniyani sekin va baxtsiz qiladi,
+      buzuq emas.
+
+      **Yo'ldan yurish** (`sim::tick`ning `road_step`i): odam har qadamda
+      qo'shni tayllarning narxini solishtiradi va arzonrog'iga qadam tashlaydi
+      — shuning uchun yonidagi qorni kechib o'tmay, yo'ldan yuradi. Bu
+      ataylab **mahalliy evristika, yo'l-topuvchi emas**: xaritada to'siq
+      yo'q va qor to'smaydi, shu sabab ochko'z qadam hech kimni tuzoqqa
+      tushira olmaydi, haqiqiy qidiruv esa yo'q narsaning atrofidan
+      chiroyliroq aylanish uchun to'lanadigan narx bo'lardi. Bir xil yerda
+      (ya'ni yangi xaritada) bu eski to'g'ri-chiziqli yurishga aynan teng.
+
+      **Balans zondi bir marta yolg'on ko'rsatdi va tuzatildi.** Dastlab
+      bo'ron kuni 34 birlik qor tashlardi, yo'l yopilish chegarasi esa 45 —
+      va yurilgan yo'l kuniga 6 birlik bosilib tozalanardi (oddiy qor 3).
+      Natijada 5 seed × 40 kunda yo'l **0%** yopilgan: butun mexanikaning
+      ma'nosi — bo'ron tarmoqni yopadi, kimdir borib ochishi kerak — hech
+      qachon ishga tushmagan. Bo'ron 52 ga ko'tarildi (bir bo'ron `BLIZZARD_TICKS`
+      = bir kun davom etadi, demak o'zi yolg'iz chegarani bosib o'tishi kerak).
+      Endi: qarovsiz yo'l kunlarning 65-95% ida yopiq, **Qor brigadasi** bilan
+      0%. Zondning o'zi ham xato o'lchayotgan edi — yo'l yoniga brigada qo'yib
+      "yopildimi?" deb so'rardi; endi ikkala holatni ham chiqaradi.
+
+      **Tozalashning ikki javobi:** `PlayerCommand::ClearSnow` — odamni
+      yuborasiz, borib belkurak uradi (`Bury`/`ChopTile` bilan bir xil
+      "yurib borib ish qilish" naqshi, `GameState.clear_orders`); va yangi
+      **Qor brigadasi** binosi — ishchi qo'ysang `SNOW_CREW_RADIUS`=7 ichini
+      o'zi ochiq tutadi, eng chuqur joydan boshlab, teng chuqurlikda yo'lga
+      ustunlik berib.
+
+      Yo'l **chizib** quriladi (bitta sudrash = bitta `BuildRoad` buyrug'i,
+      `MAX_ROAD_TILES_PER_COMMAND` bilan chegaralangan), oldindan ko'rinadi
+      va narxi hisoblanadi; tasdiqlash V0.16'ning ✓/✗ paneli orqali —
+      sudrashning o'zi serverga hech narsa yubormaydi.
+
+      Saqlov **FCWORLD16** (`legacy::TileV15` — birinchi marta har-TAYL
+      maydon qo'shildi, ya'ni muzlatilgan ko'zgu `MAP_W*MAP_H` qiymatni
+      qamraydi). Eski olamda yo'l yo'q va qor 0 — yuklash hech qachon
+      ko'milmagan koloniyani ko'mib qo'ymasligi kerak.
+
+      Testlar: `tests/road_tests.rs`, `tests/snow_tests.rs`,
+      `persist::v15_save_migrates`; balans zondi `examples/v019_balance.rs`.
+- [x] **V0.18 — Ekspeditsiya, aholi hayoti, qonunlar kitobi, global bozor va
+      Global Olamga BORIB-KELISH** (2026-07-27). Bitta relizda beshta ish, chunki
+      to'rttasi bir xil bo'shliqni to'ldiradi: shaxsiy olamda qiladigan ish
+      tugab qolardi, Global Olamda esa boshidanoq maqsad yo'q edi.
+
+      **Ekspeditsiya** (`types/expedition.rs`, `sim/expedition.rs`): 2-4 kishilik
+      guruh xaritadan tashqariga 1-4 kunga ketadi (`ExpeditionSite` — Muzli
+      o'rmon / Tashlab ketilgan kon / Vayron shahar / Muz dalalari; har biri
+      boshqa (davomiylik, xavf, o'lja) nuqtasi, biri ikkinchisining kuchaytmasi
+      emas). Yo'lga chiqqanlar `GameState.survivors`dan **butunlay chiqadi** va
+      ekspeditsiyaning o'z ichida saqlanadi — "uzoqda" bayrog'i bilan ro'yxatda
+      qolsa, ochlik/sovuq/charchoq/uyqu/ovqat sahnasi — har bir tik tizimi
+      alohida "agar uzoqda bo'lmasa" tarmog'ini talab qilardi va bitta unutilgan
+      tarmoq odamni yo'q joyda muzlatib o'ldirardi. Oziq-ovqat zaxirasi oldindan
+      to'liq yechiladi (erta chaqirib olish uni qaytarmaydi), o'lja guruh
+      sifatiga (daraja/charchoq/yosh) ko'paytiriladi, xavf faqat jarohat va
+      kasallik keltiradi — hech kim yo'lda o'lmaydi. Vayron shahar yagona
+      manzil: u yerdan odam olib kelish mumkin. Yetakchi guruhni boshlashi
+      mumkin, lekin o'rindiq u bilan birga ketadi (Tunnel bilan bir xil qoida).
+      Mag'lubiyat sharti tuzatildi: yo'lda guruh borligida bo'sh vodiy hali
+      mag'lubiyat emas.
+
+      **Aholi hayoti** (`Survivor::age_days`/`partner`, `LifeStage`,
+      `sim/lifecycle.rs`): bola ishlamaydi (lekin ovqat yeydi va joy egallaydi),
+      keksa kamroq ishlab chiqaradi, ikkalasi ham kasallikka moyilroq
+      (`FRAIL_SICK_MULTIPLIER`); juftlar tug'ilish ehtimolini ko'taradi (lekin
+      hech qachon shart emas — V0.11 ehtimoli pol bo'lib qoladi); qarilikdan
+      o'lim mavjud yagona o'lim yo'lidan o'tadi (jasad, motam, morale, sherik
+      bog'lamini tozalash). **Yosh shkalasi o'yin uzunligiga qarab kalibrlandi:**
+      dastlab "inson yoshi" (kattalik 14, keksalik 90) qo'yilgan edi — olam
+      `DEFAULT_WIN_DAYS`=12 da tugagani uchun bu butun mexanikani ko'rinmas
+      qilardi: bola hech qachon ulg'aymasdi, keksa umuman paydo bo'lmasdi.
+      Endi kattalik 6, keksalik 40, kelib qo'shiluvchilar 8-34 oralig'idan
+      (eng kattalari keksalikdan bir necha kun narida, shu sabab keksalar
+      boshidanoq bor; oraliq keng — asoschilar guruhi bir vaqtda qarimasin).
+
+      **Qonunlar kitobi** (`types/law.rs`, `sim/lawbook.rs`): 7 qonun, bir
+      vaqtda 3 tagacha, o'zgartirishlar orasida sovutish davri. Texnologiyadan
+      farqi — har birining foydasi bor va **narxi ham bor**, va bekor qilinadi.
+      Effektlar `sim::tick`da `match Law` bilan emas, `GameState::law_*_multiplier`
+      so'rovlari orqali o'qiladi, ya'ni yangi qonun — ma'lumot o'zgarishi, tik
+      ichida yangi tarmoq emas. Bo'sh kitobda har bir ko'paytma aynan 1.0
+      (V0.18'gacha bo'lgan balans tegilmagan — buni test qulflaydi).
+
+      **Takroriy missiya tsikllari** (`sim/missions.rs`): dastlabki beshtalik
+      tugagach yangi, qiyinroq tsikl beriladi (`MAX_MISSION_CYCLES`gacha).
+      Tunnel qulfi bir marta ochiladi va hech qachon yopilmaydi.
+
+      **Global bozor** (`crates/fc-net/src/market.rs`): o'yinchi-o'yinchi
+      buyurtma kitobi (SQLite, akkauntlar DB'sida). V0.13'dagi Tunnel karvoni
+      NPC narx ro'yxati bilan savdo qilardi — bu ikkinchi yarmi: narigi tomonda
+      boshqa o'yinchining koloniyasi turadi. Savdo **o'z shahringdan** qilinadi
+      (zaxira o'sha yerda; markaziy olamning zaxirasi umumiy, shu sabab u yerda
+      taqiqlangan). Buyurtma qo'yilganda tovar/oltin darhol eskrovga olinadi,
+      qarshi tomon darhol hisob-kitob qiladi, buyurtma egasining daromadi esa
+      **hamyonga** tushadi va u keyingi safar olamiga kirganda to'lanadi —
+      ishlamayotgan olamga yozish yo'q.
+
+      **Qaytish yo'li** (`ClientMsg::ReturnHome`, `sim::extract_settlers`/
+      `inject_returnees`, `WorldManager::return_home`): Tunnel doim bir tomonlama
+      edi — yetakchi va 5 tagacha aholi Global Olamga o'tib, u yerda abadiy
+      qolardi. Endi ular kasbi/XP'si bilan uyga qaytadi, markazda qurgan
+      binolari joyida qoladi (uyga qaytish — chiqib ketish emas), va
+      `EnterCentral` guruhni yana to'ldiradi, ya'ni sayohat takrorlanadi.
+
+      **Saqlov FCWORLD15** (`legacy::SurvivorV14`/`GameStateV14` muzlatilgan
+      ko'zgular). Eski olamlarda yosh yo'q — nol berish butun koloniyani
+      ishlay olmaydigan chaqaloqlarga aylantirib, yuklanish paytida jim ochlik
+      keltirar edi; shu sabab yosh survivor id'sidan deterministik chiqariladi
+      (`legacy::migrated_age`).
+
+      Testlar: `tests/expedition_tests.rs`, `tests/lifecycle_tests.rs`,
+      `tests/law_tests.rs`, `tests/mission_cycle_tests.rs`,
+      `tests/market_tests.rs`, `tests/return_home_e2e.rs`; balans zondi
+      `examples/v018_balance.rs`.
 - [x] **Clash-of-Clans uslubidagi joylashtirish oqimi + bino yo'nalishi**
       (V0.16, 2026-07-26): bino endi bosgan zahoti QURILMAYDI — birinchi bosish
       uni `PendingPlace`ga tashlaydi (arvoh o'sha taylda muzlaydi, oldi tomonini

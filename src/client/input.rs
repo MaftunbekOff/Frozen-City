@@ -6,6 +6,7 @@ use bevy::window::PrimaryWindow;
 
 use frozen_city::game::types::{
     BuildingKind, CONSTRUCTION_CREW_MAX, GamePhase, GameState, PlayerCommand, Terrain,
+    MAX_ROAD_TILES_PER_COMMAND,
 };
 use frozen_city::net::protocol::ClientMsg;
 
@@ -37,9 +38,9 @@ impl ModalBlockers<'_> {
 /// `BuildMode`/`RelocateMode`.
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct PlacementModes<'w> {
-    build: ResMut<'w, BuildMode>,
-    relocate: ResMut<'w, RelocateMode>,
-    pending: ResMut<'w, PendingPlace>,
+    pub build: ResMut<'w, BuildMode>,
+    pub relocate: ResMut<'w, RelocateMode>,
+    pub pending: ResMut<'w, PendingPlace>,
 }
 
 /// A world-space click closer than this to a survivor's sim position selects
@@ -340,6 +341,7 @@ pub fn build_input(
     view: Res<GameView>,
     net: Res<NetConn>,
     mut modes: PlacementModes,
+    mut road: super::roads::RoadModes,
     mut selection: ResMut<Selection>,
     mut survivor_sel: ResMut<SurvivorSelection>,
     mut move_queue: ResMut<MoveOrderQueue>,
@@ -380,12 +382,24 @@ pub fn build_input(
         pending.0 = None;
         selection.0 = None;
         survivor_sel.0 = None;
+        // V0.19: Escape backs all the way out of the road tool too — a half-
+        // painted stroke never survives it, same "cancels cleanly" guarantee
+        // every other mode here gets.
+        *road.mode = super::roads::RoadMode::Off;
+        road.paint.reset();
     }
     if buttons.just_pressed(MouseButton::Right) {
         if pending.0.is_some() {
             // Back out of the confirm step to positioning — the kind stays
             // selected so the ghost resumes following the cursor.
             pending.0 = None;
+        } else if !road.paint.tiles.is_empty() {
+            // Back out of an unconfirmed stroke — the tool stays armed for a
+            // new one, same "right-click backs out of the confirm step"
+            // convention as a pending building drop just above.
+            road.paint.reset();
+        } else if road.mode.active() {
+            *road.mode = super::roads::RoadMode::Off;
         } else if build.0.is_some() || relocate.0.is_some() {
             build.0 = None;
             relocate.0 = None;
@@ -431,7 +445,11 @@ pub fn build_input(
     // ghost at its tile and shows the chosen `facing`; otherwise, while
     // positioning, it follows the cursor at `facing: 0`.
     let ghost_show: Option<(u8, u8, u8, BuildingKind, bool)> = if let Some(p) = pending.0 {
-        Some((p.tx, p.ty, p.facing, p.kind, false))
+        // V0.18: a pending drop can be a relocation now, and it must keep
+        // validating against `can_relocate` — `can_place` would count the
+        // building's own current footprint as "occupied" and paint the ghost
+        // red on every tile it could actually move to.
+        Some((p.tx, p.ty, p.facing, p.kind, p.relocating.is_some()))
     } else if let (Some(kind), Some((tx, ty))) = (build.0.or(relocating_kind), cursor_tile) {
         Some((tx, ty, 0, kind, relocate.0.is_some()))
     } else {
@@ -445,7 +463,14 @@ pub fn build_input(
             t.translation.z = pos.z;
             t.rotation = Quat::from_rotation_y(facing as f32 * std::f32::consts::FRAC_PI_2);
             let valid = if is_relocate {
-                relocate.0.map(|id| state.can_relocate(id, tx, ty).is_ok()).unwrap_or(false)
+                // The id lives on the pending drop once one exists, and on
+                // `RelocateMode` while still positioning.
+                pending
+                    .0
+                    .and_then(|p| p.relocating)
+                    .or(relocate.0)
+                    .map(|id| state.can_relocate(id, tx, ty).is_ok())
+                    .unwrap_or(false)
             } else {
                 state.can_place(kind, tx, ty).is_ok()
             };
@@ -469,13 +494,29 @@ pub fn build_input(
     // Clicks.
     if buttons.just_pressed(MouseButton::Left) && !ui_hover.0 && state.phase == GamePhase::Running
     {
-        if let Some(id) = relocate.0 {
+        if road.mode.active() {
+            // Handled by `road_drag_input` below — a road tool armed means
+            // every click paints a stroke instead of selecting/building.
+        } else if let Some(id) = relocate.0 {
+            // V0.18: a relocation now goes through the SAME confirm step a
+            // placement does — the click only drops the ghost, and nothing
+            // reaches the server until ✓. That's what makes ⟳ possible while
+            // moving (and removes the need for a separate rotate button):
+            // the player answers "where" and "which way" together.
             if let Some((tx, ty)) = cursor_tile {
                 if state.can_relocate(id, tx, ty).is_ok() {
-                    net.send(ClientMsg::Cmd(PlayerCommand::RelocateBuilding { building: id, x: tx, y: ty }));
-                    // One-shot: unlike `BuildMode`, relocating targets one
-                    // specific building, not a repeatable kind.
-                    relocate.0 = None;
+                    let kind = state.find_building(id).map(|b| b.kind);
+                    // Start from the building's CURRENT heading, not 0, so
+                    // merely nudging a building one tile over doesn't
+                    // silently spin it back to south-facing.
+                    let facing = pending
+                        .0
+                        .map(|p| p.facing)
+                        .or_else(|| state.find_building(id).map(|b| b.facing))
+                        .unwrap_or(0);
+                    if let Some(kind) = kind {
+                        pending.0 = Some(PendingPlaceData { kind, tx, ty, facing, relocating: Some(id) });
+                    }
                 }
             }
         } else if let Some(kind) = build.0 {
@@ -487,7 +528,7 @@ pub fn build_input(
             if let Some((tx, ty)) = cursor_tile {
                 if state.can_place(kind, tx, ty).is_ok() {
                     let facing = pending.0.map(|p| p.facing).unwrap_or(0);
-                    pending.0 = Some(PendingPlaceData { kind, tx, ty, facing });
+                    pending.0 = Some(PendingPlaceData { kind, tx, ty, facing, relocating: None });
                 }
             }
         } else if let Some(world) = cursor {
@@ -507,6 +548,60 @@ pub fn build_input(
 fn hide_ghost(ghost: &mut Query<(&mut Transform, &GhostMarker, &mut Visibility)>) {
     if let Ok((_, _, mut vis)) = ghost.single_mut() {
         *vis = Visibility::Hidden;
+    }
+}
+
+/// V0.19: the road/erase drag itself — split out of `build_input` because a
+/// stroke spans many frames (`buttons.pressed`, not `just_pressed`) unlike
+/// every other click that system resolves in one frame. `build_input` already
+/// skips its own click routing while `RoadMode` is armed (see its "Clicks."
+/// section), so this is the only place a stroke's tiles get written.
+pub fn road_drag_input(
+    buttons: Res<ButtonInput<MouseButton>>,
+    ui_hover: Res<UiHover>,
+    view: Res<GameView>,
+    mut road: super::roads::RoadModes,
+    window: Query<&Window, With<PrimaryWindow>>,
+    camera: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    modal: ModalBlockers,
+) {
+    if !road.mode.active() || modal.blocking() {
+        return;
+    }
+    let Some(state) = view.ready() else { return };
+    if state.phase != GamePhase::Running {
+        return;
+    }
+    if buttons.just_pressed(MouseButton::Left) && !ui_hover.0 {
+        // A fresh stroke always starts a fresh batch: the previous one, if
+        // any, was either already confirmed/cancelled or the player is
+        // choosing to abandon it by starting somewhere else — there's no
+        // separate "clear" gesture to wait for.
+        road.paint.tiles.clear();
+        road.paint.dragging = true;
+        road.paint.erasing = *road.mode == super::roads::RoadMode::Erase;
+    }
+    if road.paint.dragging && buttons.pressed(MouseButton::Left) && !ui_hover.0 {
+        let cursor_tile = window
+            .iter()
+            .next()
+            .zip(camera.iter().next())
+            .and_then(|(w, (c, gt))| cursor_ground(w, c, gt))
+            .and_then(world_to_tile);
+        if let Some((tx, ty)) = cursor_tile {
+            let from = road.paint.tiles.last().copied().unwrap_or((tx, ty));
+            for tile in super::roads::line_tiles(from, (tx, ty)) {
+                if road.paint.tiles.len() >= MAX_ROAD_TILES_PER_COMMAND {
+                    break;
+                }
+                if !road.paint.tiles.contains(&tile) {
+                    road.paint.tiles.push(tile);
+                }
+            }
+        }
+    }
+    if road.paint.dragging && buttons.just_released(MouseButton::Left) {
+        road.paint.dragging = false;
     }
 }
 

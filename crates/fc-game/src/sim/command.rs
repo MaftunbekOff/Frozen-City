@@ -2,6 +2,73 @@ use crate::rng::Rng;
 use crate::types::*;
 use super::*;
 
+/// Bind one named survivor (by index) to `building`, doing everything an
+/// assignment implies: raise the building's headcount, point the survivor at
+/// it, drop any in-progress chop errand, and reset training on a KIND change.
+///
+/// Extracted in V0.20 because three commands need exactly this and only one
+/// of them used to do it. `Place`'s auto-crew and `AdjustWorkers`' `+` both
+/// used to just increment `Building::workers` — an ANONYMOUS worker, bound to
+/// nobody. The building then reported "1 working" while every survivor stood
+/// around with an empty workplace and walked nowhere, because movement keys
+/// off `assigned_building`, which no one had. The count and the world
+/// disagreed, and the player could see both.
+fn bind_survivor(state: &mut GameState, s_idx: usize, building: u32) {
+    let Some(kind) = state.buildings.iter().find(|b| b.id == building).map(|b| b.kind) else {
+        return;
+    };
+    if let Some(b) = state.buildings.iter_mut().find(|b| b.id == building) {
+        b.workers += 1;
+    }
+    let s = &mut state.survivors[s_idx];
+    s.assigned_building = Some(building);
+    // Reassigning away from the Furnace drops any in-progress chop errand —
+    // they're not building it anymore. A log already chopped and being
+    // carried home is credited now rather than destroyed: the tree is gone
+    // either way.
+    let carried = s.carrying_wood;
+    s.chop_target = None;
+    s.carrying_wood = false;
+    // A different building KIND resets training progress; moving within the
+    // same kind keeps it, since the trade is what's learned.
+    if s.trained_kind != Some(kind) {
+        s.trained_kind = Some(kind);
+        s.xp = 0.0;
+    }
+    if carried {
+        state.stock.wood += 1.0;
+    }
+}
+
+/// The idle survivors a new crew should be drawn from, lowest id first —
+/// deterministic (ids only ever grow and the roster is never reordered), so
+/// the same seed always crews the same site with the same people.
+fn idle_ids(state: &GameState, want: usize) -> Vec<u32> {
+    let mut ids: Vec<u32> = state
+        .survivors
+        .iter()
+        .filter(|s| s.assigned_building.is_none())
+        .map(|s| s.id)
+        .collect();
+    ids.sort_unstable();
+    ids.truncate(want);
+    ids
+}
+
+/// Bind up to `want` idle survivors to `building`. Returns how many actually
+/// took the job.
+fn crew_from_idle(state: &mut GameState, building: u32, want: usize) -> usize {
+    let ids = idle_ids(state, want);
+    let mut taken = 0;
+    for id in ids {
+        if let Some(idx) = state.survivors.iter().position(|s| s.id == id) {
+            bind_survivor(state, idx, building);
+            taken += 1;
+        }
+    }
+    taken
+}
+
 /// Validate and apply a player command. Invalid commands are silently ignored
 /// (the client pre-validates, so this only happens on races or tampering).
 pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
@@ -34,19 +101,6 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                 if state.stock.wood < spent_wood {
                     return;
                 }
-                // V0.8: yangi bino qurilish maydonchasi sifatida boshlanadi —
-                // bo'sh ishchilardan avtomatik usta-brigada tuziladi (kam
-                // bo'lsa bori bilan; hech kim bo'lmasa qurilish o'z-o'zidan
-                // siljimaydi, o'yinchi keyin +/- bilan biriktiradi).
-                // MARKAZIY olamda brigada tuzilmaydi: u yerda har bir aholi
-                // akkauntga tegishli, anonim jalb qilish `AdjustWorkers`
-                // taqiqlangani bilan bir xil sabablarga ko'ra mumkin emas —
-                // egasi o'z ko'chmanchisini saytga o'zi biriktiradi.
-                let crew = if state.central {
-                    0
-                } else {
-                    (state.idle_workers()).min(CONSTRUCTION_CREW_MAX as u32) as u8
-                };
                 state.stock.wood -= spent_wood;
                 let id = state.next_id;
                 state.next_id += 1;
@@ -60,16 +114,41 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                     kind: *kind,
                     x: *x,
                     y: *y,
-                    workers: crew,
+                    // Crewed below, by NAME — see `bind_survivor`.
+                    workers: 0,
                     progress: 0.0,
                     owner: Some(player),
                     owner_account,
                     level: 1,
                     build_left: kind.build_workdays(),
+                    // A new building starts bare: every fitting is bought
+                    // afterwards (`UpgradeFurnishing`). An empty vec reads
+                    // as all-zero everywhere (`furnishing_level`).
+                    furnishings: Vec::new(),
                     // Visual only; clamp defensively so a hand-crafted client
                     // can't smuggle an out-of-range value into the world.
                     facing: *facing % 4,
                 });
+                // V0.8: a new building starts as a construction site and pulls
+                // an automatic crew off the idle pool (as many as there are,
+                // up to the cap; with nobody free the site simply waits for
+                // the player to assign someone).
+                //
+                // V0.20: that crew is drawn BY NAME. It used to be an
+                // anonymous bump of `workers`, which made the site claim a
+                // worker the colony could see standing idle somewhere else —
+                // the count said "1 building", the idle pool dropped to 0, and
+                // the survivor it had supposedly taken walked nowhere and
+                // reported an empty workplace. Naming them makes the picture
+                // and the mechanic the same thing: they walk over, they tire,
+                // they train, and the roster says where they are.
+                //
+                // The CENTRAL world still crews nothing: every settler there
+                // belongs to an account, so conscripting one automatically is
+                // exactly what `AdjustWorkers` is forbidden for there.
+                if !state.central {
+                    crew_from_idle(state, id, CONSTRUCTION_CREW_MAX as usize);
+                }
                 // Central-world economy v1: charge the placing account's
                 // ledger for what it spent, so a showcase can reflect it.
                 if let Some(acc) = owner_account {
@@ -115,31 +194,48 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
             }
         }
         PlayerCommand::AdjustWorkers { building, delta } => {
-            let idle = state.idle_workers() as i32;
-            // Named assignments (`AssignSurvivor`) are a floor this anonymous
-            // +/- can't dip below — it may only drain the anonymous slack.
-            let named = state
-                .survivors
-                .iter()
-                .filter(|s| s.assigned_building == Some(*building))
-                .count() as i32;
-            if let Some(b) = state.buildings.iter_mut().find(|b| b.id == *building) {
-                // V0.8: qurilish maydonchasi o'z sig'imi bilan ishlaydi —
-                // ustalar brigada capigacha, bitgan bino esa o'z kasb
-                // o'rinlarigacha oladi.
-                let max = if b.under_construction() {
-                    CONSTRUCTION_CREW_MAX as i32
-                } else {
-                    b.kind.max_workers() as i32
-                };
-                let cur = b.workers as i32;
-                let target = (cur + *delta as i32).clamp(0, max).max(named);
-                let new = if target > cur {
-                    cur + (target - cur).min(idle)
-                } else {
-                    target
-                };
-                b.workers = new as u8;
+            // V0.20: `+` and `-` move PEOPLE now, not just a number. This used
+            // to add anonymous headcount — the building's count went up and
+            // the idle pool went down, but nobody walked over, nobody tired,
+            // nobody trained, and the roster still said their workplace was
+            // empty. Same incoherence `Place`'s auto-crew had; same fix.
+            let Some(i) = state.buildings.iter().position(|b| b.id == *building) else {
+                return;
+            };
+            let (busy, kind, cur) = {
+                let b = &state.buildings[i];
+                (b.under_construction(), b.kind, b.workers as i32)
+            };
+            // V0.8: a construction site takes a crew up to `CONSTRUCTION_CREW_MAX`
+            // (even for kinds that employ nobody once finished, like a Tent);
+            // a finished building takes its own trade's slots.
+            let max = if busy { CONSTRUCTION_CREW_MAX as i32 } else { kind.max_workers() as i32 };
+            let target = (cur + *delta as i32).clamp(0, max);
+            if target > cur {
+                crew_from_idle(state, *building, (target - cur) as usize);
+            } else if target < cur {
+                let mut to_drop = (cur - target) as usize;
+                // Let go of the most recently added first (highest id), so
+                // repeatedly tapping `-` undoes `+` in the order it happened.
+                let mut named: Vec<u32> = state
+                    .survivors
+                    .iter()
+                    .filter(|s| s.assigned_building == Some(*building))
+                    .map(|s| s.id)
+                    .collect();
+                named.sort_unstable_by(|a, b| b.cmp(a));
+                // Any headcount beyond the named survivors is anonymous slack
+                // — from a test, a tool, or a save written before V0.20. Shed
+                // that first: there is no one to send home for it.
+                let anonymous = (cur as usize).saturating_sub(named.len());
+                let shed_anonymous = anonymous.min(to_drop);
+                to_drop -= shed_anonymous;
+                for id in named.into_iter().take(to_drop) {
+                    if let Some(s) = state.survivors.iter_mut().find(|s| s.id == id) {
+                        s.assigned_building = None;
+                    }
+                }
+                state.buildings[i].workers = target as u8;
             }
         }
         PlayerCommand::AssignSurvivor { survivor, building } => {
@@ -168,8 +264,51 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                         return;
                     }
                     let new_kind = target.kind;
-                    if let Some(prev_id) = prev {
-                        if let Some(b) = state.buildings.iter_mut().find(|b| b.id == prev_id) {
+                    // `Building.workers` is a HEADCOUNT: named survivors
+                    // assigned here, plus anonymous slack filled from the idle
+                    // pool. Naming someone who is ALREADY inside that
+                    // anonymous count (which is everyone, once
+                    // `idle_workers()` has hit zero) must therefore convert a
+                    // slot, never add one — otherwise one person is counted
+                    // twice and the building reads "2 working" with a single
+                    // survivor on site. That was exactly the case after
+                    // `Place` auto-crewed a site from the idle pool and the
+                    // player then assigned that same survivor to it by name.
+                    let vacate = if prev.is_some() {
+                        // Moving between buildings: the old one gives up the
+                        // slot, as it always did.
+                        prev
+                    } else if state.idle_workers() > 0 {
+                        // Genuine slack in the colony — this is a new pair of
+                        // hands, so the headcount really does grow.
+                        None
+                    } else {
+                        // No slack: this survivor is already occupying an
+                        // anonymous slot somewhere. Prefer the target itself
+                        // (the common case, and the only one the player can
+                        // see); otherwise take the lowest-id building that has
+                        // one, which is deterministic and always exists —
+                        // with no idle workers and no named assignment, some
+                        // building's anonymous count must be covering them.
+                        let anonymous_at = |b: &Building| {
+                            let named = state
+                                .survivors
+                                .iter()
+                                .filter(|s| s.assigned_building == Some(b.id))
+                                .count();
+                            b.workers as usize > named
+                        };
+                        let mut ids: Vec<u32> = state
+                            .buildings
+                            .iter()
+                            .filter(|b| anonymous_at(b))
+                            .map(|b| b.id)
+                            .collect();
+                        ids.sort_unstable();
+                        if ids.contains(new_id) { Some(*new_id) } else { ids.first().copied() }
+                    };
+                    if let Some(vacate_id) = vacate {
+                        if let Some(b) = state.buildings.iter_mut().find(|b| b.id == vacate_id) {
                             b.workers = b.workers.saturating_sub(1);
                         }
                     }
@@ -425,6 +564,14 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                 if !kind.upgradeable() || busy || level >= BUILDING_MAX_LEVEL {
                     return;
                 }
+                // V0.20: a room has to be furnished before it can be enlarged
+                // — every fitting it takes must have kept pace with its level
+                // (see `Building::furnishings_keep_pace`). Vacuously true for
+                // anything with no interior, so Tents/Walls/the Furnace climb
+                // exactly as they always did.
+                if !state.buildings[i].furnishings_keep_pace() {
+                    return;
+                }
                 let cost = kind.upgrade_cost_wood(level + 1) as f32;
                 if state.stock.wood < cost {
                     return;
@@ -551,6 +698,153 @@ pub fn apply_command(state: &mut GameState, player: u64, cmd: &PlayerCommand) {
                 }
             }
         }
+        // V0.18: each new mechanic keeps its logic in its own module (see
+        // `sim::expedition` / `sim::lawbook`); this match only routes.
+        PlayerCommand::LaunchExpedition { site, members } => {
+            super::expedition::launch(state, *site, members)
+        }
+        PlayerCommand::RecallExpedition { expedition } => {
+            super::expedition::recall(state, *expedition)
+        }
+        // V0.18: relocate + re-face in one commit (see `RelocateFacing`'s doc
+        // for why it can't be two commands). Everything but the extra
+        // `facing` write is `RelocateBuilding`'s arm verbatim.
+        PlayerCommand::RelocateFacing { building, x, y, facing } => {
+            if state.can_relocate(*building, *x, *y).is_ok() {
+                let idle = state.idle_workers();
+                if let Some(i) = state.buildings.iter().position(|b| b.id == *building) {
+                    let kind = state.buildings[i].kind;
+                    let b = &mut state.buildings[i];
+                    b.x = *x;
+                    b.y = *y;
+                    // Visual only; clamped defensively so a hand-crafted
+                    // client can't smuggle an out-of-range value in (same
+                    // guard `Place` uses).
+                    b.facing = *facing % 4;
+                    b.build_left = kind.build_workdays() * RELOCATE_WORKDAYS_FACTOR;
+                    let idle = if state.central { 0 } else { idle };
+                    let add = (CONSTRUCTION_CREW_MAX.saturating_sub(b.workers) as u32).min(idle) as u8;
+                    b.workers += add;
+                    let name = state.player(player).map(|p| p.name.clone());
+                    if let Some(name) = name {
+                        push_action_event(state, format!("{} started relocating a {}.", name, kind.name()));
+                    }
+                }
+            }
+        }
+        // V0.19: roads and snow. One command per drag — see `BuildRoad`.
+        PlayerCommand::BuildRoad { tiles } => {
+            let mut laid = 0u32;
+            for (x, y) in tiles.iter().take(MAX_ROAD_TILES_PER_COMMAND) {
+                if state.can_lay_road(*x, *y).is_err() {
+                    continue;
+                }
+                // Never on credit: the drag simply stops where the wood does.
+                if state.stock.wood < ROAD_COST_WOOD {
+                    break;
+                }
+                state.stock.wood -= ROAD_COST_WOOD;
+                let idx = tile_index(*x, *y);
+                state.tiles[idx].road = true;
+                // Laying a road clears what had settled on it — the crew is
+                // standing right there.
+                state.tiles[idx].snow = 0;
+                laid += 1;
+            }
+            if laid > 0 {
+                let name = state.player(player).map(|p| p.name.clone());
+                if let Some(name) = name {
+                    push_action_event(state, format!("{} laid {} tiles of road.", name, laid));
+                }
+            }
+        }
+        PlayerCommand::RemoveRoad { tiles } => {
+            let mut torn = 0u32;
+            for (x, y) in tiles.iter().take(MAX_ROAD_TILES_PER_COMMAND) {
+                let idx = tile_index(*x, *y);
+                if state.tiles.get(idx).is_none_or(|t| !t.road) {
+                    continue;
+                }
+                state.tiles[idx].road = false;
+                state.stock.wood += ROAD_COST_WOOD * ROAD_REFUND;
+                torn += 1;
+            }
+            if torn > 0 {
+                let name = state.player(player).map(|p| p.name.clone());
+                if let Some(name) = name {
+                    push_action_event(state, format!("{} tore up {} tiles of road.", name, torn));
+                }
+            }
+        }
+        PlayerCommand::ClearSnow { survivor, x, y } => {
+            if state.tile(*x, *y).is_none() {
+                return;
+            }
+            let Some(s) = state.survivors.iter_mut().find(|s| s.id == *survivor) else {
+                return;
+            };
+            // A manual order always overrides the standing job, exactly like
+            // `MoveSurvivor`/`ChopTile`/`Bury`.
+            s.assigned_building = None;
+            s.move_target = Some((*x, *y));
+            s.chop_target = None;
+            s.bury_target = None;
+            s.carrying_wood = false;
+            let id = s.id;
+            // One order per tile: re-issuing just re-points whoever is going.
+            match state.clear_orders.iter_mut().find(|o| o.x == *x && o.y == *y) {
+                Some(o) => o.survivor = id,
+                None => state.clear_orders.push(ClearOrder {
+                    x: *x,
+                    y: *y,
+                    survivor: id,
+                    work_left: CLEAR_SNOW_WORKDAYS * TICKS_PER_DAY as f32,
+                }),
+            }
+        }
+        // V0.20: buy or improve one fitting. Unlike `UpgradeBuilding` this
+        // never re-enters construction — the room keeps working while the
+        // table is carried in.
+        PlayerCommand::UpgradeFurnishing { building, slot } => {
+            let slot = *slot as usize;
+            let Some(i) = state.buildings.iter().position(|b| b.id == *building) else {
+                return;
+            };
+            let Some((next, cost)) = state.buildings[i].next_furnishing_step(slot) else {
+                return;
+            };
+            if state.buildings[i].under_construction() {
+                return;
+            }
+            if state.stock.wood < cost {
+                return;
+            }
+            state.stock.wood -= cost;
+            if state.central {
+                if let Some(acc) = state.buildings[i].owner_account {
+                    state.credit_ledger(acc, |t| t.wood_spent += cost);
+                }
+            }
+            let kind = state.buildings[i].kind;
+            let b = &mut state.buildings[i];
+            // Grow the vec lazily to exactly the slot count — a building
+            // migrated from before interiors arrives with an empty one.
+            let slots = kind.furnishings().len();
+            if b.furnishings.len() < slots {
+                b.furnishings.resize(slots, 0);
+            }
+            b.furnishings[slot] = next;
+            let fitting = kind.furnishings()[slot];
+            let name = state.player(player).map(|p| p.name.clone());
+            if let Some(name) = name {
+                push_action_event(
+                    state,
+                    format!("{} fitted a {} in the {}.", name, fitting.name(), kind.name()),
+                );
+            }
+        }
+        PlayerCommand::EnactLaw { law } => super::lawbook::enact(state, *law),
+        PlayerCommand::RepealLaw { law } => super::lawbook::repeal(state, *law),
     }
 }
 
@@ -590,8 +884,13 @@ pub(crate) fn survivor_contribution(s: &Survivor, kind: BuildingKind, leader: Op
     // post but gets little done). Both are 1.0 for a rested, healthy
     // survivor, so every pre-V0.17 balance expectation is unchanged on a
     // colony that sleeps and stays well.
-    let condition_factor =
-        s.fatigue_factor() * if s.is_sick() { SICK_WORK_FACTOR } else { 1.0 };
+    // V0.18: age joins the same per-survivor condition band — a child
+    // contributes nothing (they still eat and still need a bunk), an elder
+    // contributes less. 1.0 for every adult, so pre-V0.18 balance holds for
+    // any colony of working-age people.
+    let condition_factor = s.fatigue_factor()
+        * if s.is_sick() { SICK_WORK_FACTOR } else { 1.0 }
+        * s.age_work_factor();
     profession_factor * level_factor * condition_factor
 }
 // `xp_level` endi `types`da yashaydi (klient ko'rinish-darajalari ham xuddi
@@ -632,6 +931,23 @@ pub fn finish_all_construction(state: &mut GameState) {
         if kind == BuildingKind::Furnace && state.furnace_level == 0 {
             state.furnace_lit = true;
             state.furnace_level = 1;
+        }
+        // V0.21: a finished building is not an OPERATIONAL one — production
+        // comes from the workbench inside it (`FurnishingKind::cycle`), and a
+        // bare room yields nothing. This helper exists so a test that cares
+        // about a working building's effect can skip the parts it isn't
+        // testing, so it fits the first workbench too (free, like the
+        // construction it also skips). Tests that care about the interior
+        // itself drive `UpgradeFurnishing` and see the real costs.
+        if let Some(slot) = kind.furnishings().iter().position(|f| *f == FurnishingKind::Workbench) {
+            if let Some(b) = state.buildings.iter_mut().find(|b| b.id == id) {
+                if b.furnishings.len() < kind.furnishings().len() {
+                    b.furnishings.resize(kind.furnishings().len(), 0);
+                }
+                if b.furnishings[slot] == 0 {
+                    b.furnishings[slot] = 1;
+                }
+            }
         }
     }
 }

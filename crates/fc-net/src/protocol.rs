@@ -106,6 +106,37 @@ pub enum ClientMsg {
     /// `VisitFriend` into the sender's personal world while the sender isn't
     /// online there (default: no). Answered with `ServerMsg::VisitPolicy`.
     SetVisitPolicy { allow_offline: bool },
+    /// V0.18 — the way BACK. Sixth possible first message: sign in, bring
+    /// this account's settlers home out of the central world, and join the
+    /// account's own personal world with them. The mirror of `EnterCentral`:
+    /// that one migrates people out through the Tunnel, this one migrates
+    /// them back in (`sim::extract_settlers` / `sim::inject_returnees`).
+    /// Buildings placed in the shared city stay there — going home is not a
+    /// withdrawal from the Global World, just a trip home.
+    /// (Appended: bincode enum indices are positional.)
+    ReturnHome {
+        login: String,
+        password: String,
+        token: Option<u64>,
+    },
+    /// V0.18 global market: ask for the current order book plus this
+    /// account's pending payouts. Answered with `ServerMsg::Market`.
+    RefreshMarket,
+    /// V0.18 global market: post an order. `selling` orders escrow the goods
+    /// out of the poster's stockpile immediately; buying orders escrow the
+    /// gold. Central world only.
+    PostOrder {
+        good: fc_game::types::TradeGood,
+        amount: u32,
+        /// Gold per unit.
+        unit_price: f32,
+        selling: bool,
+    },
+    /// V0.18 global market: take (part of) someone else's order by id.
+    TakeOrder { order: i64, amount: u32 },
+    /// V0.18 global market: withdraw one of the sender's own orders; whatever
+    /// is left in escrow returns as a pending payout.
+    CancelOrder { order: i64 },
 }
 
 /// One friend row in `ServerMsg::Social`.
@@ -135,6 +166,49 @@ pub struct ShowcaseEntry {
     /// available (the requester's own central-world `GameState` already has
     /// them in memory; `None` when the requester isn't asking from there).
     pub central_contribution: Option<fc_game::types::ContributionTotals>,
+}
+
+/// V0.18: one live row of the global market's order book. Prices are per
+/// unit of `good`; `amount` is what's still unfilled (an order is removed
+/// once it reaches 0).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct MarketOrder {
+    pub id: i64,
+    pub account: i64,
+    /// Display name of the poster, resolved server-side so the client never
+    /// has to look accounts up.
+    pub name: String,
+    pub good: fc_game::types::TradeGood,
+    pub amount: u32,
+    pub unit_price: f32,
+    /// True when the poster is SELLING `good` for gold; false when they're
+    /// buying it.
+    pub selling: bool,
+}
+
+/// V0.18: goods and gold owed to an account that were earned (or refunded)
+/// while it wasn't connected anywhere. Credited into the account's stockpile
+/// the next time it joins a world — the market never reaches into a world
+/// that isn't running (see `market.rs`).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq)]
+pub struct Wallet {
+    pub gold: f32,
+    pub wood: f32,
+    pub coal: f32,
+    pub food: f32,
+    pub fur: f32,
+    pub cloth: f32,
+}
+
+impl Wallet {
+    pub fn is_empty(&self) -> bool {
+        self.gold == 0.0
+            && self.wood == 0.0
+            && self.coal == 0.0
+            && self.food == 0.0
+            && self.fur == 0.0
+            && self.cloth == 0.0
+    }
 }
 
 /// Which of `GameState`'s pricier collection fields actually ride along on a
@@ -196,6 +270,15 @@ pub enum ServerMsg {
     /// second-value change while the world sits in game-over, so the overlay
     /// can show a live countdown instead of a silent 45 s command freeze.
     ResetCountdown { seconds_left: u32 },
+    /// V0.18: the global market's order book plus this account's own pending
+    /// payouts, sent in answer to `RefreshMarket` and after every accepted
+    /// market command. (Appended: bincode enum indices are positional.)
+    Market {
+        orders: Vec<MarketOrder>,
+        /// What the market still owes the requesting account (credited on
+        /// their next world join) — `None` for a guest with no account.
+        wallet: Option<Wallet>,
+    },
 }
 
 /// Deflate level: fast enough to run every tick on a shared box, still gets

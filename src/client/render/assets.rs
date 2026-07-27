@@ -14,7 +14,13 @@ use crate::client::*;
 
 /// Fixed `BuildingKind` order backing `GameAssets::building_mats` — index
 /// `i` corresponds to `ALL_KINDS[i]`.
-const ALL_KINDS: [BuildingKind; 15] = [
+///
+/// V0.22: MUST list every variant — `building_mat`'s lookup panics on a
+/// miss. `SnowCrew` (V0.19) was missing here until this pass, which meant
+/// placing one paniced the client; caught while wiring furnished rooms into
+/// `spawn_room` (every room-kind arm calls `building_mat`, including this
+/// one now that it's no longer its own dedicated match arm).
+const ALL_KINDS: [BuildingKind; 16] = [
     BuildingKind::Furnace,
     BuildingKind::Tent,
     BuildingKind::Sawmill,
@@ -29,6 +35,7 @@ const ALL_KINDS: [BuildingKind; 15] = [
     BuildingKind::Gate,
     BuildingKind::Well,
     BuildingKind::Farmhouse,
+    BuildingKind::SnowCrew,
     BuildingKind::Tunnel,
 ];
 
@@ -88,7 +95,7 @@ pub struct GameAssets {
     pub survivor_skin_sick_mat: Handle<StandardMaterial>,
     /// One body material per `BuildingKind` (see `ALL_KINDS`), shared so
     /// every building of the same kind batches into one draw call.
-    pub building_mats: [Handle<StandardMaterial>; 15],
+    pub building_mats: [Handle<StandardMaterial>; 16],
     /// Furnace base/chimney stone — identical for every furnace.
     pub furnace_stone_mat: Handle<StandardMaterial>,
     /// The Tunnel's dark mouth/opening, once unlocked.
@@ -98,6 +105,10 @@ pub struct GameAssets {
     pub hunter_roof_mat: Handle<StandardMaterial>,
     pub greenhouse_glass_mat: Handle<StandardMaterial>,
     pub hospital_cross_mat: Handle<StandardMaterial>,
+    /// Generic stone gray — despite the name (kept from V0.16, when this was
+    /// Kitchen-exclusive), V0.22 reuses it for every room's roof chimney
+    /// AND every bought `Heater` fitting's stove ring (`render::buildings`'s
+    /// `spawn_room`/`spawn_furnishing`) — one shared "stone" look colony-wide.
     pub kitchen_stone_mat: Handle<StandardMaterial>,
     pub warehouse_plank_mat: Handle<StandardMaterial>,
     /// V0.16: muted fur/pelt rug laid beside a Tent — decorative only, no
@@ -121,6 +132,20 @@ pub struct GameAssets {
     pub corpse_mat: Handle<StandardMaterial>,
     /// V0.11: the wooden cross marking a `Grave`.
     pub grave_cross_mat: Handle<StandardMaterial>,
+    /// V0.22: a room's wood floor — `spawn_room`'s interior. A slightly
+    /// different tone from `warehouse_plank_mat` (the wall frame/furniture
+    /// timber) so the floor reads as its own surface, not more framing.
+    pub room_floor_mat: Handle<StandardMaterial>,
+    /// V0.22: the snow-covered pitched roof every room-kind building shows
+    /// while NOT selected (`spawn_room`'s `BuildingRoof` group). A few kinds
+    /// swap this for a themed handle instead (Greenhouse's glass, HunterHut's
+    /// and TailorShop's own roof tones) — see `spawn_room`.
+    pub roof_snow_mat: Handle<StandardMaterial>,
+    /// V0.22: shared flame material for every bought `Heater` fitting's small
+    /// stove (`spawn_furnishing`) — one handle for every room's hearth,
+    /// animated in lockstep by `animate_meal_fire` (see `MealFireGlow`'s doc
+    /// comment for why that system's name predates this broader use).
+    pub heater_fire_mat: Handle<StandardMaterial>,
 }
 
 /// Shared body material handle for a building kind — keeps same-kind
@@ -186,6 +211,14 @@ pub fn setup_camera_and_assets(
         DirectionalLight {
             illuminance: 9_000.0,
             shadow_maps_enabled: *quality != Quality::Low,
+            // Raised well above Bevy's defaults (0.02 / 1.8). This scene is
+            // one big flat plane covered in small objects, which is the worst
+            // case for shadow acne: a nearly-parallel surface samples the
+            // depth map at grazing incidence and self-shadows in stripes. The
+            // sun's own elevation floor (`effects.rs`) does the heavy lifting;
+            // this is the second belt, for the remaining low-angle hours.
+            shadow_depth_bias: 0.06,
+            shadow_normal_bias: 3.0,
             ..default()
         },
         CascadeShadowConfigBuilder {
@@ -388,6 +421,21 @@ pub fn setup_camera_and_assets(
         grave_cross_mat: materials.add(StandardMaterial {
             base_color: Color::srgb(0.36, 0.26, 0.16),
             perceptual_roughness: 0.85,
+            ..default()
+        }),
+        room_floor_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.58, 0.42, 0.26),
+            perceptual_roughness: 0.92,
+            ..default()
+        }),
+        roof_snow_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.90, 0.93, 0.98),
+            perceptual_roughness: 0.85,
+            ..default()
+        }),
+        heater_fire_mat: materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.55, 0.15),
+            emissive: LinearRgba::rgb(4.0, 1.4, 0.3),
             ..default()
         }),
     };

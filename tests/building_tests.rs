@@ -265,8 +265,18 @@ fn new_buildings_cost_wood_and_need_clear_ground() {
         );
 
         // A coal deposit is not "clear ground" for these buildings (only
-        // CoalMine may sit on one).
-        let (cx, cy) = find_spot(&state, BuildingKind::CoalMine);
+        // CoalMine may sit on one). V0.22: ask for an actual coal TILE rather
+        // than a Coal Mine's placement spot — a mine now covers a 3x3 room
+        // and only needs SOME coal beneath it, so its origin tile is often
+        // plain snow, on which a Wall is perfectly legal.
+        let (cx, cy) = (0..MAP_H as u8)
+            .flat_map(|y| (0..MAP_W as u8).map(move |x| (x, y)))
+            .find(|&(x, y)| {
+                state
+                    .tile(x, y)
+                    .is_some_and(|t| t.terrain == Terrain::Coal && t.deposit > 0)
+            })
+            .expect("mapgen always seeds coal");
         assert!(
             state.can_place(kind, cx, cy).is_err(),
             "{kind:?} should not be placeable on a coal deposit"

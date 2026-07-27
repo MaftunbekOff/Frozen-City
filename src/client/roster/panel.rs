@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use frozen_city::game::types::{PlayerCommand, FATIGUE_EXHAUSTED, FATIGUE_TIRED};
+use frozen_city::game::types::{LifeStage, PlayerCommand, FATIGUE_EXHAUSTED, FATIGUE_TIRED};
 use frozen_city::net::protocol::ClientMsg;
 
 use super::super::chat::ChatState;
@@ -229,13 +229,28 @@ pub(crate) fn update_roster(
                 } else {
                     String::new()
                 };
+                // V0.18: Child/Elder gets the same compact "· tag" treatment
+                // as `health_tag` right above — Adult (the common case) stays
+                // untagged. No `i18n_panels` entry exists for this yet (that
+                // catalog isn't ours to extend); `LifeStage::name()`'s plain
+                // English is the documented fallback in the meantime. Partner
+                // (who-with) is full detail reserved for the roomier detail
+                // card (`card.rs`) — this row is already width-constrained.
+                let stage_tag = match s.stage() {
+                    LifeStage::Adult => String::new(),
+                    other => format!(" · {}", other.name()),
+                };
                 // Leader gets its own status word ahead of the workplace —
                 // the settlement's one leader is always worth flagging in the
                 // list, not just on the detail card.
                 if state.leader == Some(s.id) {
-                    format!("{} — {}, {workplace}{health_tag}", profession_level_tag(s, lang), i18n_panels::status_leader(lang))
+                    format!(
+                        "{}{stage_tag} — {}, {workplace}{health_tag}",
+                        profession_level_tag(s, lang),
+                        i18n_panels::status_leader(lang)
+                    )
                 } else {
-                    format!("{} — {workplace}{health_tag}", profession_level_tag(s, lang))
+                    format!("{}{stage_tag} — {workplace}{health_tag}", profession_level_tag(s, lang))
                 }
             })
             .unwrap_or_default();

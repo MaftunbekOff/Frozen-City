@@ -42,6 +42,8 @@ fn settler(id: u32) -> Survivor {
         bury_target: None,
         fatigue: 0.0,
         sick_left: 0.0,
+        age_days: 30.0,
+        partner: None,
     }
 }
 
@@ -125,6 +127,7 @@ fn legacy_central_building_with_no_owner_account_stays_demolishable_by_placing_s
         owner_account: None, // migration default
         level: 1,
         build_left: 0.0,
+        furnishings: Vec::new(),
         facing: 0,
     });
     assert!(
@@ -280,12 +283,13 @@ fn v2_mirror_migrates_to_v3_with_none_owner_account_and_empty_ledger() {
         owner_account: None,
         level: 1,
         build_left: 0.0,
+        furnishings: Vec::new(),
         facing: 0,
     });
     let v2 = GameStateV2 {
         tick: modern.tick,
         win_days: modern.win_days,
-        tiles: modern.tiles.clone(),
+        tiles: modern.tiles.iter().map(frozen_city::net::legacy::TileV15::from).collect(),
         buildings: modern
             .buildings
             .iter()
@@ -358,7 +362,7 @@ fn v2_file_on_disk_round_trips_through_persist_load_at() {
     let v2 = GameStateV2 {
         tick: modern.tick,
         win_days: modern.win_days,
-        tiles: modern.tiles.clone(),
+        tiles: modern.tiles.iter().map(frozen_city::net::legacy::TileV15::from).collect(),
         buildings: modern
             .buildings
             .iter()

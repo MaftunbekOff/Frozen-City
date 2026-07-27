@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use frozen_city::game::types::GamePhase;
 
 use super::super::i18n_hud;
+use super::super::i18n_v018;
 use super::super::theme::TEXT_MUTED;
 use super::super::*;
 use super::*;
@@ -130,10 +131,17 @@ pub fn world_switch_button(
     mut label: Query<&mut Text, With<WorldSwitchLabel>>,
 ) {
     let Some(state) = view.state.as_ref() else { return };
+    // V0.18: pressed from inside the Global World, this button now brings the
+    // account's settlers home with it (`ClientMsg::ReturnHome`, chosen over a
+    // plain `Login` in `menu::start::pending_switch` whenever the session was
+    // central) — the label and transition line use the round-trip-specific
+    // i18n_v018 catalog instead of the old generic "My City" text so the wait
+    // reads as "people are travelling home", matching how the outbound
+    // "Entering the Global World..." transition already reads.
     let target = if session.auth.is_none() {
         None
     } else if state.central {
-        Some((WorldTarget::Personal, i18n_hud::world_switch_my_city(*lang)))
+        Some((WorldTarget::Personal, i18n_v018::return_home(*lang)))
     } else if state.graduated {
         Some((WorldTarget::Central, i18n_hud::world_switch_global(*lang)))
     } else {
@@ -147,7 +155,10 @@ pub fn world_switch_button(
         if let Some((world, _)) = target {
             if *interaction == Interaction::Pressed {
                 pending.0 = Some(world);
-                transition.text = Some(world.transition_label(None, *lang));
+                transition.text = Some(match world {
+                    WorldTarget::Personal => i18n_v018::returning(*lang).to_string(),
+                    _ => world.transition_label(None, *lang),
+                });
                 transition.age = 0.0;
                 next.set(Screen::Menu);
                 return;

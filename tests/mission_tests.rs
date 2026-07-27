@@ -88,6 +88,8 @@ fn population_mission_completes() {
             bury_target: None,
             fatigue: 0.0,
             sick_left: 0.0,
+            age_days: 30.0,
+            partner: None,
         });
         next_id += 1;
     }

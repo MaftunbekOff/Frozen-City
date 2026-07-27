@@ -53,6 +53,21 @@ fn place_and_finish(state: &mut GameState, kind: BuildingKind, x: u8, y: u8) -> 
     id
 }
 
+/// `place_and_finish`, then clears the auto-crewed anonymous construction
+/// crew it leaves behind (`Place` fills up to `CONSTRUCTION_CREW_MAX` idle
+/// survivors in as anonymous workers; finishing only clamps that to the
+/// kind's `max_workers()`, not zero) -- so a freshly finished Sawmill isn't
+/// already at capacity before a test's own `AssignSurvivor` call, which
+/// would otherwise silently no-op. `place_and_staff` above sidesteps this
+/// by targeting an exact worker count; this is for callers that need a
+/// SPECIFIC named survivor holding the slot instead.
+fn place_finish_and_clear_crew(state: &mut GameState, kind: BuildingKind, x: u8, y: u8) -> u32 {
+    let id = place_and_finish(state, kind, x, y);
+    let cur = state.find_building(id).unwrap().workers as i8;
+    sim::apply_command(state, 1, &PlayerCommand::AdjustWorkers { building: id, delta: -cur });
+    id
+}
+
 fn fund(state: &mut GameState) {
     state.stock.food = 9999.0;
     state.stock.water = 9999.0;
@@ -202,7 +217,7 @@ fn a_sick_survivor_produces_at_sick_work_factor() {
     }
 
     let (x, y) = find_sawmill_spot_near_forest(&control);
-    let control_id = place_and_finish(&mut control, BuildingKind::Sawmill, x, y);
+    let control_id = place_finish_and_clear_crew(&mut control, BuildingKind::Sawmill, x, y);
     let control_survivor = control.survivors[0].id;
     sim::apply_command(
         &mut control,
@@ -211,7 +226,7 @@ fn a_sick_survivor_produces_at_sick_work_factor() {
     );
 
     let (x2, y2) = find_sawmill_spot_near_forest(&experiment); // same seed -> same spot
-    let exp_id = place_and_finish(&mut experiment, BuildingKind::Sawmill, x2, y2);
+    let exp_id = place_finish_and_clear_crew(&mut experiment, BuildingKind::Sawmill, x2, y2);
     let exp_survivor = experiment.survivors[0].id;
     sim::apply_command(
         &mut experiment,
@@ -247,10 +262,27 @@ fn a_staffed_hospital_burns_illness_down_faster_than_the_natural_course() {
     }
 
     let (x, y) = find_spot(&experiment, BuildingKind::Hospital);
-    // One anonymous worker, level 1 (`level_factor() == 1.0`) -> exactly
-    // 1.0 hospital "unit", so the expected recovery-rate formula below has
-    // no other multiplier to account for.
-    place_and_staff(&mut experiment, BuildingKind::Hospital, x, y, 1);
+    // V0.20: every worker slot holds a NAMED survivor, so the old "one
+    // anonymous worker = exactly 1.0 unit" shortcut is gone — and a Hospital
+    // is the one building that PUNISHES the wrong trade
+    // (`requires_specialist`, `SKILLED_MISMATCH_PENALTY`), so whoever the site
+    // happened to crew was healing at a tenth of the rate this formula
+    // assumes. Staff it deliberately instead: one rested, healthy, untrained
+    // Medic, whose contribution is exactly `PROFESSION_MATCH_BONUS`.
+    let hospital = place_and_staff(&mut experiment, BuildingKind::Hospital, x, y, 0);
+    let medic = experiment.survivors[1].id;
+    {
+        let s = experiment.survivors.iter_mut().find(|s| s.id == medic).unwrap();
+        s.profession = Profession::Medic;
+        s.xp = 0.0;
+        s.fatigue = 0.0;
+        s.sick_left = 0.0;
+    }
+    sim::apply_command(
+        &mut experiment,
+        1,
+        &PlayerCommand::AssignSurvivor { survivor: medic, building: Some(hospital) },
+    );
 
     let sid = control.survivors[0].id;
     control.survivors.iter_mut().find(|s| s.id == sid).unwrap().sick_left = SICKNESS_TICKS;
@@ -265,7 +297,9 @@ fn a_staffed_hospital_burns_illness_down_faster_than_the_natural_course() {
     let control_left = control.survivors.iter().find(|s| s.id == sid).unwrap().sick_left;
     let experiment_left = experiment.survivors.iter().find(|s| s.id == sid).unwrap().sick_left;
 
-    let hospital_units = 1.0f32;
+    // One Medic at a matching building, rested and untrained: exactly
+    // `PROFESSION_MATCH_BONUS` (see `survivor_contribution`).
+    let hospital_units = PROFESSION_MATCH_BONUS;
     let experiment_rate = 1.0 + hospital_units * HOSPITAL_RECOVERY_PER_UNIT_DAY / TICKS_PER_DAY as f32;
     let expected_control = (SICKNESS_TICKS - ticks as f32 * 1.0).max(0.0);
     let expected_experiment = (SICKNESS_TICKS - ticks as f32 * experiment_rate).max(0.0);

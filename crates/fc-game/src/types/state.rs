@@ -115,6 +115,49 @@ pub struct GameState {
     /// IMPORTANT: bincode serializes this struct positionally — new fields
     /// stay APPENDED here at the end (same rule as `Survivor`).
     pub illness_rng: u64,
+    /// V0.18: parties currently away from the valley. Their members are NOT
+    /// in `survivors` while they're gone — see the [`Expedition`] module doc
+    /// for why they leave the roster entirely instead of carrying an "away"
+    /// flag through every per-tick system.
+    pub expeditions: Vec<Expedition>,
+    /// V0.18: RNG stream for expedition hazard/haul rolls. Its own stream for
+    /// the same reason as `illness_rng`: an expedition can be launched on any
+    /// tick of any day, and sharing `rng`/`event_rng` would silently
+    /// re-sequence arrivals, births and weather from that point on.
+    pub expedition_rng: u64,
+    /// V0.18: the standing laws (see [`Law`]). Capped at `MAX_ACTIVE_LAWS`.
+    pub laws: Vec<Law>,
+    /// V0.18: tick until which the law book is closed after an enact/repeal
+    /// (`LAW_COOLDOWN_TICKS`), so policy is a decision rather than a dial.
+    pub law_cooldown_until: u64,
+    /// V0.18: RNG stream for the daily aging/pairing/old-age rolls — its own
+    /// stream, same reasoning as `illness_rng`/`expedition_rng`.
+    pub lifecycle_rng: u64,
+    /// V0.18: how many EXTRA mission cycles have been issued beyond the
+    /// original one (0 on a fresh world). The Tunnel's unlock latch
+    /// (`tunnel.unlocked`) is set once and never cleared, so re-issuing
+    /// missions can never re-lock it.
+    pub mission_cycle: u32,
+    /// V0.19: tiles a survivor has been sent to shovel clear
+    /// (`PlayerCommand::ClearSnow`). Its own vec rather than a field on
+    /// `Survivor` for the same reason `corpses` is one: the order is about a
+    /// PLACE, it outlives whoever was walking to it (they can die on the way),
+    /// and keeping it here means no `Survivor` field to migrate.
+    pub clear_orders: Vec<ClearOrder>,
+}
+
+/// V0.19: one standing "shovel this tile" order — mirrors `Corpse`'s
+/// remaining-work shape (`bury_left`) exactly, because it is the same kind of
+/// thing: walk there, then spend time.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct ClearOrder {
+    pub x: u8,
+    pub y: u8,
+    /// Who is walking to it. Cleared (and the order dropped) if they die.
+    pub survivor: u32,
+    /// Remaining work in ticks, counting down only while the assigned
+    /// survivor is actually standing on the tile.
+    pub work_left: f32,
 }
 
 impl GameState {
@@ -310,7 +353,149 @@ impl GameState {
     /// here as tools -> leader -> morale to match the brief.
     pub fn colony_production_multiplier(&self) -> f32 {
         let tools = if self.has_tech(Tech::Tools) { TECH_TOOLS_PRODUCTION } else { 1.0 };
-        tools * self.leader_multiplier() * self.morale_multiplier()
+        tools * self.leader_multiplier() * self.morale_multiplier() * self.law_production_multiplier()
+    }
+
+    // --- V0.18: the law book. Every effect a law has on the sim is read
+    // through one of these composed queries, so `sim::tick` never matches on
+    // a specific `Law` variant and a new law is a data change, not a new
+    // branch scattered across the tick. With no law enacted every multiplier
+    // below is exactly 1.0 (and the morale/funeral sums exactly 0.0), so a
+    // world that never opens the book behaves precisely as it did pre-V0.18.
+
+    pub fn has_law(&self, law: Law) -> bool {
+        self.laws.contains(&law)
+    }
+
+    /// Composes `f` over every enacted law multiplicatively.
+    fn law_product(&self, f: impl Fn(Law) -> f32) -> f32 {
+        self.laws.iter().map(|l| f(*l)).product()
+    }
+
+    pub fn law_production_multiplier(&self) -> f32 {
+        self.law_product(Law::production_factor)
+    }
+
+    pub fn law_food_multiplier(&self) -> f32 {
+        self.law_product(Law::food_factor)
+    }
+
+    pub fn law_fatigue_multiplier(&self) -> f32 {
+        self.law_product(Law::fatigue_factor)
+    }
+
+    pub fn law_rest_multiplier(&self) -> f32 {
+        self.law_product(Law::rest_factor)
+    }
+
+    pub fn law_contagion_multiplier(&self) -> f32 {
+        self.law_product(Law::contagion_factor)
+    }
+
+    pub fn law_xp_multiplier(&self) -> f32 {
+        self.law_product(Law::xp_factor)
+    }
+
+    pub fn law_death_morale_multiplier(&self) -> f32 {
+        self.law_product(Law::death_morale_factor)
+    }
+
+    /// Sum (not product) — these are additive per-day morale adjustments,
+    /// exactly like the Kitchen/Hospital/leader terms they join in `tick`.
+    pub fn law_morale_per_day(&self) -> f32 {
+        self.laws.iter().map(|l| l.morale_per_day()).sum()
+    }
+
+    /// Wood a single funeral costs under the current book (0.0 with no
+    /// funeral law enacted).
+    pub fn law_funeral_wood(&self) -> f32 {
+        self.laws.iter().map(|l| l.funeral_wood()).sum()
+    }
+
+    /// Shared validation for `PlayerCommand::EnactLaw` — client greying and
+    /// server authority read the same answer, the `can_place` convention.
+    pub fn can_enact_law(&self, law: Law) -> Result<(), &'static str> {
+        if self.central {
+            return Err("The Global World has no lawbook");
+        }
+        if self.day() < LAW_MIN_DAY {
+            return Err("Too early to pass laws");
+        }
+        if self.tick < self.law_cooldown_until {
+            return Err("The council is still deliberating");
+        }
+        if self.has_law(law) {
+            return Err("Already in force");
+        }
+        if self.laws.len() >= MAX_ACTIVE_LAWS {
+            return Err("Too many laws already stand");
+        }
+        Ok(())
+    }
+
+    /// Shared validation for `PlayerCommand::RepealLaw`.
+    pub fn can_repeal_law(&self, law: Law) -> Result<(), &'static str> {
+        if !self.has_law(law) {
+            return Err("Not in force");
+        }
+        if self.tick < self.law_cooldown_until {
+            return Err("The council is still deliberating");
+        }
+        Ok(())
+    }
+
+    // --- V0.18: expeditions ---
+
+    /// How many people are away on expeditions right now. They are NOT in
+    /// `survivors`, so every population figure the colony reports (housing,
+    /// food, missions, defeat check) already excludes them by construction;
+    /// this is purely for display and for the "don't empty the city" guard.
+    pub fn people_away(&self) -> usize {
+        self.expeditions.iter().map(|e| e.party.len()).sum()
+    }
+
+    /// Shared validation for `PlayerCommand::LaunchExpedition`. `members` are
+    /// survivor ids; duplicates, unknown ids, children, the sick and anyone
+    /// mid-errand are all refused here rather than silently dropped, so the
+    /// client can explain exactly why the button is dead.
+    pub fn can_launch_expedition(
+        &self,
+        _site: ExpeditionSite,
+        members: &[u32],
+    ) -> Result<(), &'static str> {
+        if self.central {
+            return Err("No expeditions leave the Global World");
+        }
+        if self.day() < EXPEDITION_MIN_DAY {
+            return Err("The colony is not ready to send anyone out");
+        }
+        if self.expeditions.len() >= EXPEDITION_MAX_ACTIVE {
+            return Err("A party is already out there");
+        }
+        if members.len() < EXPEDITION_MIN_PARTY {
+            return Err("Too few for a party");
+        }
+        if members.len() > EXPEDITION_MAX_PARTY {
+            return Err("Too many for one party");
+        }
+        for (i, id) in members.iter().enumerate() {
+            if members[..i].contains(id) {
+                return Err("Someone is listed twice");
+            }
+            let Some(s) = self.survivors.iter().find(|s| s.id == *id) else {
+                return Err("Someone is no longer here");
+            };
+            if s.stage() == LifeStage::Child {
+                return Err("Children do not travel");
+            }
+            if s.is_sick() {
+                return Err("The sick cannot travel");
+            }
+        }
+        if self.survivors.len().saturating_sub(members.len()) < EXPEDITION_MIN_STAY_HOME {
+            return Err("Too few would be left at home");
+        }
+        Ok(())
     }
 
     /// Deterministic per-id spawn offset near the furnace, used both for
@@ -403,16 +588,21 @@ impl GameState {
                     })
                 }
                 // Upgrading follows the same ownership rule as tearing down:
-                // only whoever placed the building improves it.
-                PlayerCommand::UpgradeBuilding { building } => {
+                // only whoever placed the building improves it. V0.20's
+                // interior fittings are an improvement to that same building,
+                // so they share the arm.
+                PlayerCommand::UpgradeBuilding { building }
+                | PlayerCommand::UpgradeFurnishing { building, .. } => {
                     self.find_building(*building).is_some_and(|b| match b.owner_account {
                         Some(owner_acc) => account == Some(owner_acc),
                         None => b.owner == Some(pid),
                     })
                 }
                 // Relocating is as much a structural change as upgrading —
-                // same ownership rule.
-                PlayerCommand::RelocateBuilding { building, .. } => {
+                // same ownership rule. V0.18's `RelocateFacing` is the same
+                // action with a heading attached, so it shares the arm.
+                PlayerCommand::RelocateBuilding { building, .. }
+                | PlayerCommand::RelocateFacing { building, .. } => {
                     self.find_building(*building).is_some_and(|b| match b.owner_account {
                         Some(owner_acc) => account == Some(owner_acc),
                         None => b.owner == Some(pid),
@@ -465,6 +655,26 @@ impl GameState {
                 // (mirrors `InvestTunnel`) — there's no "Global World" to
                 // trade with from inside the Global World itself.
                 PlayerCommand::DispatchTradeCaravan { .. } => false,
+                // V0.18: expeditions leave from a colony, and laws govern
+                // one. The Global World is neither — it's a meeting place
+                // with no hunger, no weather and no council, so both are
+                // personal-world-only, exactly like `Research`/`InvestTunnel`
+                // above. (The way OUT of the Global World is the return
+                // migration, not a `PlayerCommand` — see `ClientMsg::ReturnHome`.)
+                PlayerCommand::LaunchExpedition { .. }
+                | PlayerCommand::RecallExpedition { .. }
+                | PlayerCommand::EnactLaw { .. }
+                | PlayerCommand::RepealLaw { .. } => false,
+                // V0.19: no weather runs in the Global World (`tick` returns
+                // before the blizzard/event block for `central`), so no snow
+                // ever falls there and clearing it is meaningless. Roads are
+                // refused for a different reason: a road is a tile property
+                // with no owner, and the shared map's whole authority model
+                // is "you may only undo what you placed" — one account could
+                // otherwise pave over, or tear up, another's approach.
+                PlayerCommand::BuildRoad { .. }
+                | PlayerCommand::RemoveRoad { .. }
+                | PlayerCommand::ClearSnow { .. } => false,
             };
         }
         // Personal/shared-guest worlds have no per-command permission tiering
@@ -525,19 +735,54 @@ impl GameState {
         if x as usize + w as usize > MAP_W || y as usize + h as usize > MAP_H {
             return Err("Out of bounds");
         }
+        self.footprint_is_clear(kind, x, y, None)?;
+        if self.stock.wood < kind.cost_wood() as f32 {
+            return Err("Not enough wood");
+        }
+        Ok(())
+    }
+
+    /// Shared footprint check for [`Self::can_place`] and
+    /// [`Self::can_relocate`] — `ignore` is the building vacating the spot
+    /// (relocation) so it never collides with itself.
+    ///
+    /// V0.22: a mine's rule changed with the room footprint. It used to
+    /// demand that EVERY tile it covered be a coal deposit, which was easy at
+    /// 1x1 and is nearly impossible at 3x3 — deposit blobs are ragged, so the
+    /// building simply became unplaceable. What actually matters is that the
+    /// mine SITS ON a seam: at least one tile of coal under it, and no forest
+    /// in the way of the rest. Extraction follows the same rule (see the
+    /// `CoalMine` arm in `sim::tick`, which draws from the richest covered
+    /// tile rather than assuming the corner one).
+    fn footprint_is_clear(
+        &self,
+        kind: BuildingKind,
+        x: u8,
+        y: u8,
+        ignore: Option<u32>,
+    ) -> Result<(), &'static str> {
+        let (w, h) = kind.size();
+        let mut coal_under = false;
         for dy in 0..h {
             for dx in 0..w {
                 let (tx, ty) = (x + dx, y + dy);
-                if self.building_at(tx, ty).is_some() {
-                    return Err("Space is occupied");
+                if let Some(occupant) = self.building_at(tx, ty) {
+                    if Some(occupant.id) != ignore {
+                        return Err("Space is occupied");
+                    }
                 }
                 let Some(tile) = self.tile(tx, ty) else {
                     return Err("Out of bounds");
                 };
                 match kind {
                     BuildingKind::CoalMine => {
-                        if tile.terrain != Terrain::Coal || tile.deposit == 0 {
-                            return Err("Needs a coal deposit");
+                        // Forest would have to be cleared first; bare snow and
+                        // the seam itself are both fine to build over.
+                        if tile.terrain == Terrain::Forest {
+                            return Err("Ground must be clear");
+                        }
+                        if tile.terrain == Terrain::Coal && tile.deposit > 0 {
+                            coal_under = true;
                         }
                     }
                     _ => {
@@ -548,10 +793,31 @@ impl GameState {
                 }
             }
         }
-        if self.stock.wood < kind.cost_wood() as f32 {
-            return Err("Not enough wood");
+        if kind == BuildingKind::CoalMine && !coal_under {
+            return Err("Needs a coal deposit");
         }
         Ok(())
+    }
+
+    /// V0.22: the tile a Coal Mine at `(x, y)` should draw from — the richest
+    /// seam under its footprint. `None` when every covered tile is spent,
+    /// which is what stops extraction.
+    pub fn richest_coal_under(&self, kind: BuildingKind, x: u8, y: u8) -> Option<usize> {
+        let (w, h) = kind.size();
+        let mut best: Option<(u16, usize)> = None;
+        for dy in 0..h {
+            for dx in 0..w {
+                let (tx, ty) = (x + dx, y + dy);
+                let Some(tile) = self.tile(tx, ty) else { continue };
+                if tile.terrain == Terrain::Coal && tile.deposit > 0 {
+                    let idx = tile_index(tx, ty);
+                    if best.is_none_or(|(d, _)| tile.deposit > d) {
+                        best = Some((tile.deposit, idx));
+                    }
+                }
+            }
+        }
+        best.map(|(_, idx)| idx)
     }
 
     /// V0.16: validation for `PlayerCommand::RotateBuilding` — a finished,
@@ -592,32 +858,46 @@ impl GameState {
         if x as usize + w as usize > MAP_W || y as usize + h as usize > MAP_H {
             return Err("Out of bounds");
         }
-        for dy in 0..h {
-            for dx in 0..w {
-                let (tx, ty) = (x + dx, y + dy);
-                if let Some(occupant) = self.building_at(tx, ty) {
-                    if occupant.id != building {
-                        return Err("Space is occupied");
-                    }
-                }
-                let Some(tile) = self.tile(tx, ty) else {
-                    return Err("Out of bounds");
-                };
-                match kind {
-                    BuildingKind::CoalMine => {
-                        if tile.terrain != Terrain::Coal || tile.deposit == 0 {
-                            return Err("Needs a coal deposit");
-                        }
-                    }
-                    _ => {
-                        if tile.terrain != Terrain::Snow {
-                            return Err("Ground must be clear");
-                        }
-                    }
-                }
-            }
+        self.footprint_is_clear(kind, x, y, Some(building))
+    }
+
+    // --- V0.19: roads and snow ---
+
+    /// Shared validation for one tile of `PlayerCommand::BuildRoad`. A road
+    /// goes on open ground only: not on forest or a coal deposit (both are
+    /// harvestable terrain a road would pave over), and not under a building
+    /// (which occupies the tile outright). Deliberately does NOT check wood —
+    /// a drag is priced as a whole and paid for tile by tile until it runs
+    /// out, so affordability is the caller's business.
+    pub fn can_lay_road(&self, x: u8, y: u8) -> Result<(), &'static str> {
+        let Some(tile) = self.tile(x, y) else {
+            return Err("Out of bounds");
+        };
+        if tile.road {
+            return Err("Already a road");
+        }
+        if tile.terrain != Terrain::Snow {
+            return Err("Ground must be clear");
+        }
+        if self.building_at(x, y).is_some() {
+            return Err("Space is occupied");
         }
         Ok(())
+    }
+
+    /// V0.19: the tile a survivor standing at `(x, y)` is on, if any. Their
+    /// position is a float; this is the one place it is rounded to a tile, so
+    /// movement speed and snow trampling can never disagree about where
+    /// somebody is.
+    pub fn tile_under(&self, x: f32, y: f32) -> Option<&Tile> {
+        if !x.is_finite() || !y.is_finite() {
+            return None;
+        }
+        let (tx, ty) = (x.floor(), y.floor());
+        if !in_bounds(tx as i32, ty as i32) {
+            return None;
+        }
+        self.tile(tx as u8, ty as u8)
     }
 
     /// How many forest units are harvestable within `r` tiles of (x, y) —

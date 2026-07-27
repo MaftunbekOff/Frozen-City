@@ -184,6 +184,41 @@ pub struct Survivor {
     /// colony-wide flat HP drain: an outbreak (`GameState.disease_until`)
     /// now infects individuals, who then carry and spread it themselves.
     pub sick_left: f32,
+    /// V0.18: in-game days lived — counted from birth for anyone born here,
+    /// and from a drawn starting age (`ARRIVAL_AGE_MIN_DAYS`..
+    /// `ARRIVAL_AGE_MAX_DAYS`) for anyone who walked in already grown. Drives
+    /// [`Survivor::stage`]: a child doesn't work, an elder works less and
+    /// eventually dies of old age. Pre-V0.18 saves migrate to a drawn adult
+    /// age rather than 0 — a whole city of newborns would be a very literal
+    /// reading of "no data".
+    pub age_days: f32,
+    /// V0.18: this survivor's partner, by id, if they've paired up. Symmetric
+    /// by construction (`sim::lifecycle` always writes both sides) and cleared
+    /// on either side's death, since a dangling partner id would outlive the
+    /// person it names. Couples raise the colony's birth chance
+    /// (`BIRTH_COUPLE_MULTIPLIER`).
+    pub partner: Option<u32>,
+}
+
+/// V0.18: which stage of life a survivor is in. The single place the
+/// `ADULT_AGE_DAYS`/`ELDER_AGE_DAYS` thresholds are interpreted — shared by
+/// the sim (work output, food share, frailty) and the client (roster tag), so
+/// the two can never disagree about who counts as a child.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LifeStage {
+    Child,
+    Adult,
+    Elder,
+}
+
+impl LifeStage {
+    pub fn name(self) -> &'static str {
+        match self {
+            LifeStage::Child => "Child",
+            LifeStage::Adult => "Adult",
+            LifeStage::Elder => "Elder",
+        }
+    }
 }
 
 impl Survivor {
@@ -202,6 +237,46 @@ impl Survivor {
         }
         let t = ((self.fatigue - super::FATIGUE_TIRED) / (100.0 - super::FATIGUE_TIRED)).clamp(0.0, 1.0);
         1.0 - t * (1.0 - super::FATIGUE_MIN_FACTOR)
+    }
+
+    /// V0.18: this survivor's stage of life, from `age_days`.
+    pub fn stage(&self) -> LifeStage {
+        if self.age_days < super::ADULT_AGE_DAYS {
+            LifeStage::Child
+        } else if self.age_days >= super::ELDER_AGE_DAYS {
+            LifeStage::Elder
+        } else {
+            LifeStage::Adult
+        }
+    }
+
+    /// V0.18: production scale from age — children contribute nothing (they
+    /// still eat and still need a bunk), elders contribute less. Composes
+    /// multiplicatively with `fatigue_factor` and `SICK_WORK_FACTOR` in
+    /// `survivor_contribution`, so an exhausted, sick elder is scaled by all
+    /// three rather than by whichever one the call site remembered.
+    pub fn age_work_factor(&self) -> f32 {
+        match self.stage() {
+            LifeStage::Child => super::CHILD_WORK_FACTOR,
+            LifeStage::Adult => 1.0,
+            LifeStage::Elder => super::ELDER_WORK_FACTOR,
+        }
+    }
+
+    /// V0.18: this survivor's share of `FOOD_PER_SURVIVOR_DAY` — a child eats
+    /// less than an adult. Water is deliberately NOT scaled: thirst doesn't
+    /// care how old you are.
+    pub fn food_factor(&self) -> f32 {
+        match self.stage() {
+            LifeStage::Child => super::CHILD_FOOD_FACTOR,
+            _ => 1.0,
+        }
+    }
+
+    /// V0.18: true at the fragile ends of life (child or elder), where the
+    /// daily infection roll is multiplied by `FRAIL_SICK_MULTIPLIER`.
+    pub fn is_frail(&self) -> bool {
+        !matches!(self.stage(), LifeStage::Adult)
     }
 }
 

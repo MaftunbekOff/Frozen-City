@@ -63,6 +63,19 @@ const MAGIC_V13: &[u8; 9] = b"FCWORLD13";
 // `legacy::GameStateV13` for the frozen pre-V0.17 mirror old saves load
 // through.
 const MAGIC_V14: &[u8; 9] = b"FCWORLD14";
+// V15 (V0.18): `Survivor` grew `age_days`/`partner`, and `GameState` grew
+// expeditions, the law book and two more isolated RNG streams. See
+// `legacy::SurvivorV14` / `legacy::GameStateV14` for the frozen pre-V0.18
+// mirror old saves load through.
+const MAGIC_V15: &[u8; 9] = b"FCWORLD15";
+// V16 (V0.19): `Tile` grew a `road` flag and a `snow` depth, and `GameState`
+// grew `clear_orders`. See `legacy::TileV15` / `legacy::GameStateV15` for the
+// frozen pre-V0.19 mirror old saves load through.
+const MAGIC_V16: &[u8; 9] = b"FCWORLD16";
+// V17 (V0.20): `Building` grew a `furnishings` list (its interior fittings).
+// See `legacy::BuildingV16` / `legacy::GameStateV16` for the frozen
+// pre-V0.20 mirror old saves load through.
+const MAGIC_V17: &[u8; 9] = b"FCWORLD17";
 
 fn resolve_path() -> String {
     std::env::var("FC_WORLD_SAVE").unwrap_or_else(|_| DEFAULT_SAVE_PATH.to_string())
@@ -92,8 +105,8 @@ pub fn save_at(state: &GameState, path: &str) -> io::Result<()> {
     }
     let body =
         bincode::serialize(state).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    let mut bytes = Vec::with_capacity(MAGIC_V14.len() + body.len());
-    bytes.extend_from_slice(MAGIC_V14);
+    let mut bytes = Vec::with_capacity(MAGIC_V17.len() + body.len());
+    bytes.extend_from_slice(MAGIC_V17);
     bytes.extend_from_slice(&body);
     // Write to a sibling temp file and rename over the target: a kill mid-write
     // (the exact moment this feature exists to survive) leaves the previous,
@@ -115,8 +128,30 @@ pub fn load_at(path: &str) -> Option<GameState> {
 
 fn load_at_raw(path: &str) -> Option<GameState> {
     let bytes = fs::read(path).ok()?;
-    if let Some(body) = bytes.strip_prefix(MAGIC_V14.as_slice()) {
+    if let Some(body) = bytes.strip_prefix(MAGIC_V17.as_slice()) {
         return bincode::deserialize(body).ok();
+    }
+    if let Some(body) = bytes.strip_prefix(MAGIC_V16.as_slice()) {
+        // V16 (pre-interiors): decode through the frozen V16 mirror
+        // and migrate one hop to V17. The next autosave rewrites it.
+        return bincode::deserialize::<crate::legacy::GameStateV16>(body)
+            .ok()
+            .map(GameState::from);
+    }
+    if let Some(body) = bytes.strip_prefix(MAGIC_V15.as_slice()) {
+        // V15 (pre-roads/snow): decode through the frozen V15 mirror and
+        // migrate one hop to V16. The next autosave rewrites it as V16.
+        return bincode::deserialize::<crate::legacy::GameStateV15>(body)
+            .ok()
+            .map(GameState::from);
+    }
+    if let Some(body) = bytes.strip_prefix(MAGIC_V14.as_slice()) {
+        // V14 (pre-expeditions/laws/life-cycle): decode through the frozen V14
+        // mirror and migrate one hop to V15. The next autosave rewrites it as
+        // V15.
+        return bincode::deserialize::<crate::legacy::GameStateV14>(body)
+            .ok()
+            .map(GameState::from);
     }
     if let Some(body) = bytes.strip_prefix(MAGIC_V13.as_slice()) {
         // V13 (pre-fatigue/illness): decode through the frozen V13 mirror and
@@ -225,6 +260,27 @@ mod tests {
             .to_string()
     }
 
+    /// Compare a migrated roster against the live one it was fabricated from.
+    /// Every field must survive a migration EXCEPT `age_days` (V0.18): a
+    /// pre-V15 save records no age at all, so the migration draws one from the
+    /// survivor's id (`legacy::migrated_age`) rather than the age the live
+    /// world happened to roll. What actually matters is asserted directly:
+    /// nobody comes back as a child, which would mean a whole colony that
+    /// silently cannot work (see `Survivor::age_work_factor`).
+    fn assert_roster_migrated(loaded: &[fc_game::types::Survivor], modern: &[fc_game::types::Survivor]) {
+        assert_eq!(loaded.len(), modern.len(), "migration must never drop people");
+        for (got, want) in loaded.iter().zip(modern) {
+            assert!(
+                got.age_days >= fc_game::types::ADULT_AGE_DAYS,
+                "a migrated survivor must load as a working adult, got age {}",
+                got.age_days
+            );
+            let mut normalized = got.clone();
+            normalized.age_days = want.age_days;
+            assert_eq!(&normalized, want);
+        }
+    }
+
     #[test]
     fn roundtrip_preserves_state() {
         let path = throwaway_path("roundtrip");
@@ -296,7 +352,7 @@ mod tests {
         let v1 = GameStateV1 {
             tick: modern.tick,
             win_days: modern.win_days,
-            tiles: modern.tiles.clone(),
+            tiles: modern.tiles.iter().map(crate::legacy::TileV15::from).collect(),
             buildings: modern
                 .buildings
                 .iter()
@@ -406,7 +462,7 @@ mod tests {
         let v2 = GameStateV2 {
             tick: modern.tick,
             win_days: modern.win_days,
-            tiles: modern.tiles.clone(),
+            tiles: modern.tiles.iter().map(crate::legacy::TileV15::from).collect(),
             buildings: modern
                 .buildings
                 .iter()
@@ -503,7 +559,7 @@ mod tests {
         let v3 = GameStateV3 {
             tick: modern.tick,
             win_days: modern.win_days,
-            tiles: modern.tiles.clone(),
+            tiles: modern.tiles.iter().map(crate::legacy::TileV15::from).collect(),
             buildings: modern.buildings.iter().map(crate::legacy::BuildingV4::from).collect(),
             survivors: modern.survivors.iter().map(SurvivorV3::from).collect(),
             stock: crate::legacy::StockpileV7 {
@@ -598,7 +654,7 @@ mod tests {
         let v4 = GameStateV4 {
             tick: modern.tick,
             win_days: modern.win_days,
-            tiles: modern.tiles.clone(),
+            tiles: modern.tiles.iter().map(crate::legacy::TileV15::from).collect(),
             buildings: modern.buildings.iter().map(BuildingV4::from).collect(),
             survivors: modern.survivors.iter().map(SurvivorV5::from).collect(),
             stock: crate::legacy::StockpileV7 {
@@ -689,7 +745,7 @@ mod tests {
         let v5 = GameStateV5 {
             tick: modern.tick,
             win_days: modern.win_days,
-            tiles: modern.tiles.clone(),
+            tiles: modern.tiles.iter().map(crate::legacy::TileV15::from).collect(),
             buildings: modern.buildings.iter().map(crate::legacy::BuildingV12::from).collect(),
             survivors: modern.survivors.iter().map(SurvivorV5::from).collect(),
             stock: crate::legacy::StockpileV7 {
@@ -773,7 +829,7 @@ mod tests {
         let v6 = GameStateV6 {
             tick: modern.tick,
             win_days: modern.win_days,
-            tiles: modern.tiles.clone(),
+            tiles: modern.tiles.iter().map(crate::legacy::TileV15::from).collect(),
             buildings: modern.buildings.iter().map(crate::legacy::BuildingV12::from).collect(),
             survivors: modern.survivors.iter().map(SurvivorV8::from).collect(),
             stock: crate::legacy::StockpileV7 {
@@ -858,7 +914,7 @@ mod tests {
         let v7 = GameStateV7 {
             tick: modern.tick,
             win_days: modern.win_days,
-            tiles: modern.tiles.clone(),
+            tiles: modern.tiles.iter().map(crate::legacy::TileV15::from).collect(),
             buildings: modern.buildings.iter().map(crate::legacy::BuildingV12::from).collect(),
             survivors: modern.survivors.iter().map(SurvivorV8::from).collect(),
             stock: crate::legacy::StockpileV7 {
@@ -952,7 +1008,7 @@ mod tests {
         let v8 = GameStateV8 {
             tick: modern.tick,
             win_days: modern.win_days,
-            tiles: modern.tiles.clone(),
+            tiles: modern.tiles.iter().map(crate::legacy::TileV15::from).collect(),
             buildings: modern.buildings.iter().map(crate::legacy::BuildingV12::from).collect(),
             survivors: modern.survivors.iter().map(SurvivorV8::from).collect(),
             stock: StockpileV8 {
@@ -1032,7 +1088,7 @@ mod tests {
         let v9 = GameStateV9 {
             tick: modern.tick,
             win_days: modern.win_days,
-            tiles: modern.tiles.clone(),
+            tiles: modern.tiles.iter().map(crate::legacy::TileV15::from).collect(),
             buildings: modern.buildings.iter().map(crate::legacy::BuildingV12::from).collect(),
             survivors: modern.survivors.iter().map(crate::legacy::SurvivorV13::from).collect(),
             stock: StockpileV10 {
@@ -1085,7 +1141,7 @@ mod tests {
         assert_eq!(loaded.livestock.sheep, fc_game::types::SHEEP_START, "V9 predates livestock");
         assert_eq!(loaded.stock.gold, 0.0, "V9 predates the trade caravan");
         assert!(loaded.pending_caravan.is_none(), "V9 predates the trade caravan");
-        assert_eq!(loaded.survivors, modern.survivors);
+        assert_roster_migrated(&loaded.survivors, &modern.survivors);
         assert_eq!(loaded.players, modern.players);
         assert!(loaded.graduated, "graduation must survive migration");
         assert_eq!(loaded.stock, modern.stock);
@@ -1111,7 +1167,7 @@ mod tests {
         let v10 = GameStateV10 {
             tick: modern.tick,
             win_days: modern.win_days,
-            tiles: modern.tiles.clone(),
+            tiles: modern.tiles.iter().map(crate::legacy::TileV15::from).collect(),
             buildings: modern.buildings.iter().map(crate::legacy::BuildingV12::from).collect(),
             survivors: modern.survivors.iter().map(crate::legacy::SurvivorV13::from).collect(),
             stock: StockpileV10 {
@@ -1163,7 +1219,7 @@ mod tests {
         let loaded = load_at(&path).expect("V10 save must migrate, never wipe");
         assert_eq!(loaded.stock.gold, 0.0, "V10 predates the trade caravan");
         assert!(loaded.pending_caravan.is_none(), "V10 predates the trade caravan");
-        assert_eq!(loaded.survivors, modern.survivors);
+        assert_roster_migrated(&loaded.survivors, &modern.survivors);
         assert_eq!(loaded.players, modern.players);
         assert!(loaded.graduated, "graduation must survive migration");
         assert_eq!(loaded.stock, modern.stock);
@@ -1196,7 +1252,7 @@ mod tests {
         let v11 = GameStateV11 {
             tick: modern.tick,
             win_days: modern.win_days,
-            tiles: modern.tiles.clone(),
+            tiles: modern.tiles.iter().map(crate::legacy::TileV15::from).collect(),
             buildings: modern.buildings.iter().map(crate::legacy::BuildingV12::from).collect(),
             survivors: modern.survivors.iter().map(crate::legacy::SurvivorV13::from).collect(),
             stock: modern.stock,
@@ -1232,7 +1288,7 @@ mod tests {
             corpses: modern.corpses.clone(),
             graves: modern.graves.clone(),
             livestock: modern.livestock,
-            pending_caravan: modern.pending_caravan.clone(),
+            pending_caravan: modern.pending_caravan,
         };
         let mut bytes = Vec::new();
         bytes.extend_from_slice(MAGIC_V11);
@@ -1240,7 +1296,7 @@ mod tests {
         fs::write(&path, bytes).unwrap();
 
         let loaded = load_at(&path).expect("V11 save must migrate, never wipe");
-        assert_eq!(loaded.survivors, modern.survivors);
+        assert_roster_migrated(&loaded.survivors, &modern.survivors);
         assert_eq!(loaded.players, modern.players);
         assert!(loaded.graduated, "graduation must survive migration");
         assert_eq!(loaded.stock, modern.stock);
@@ -1260,6 +1316,218 @@ mod tests {
         fs::remove_file(&path).ok();
     }
 
+
+    /// A world saved under `FCWORLD16` (pre-interiors: `Building` had no
+    /// `furnishings` field at all) must migrate rather than wipe — every
+    /// building arriving completely unfurnished. The interesting case is an
+    /// already-upgraded building: `legacy::BuildingV16`'s `From` impl
+    /// deliberately leaves its `level` untouched rather than retro-demoting
+    /// it to whatever its (nonexistent) fittings would now permit — an old
+    /// colony keeps what it earned and simply has to furnish before growing
+    /// further (enforced on the NEXT `UpgradeBuilding`, via
+    /// `furnishings_keep_pace`, not by rewriting history here).
+    #[test]
+    fn v16_save_migrates() {
+        use crate::legacy::GameStateV16;
+
+        let path = throwaway_path("v16-migrate");
+        let mut modern = sim::new_game(116, 12);
+        sim::player_joined(&mut modern, 22, "Malika");
+        modern.graduated = true;
+        // An old colony that, in the pre-interiors world, had already
+        // climbed a building past level 1 via the (then-ungated) upgrade
+        // path — exactly what a real V16 save can contain, since the
+        // furnishing gate didn't exist yet to have stopped it.
+        modern.buildings.push(fc_game::types::Building {
+            id: modern.next_id,
+            kind: fc_game::types::BuildingKind::Sawmill,
+            x: 6,
+            y: 6,
+            workers: 0,
+            progress: 0.0,
+            owner: Some(22),
+            owner_account: None,
+            level: 5,
+            build_left: 0.0,
+            furnishings: Vec::new(),
+            facing: 0,
+        });
+        modern.next_id += 1;
+        let sawmill_id = modern.buildings.last().unwrap().id;
+
+        let v16 = GameStateV16 {
+            tick: modern.tick,
+            win_days: modern.win_days,
+            tiles: modern.tiles.clone(),
+            buildings: modern.buildings.iter().map(crate::legacy::BuildingV16::from).collect(),
+            survivors: modern.survivors.clone(),
+            stock: modern.stock,
+            furnace_level: modern.furnace_level,
+            furnace_lit: modern.furnace_lit,
+            cold_snap: modern.cold_snap,
+            players: modern.players.clone(),
+            phase: modern.phase,
+            events: modern.events.clone(),
+            total_events: modern.total_events,
+            chat: modern.chat.clone(),
+            total_chat: modern.total_chat,
+            pings: modern.pings.clone(),
+            missions: modern.missions.clone(),
+            tunnel: modern.tunnel,
+            graduated: modern.graduated,
+            central: modern.central,
+            techs: modern.techs.clone(),
+            disease_until: modern.disease_until,
+            blizzard_until: modern.blizzard_until,
+            pending_event: modern.pending_event,
+            event_rng: modern.event_rng,
+            owner_id: modern.owner_id,
+            next_id: modern.next_id,
+            rng: modern.rng,
+            central_ledger: modern.central_ledger.clone(),
+            leader: modern.leader,
+            mourning_until: modern.mourning_until,
+            morale: modern.morale,
+            pending_migrant: modern.pending_migrant,
+            wildlife: modern.wildlife,
+            corpses: modern.corpses.clone(),
+            graves: modern.graves.clone(),
+            livestock: modern.livestock,
+            pending_caravan: modern.pending_caravan,
+            illness_rng: modern.illness_rng,
+            expeditions: modern.expeditions.clone(),
+            expedition_rng: modern.expedition_rng,
+            laws: modern.laws.clone(),
+            law_cooldown_until: modern.law_cooldown_until,
+            lifecycle_rng: modern.lifecycle_rng,
+            mission_cycle: modern.mission_cycle,
+            clear_orders: modern.clear_orders.clone(),
+        };
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(MAGIC_V16);
+        bytes.extend_from_slice(&bincode::serialize(&v16).unwrap());
+        fs::write(&path, bytes).unwrap();
+
+        let loaded = load_at(&path).expect("V16 save must migrate, never wipe");
+        assert!(
+            loaded.buildings.iter().all(|b| b.furnishings.is_empty()),
+            "every building from before interiors must load completely unfurnished"
+        );
+        assert_eq!(loaded.survivors, modern.survivors);
+        assert!(loaded.graduated, "graduation must survive migration");
+        assert_eq!(loaded.stock, modern.stock);
+        assert_eq!(loaded.tiles, modern.tiles);
+        assert_eq!(loaded.buildings, modern.buildings, "furnishings aside, every building field must pass through untouched");
+
+        // The deliberate design decision: the level-5 Sawmill keeps its level
+        // — it is NOT retro-demoted to what its (now-empty) fittings would
+        // allow.
+        let sawmill = loaded.buildings.iter().find(|b| b.id == sawmill_id).expect("sawmill survives the hop");
+        assert_eq!(sawmill.level, 5, "an already-upgraded building must keep the level it earned, not be demoted");
+        assert!(sawmill.furnishings.is_empty());
+        // ...and the consequence is exactly what the doc comment promises:
+        // the gate on its NEXT upgrade is what enforces furnishing, not a
+        // retroactive rewrite of the level it already has.
+        assert!(
+            !sawmill.furnishings_keep_pace(),
+            "a level-5 building with no fittings must fail the gate on its next upgrade"
+        );
+
+        // And once re-saved (V17, with header), it round-trips as-is.
+        save_at(&loaded, &path).unwrap();
+        assert_eq!(load_at(&path).expect("V17 reload"), loaded);
+        fs::remove_file(&path).ok();
+    }
+
+    /// A world saved under `FCWORLD15` (pre-roads/snow: `Tile` had no `road`
+    /// flag and no `snow` depth, and `GameState` had no `clear_orders`) must
+    /// migrate rather than wipe. The tile grid is the interesting part here —
+    /// it is the first time a per-TILE field has been added, so the frozen
+    /// mirror covers `MAP_W * MAP_H` values rather than a handful.
+    #[test]
+    fn v15_save_migrates() {
+        use crate::legacy::{GameStateV15, TileV15};
+
+        let path = throwaway_path("v15-migrate");
+        let mut modern = sim::new_game(115, 12);
+        sim::player_joined(&mut modern, 21, "Nodira");
+        modern.graduated = true;
+        // Something on the grid worth checking survives the round trip.
+        modern.tiles[fc_game::types::tile_index(4, 4)].deposit = 77;
+        let v15 = GameStateV15 {
+            tick: modern.tick,
+            win_days: modern.win_days,
+            tiles: modern.tiles.iter().map(TileV15::from).collect(),
+            buildings: modern.buildings.iter().map(crate::legacy::BuildingV16::from).collect(),
+            survivors: modern.survivors.clone(),
+            stock: modern.stock,
+            furnace_level: modern.furnace_level,
+            furnace_lit: modern.furnace_lit,
+            cold_snap: modern.cold_snap,
+            players: modern.players.clone(),
+            phase: modern.phase,
+            events: modern.events.clone(),
+            total_events: modern.total_events,
+            chat: modern.chat.clone(),
+            total_chat: modern.total_chat,
+            pings: modern.pings.clone(),
+            missions: modern.missions.clone(),
+            tunnel: modern.tunnel,
+            graduated: modern.graduated,
+            central: modern.central,
+            techs: modern.techs.clone(),
+            disease_until: modern.disease_until,
+            blizzard_until: modern.blizzard_until,
+            pending_event: modern.pending_event,
+            event_rng: modern.event_rng,
+            owner_id: modern.owner_id,
+            next_id: modern.next_id,
+            rng: modern.rng,
+            central_ledger: modern.central_ledger.clone(),
+            leader: modern.leader,
+            mourning_until: modern.mourning_until,
+            morale: modern.morale,
+            pending_migrant: modern.pending_migrant,
+            wildlife: modern.wildlife,
+            corpses: modern.corpses.clone(),
+            graves: modern.graves.clone(),
+            livestock: modern.livestock,
+            pending_caravan: modern.pending_caravan,
+            illness_rng: modern.illness_rng,
+            expeditions: modern.expeditions.clone(),
+            expedition_rng: modern.expedition_rng,
+            laws: modern.laws.clone(),
+            law_cooldown_until: modern.law_cooldown_until,
+            lifecycle_rng: modern.lifecycle_rng,
+            mission_cycle: modern.mission_cycle,
+        };
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(MAGIC_V15);
+        bytes.extend_from_slice(&bincode::serialize(&v15).unwrap());
+        fs::write(&path, bytes).unwrap();
+
+        let loaded = load_at(&path).expect("V15 save must migrate, never wipe");
+        assert_eq!(loaded.tiles.len(), modern.tiles.len(), "the whole grid must survive");
+        assert!(
+            loaded.tiles.iter().all(|t| !t.road && t.snow == 0),
+            "a world that predates roads has none, and starts unburied — loading must              never bury a colony it was never buried in"
+        );
+        assert_eq!(
+            loaded.tiles[fc_game::types::tile_index(4, 4)].deposit,
+            77,
+            "terrain and deposits must come through untouched"
+        );
+        assert!(loaded.clear_orders.is_empty(), "nobody was shovelling before snow existed");
+        assert_eq!(loaded.survivors, modern.survivors);
+        assert!(loaded.graduated, "graduation must survive migration");
+        assert_eq!(loaded.stock, modern.stock);
+        assert_eq!(loaded.buildings, modern.buildings);
+
+        // And once re-saved (V16, with header), it round-trips as-is.
+        save_at(&loaded, &path).unwrap();
+        assert_eq!(load_at(&path).expect("V16 reload"), loaded);
+        fs::remove_file(&path).ok();
+    }
 
     /// A world saved under `FCWORLD13` (pre-V0.17: survivors had no
     /// `fatigue`/`sick_left`, and there was no isolated `illness_rng` stream)
@@ -1282,8 +1550,8 @@ mod tests {
         let v13 = GameStateV13 {
             tick: modern.tick,
             win_days: modern.win_days,
-            tiles: modern.tiles.clone(),
-            buildings: modern.buildings.clone(),
+            tiles: modern.tiles.iter().map(crate::legacy::TileV15::from).collect(),
+            buildings: modern.buildings.iter().map(crate::legacy::BuildingV16::from).collect(),
             survivors: modern.survivors.iter().map(crate::legacy::SurvivorV13::from).collect(),
             stock: modern.stock,
             furnace_level: modern.furnace_level,
@@ -1317,7 +1585,7 @@ mod tests {
             corpses: modern.corpses.clone(),
             graves: modern.graves.clone(),
             livestock: modern.livestock,
-            pending_caravan: modern.pending_caravan.clone(),
+            pending_caravan: modern.pending_caravan,
         };
         let mut bytes = Vec::new();
         bytes.extend_from_slice(MAGIC_V13);
@@ -1376,7 +1644,7 @@ mod tests {
         let v12 = GameStateV12 {
             tick: modern.tick,
             win_days: modern.win_days,
-            tiles: modern.tiles.clone(),
+            tiles: modern.tiles.iter().map(crate::legacy::TileV15::from).collect(),
             buildings: modern.buildings.iter().map(crate::legacy::BuildingV12::from).collect(),
             survivors: modern.survivors.iter().map(crate::legacy::SurvivorV13::from).collect(),
             stock: modern.stock,
@@ -1411,7 +1679,7 @@ mod tests {
             corpses: modern.corpses.clone(),
             graves: modern.graves.clone(),
             livestock: modern.livestock,
-            pending_caravan: modern.pending_caravan.clone(),
+            pending_caravan: modern.pending_caravan,
         };
         let mut bytes = Vec::new();
         bytes.extend_from_slice(MAGIC_V12);
@@ -1423,7 +1691,7 @@ mod tests {
             loaded.buildings.iter().all(|b| b.facing == 0),
             "pre-V13 buildings load south-facing"
         );
-        assert_eq!(loaded.survivors, modern.survivors);
+        assert_roster_migrated(&loaded.survivors, &modern.survivors);
         assert_eq!(loaded.players, modern.players);
         assert!(loaded.graduated, "graduation must survive migration");
         assert_eq!(loaded.stock, modern.stock);

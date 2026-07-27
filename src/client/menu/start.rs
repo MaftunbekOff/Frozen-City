@@ -73,6 +73,17 @@ pub fn pending_switch(
             host,
             token: None,
         },
+        // V0.18: `session.central` still holds its PRE-switch value here
+        // (only overwritten below, once the dial succeeds), so this tells us
+        // whether "go to my personal world" means coming home through the
+        // Tunnel with this account's settlers (`ReturnHome`) or just leaving
+        // a visited friend's world (`social::toast::go_home_button`, plain
+        // `Login` — no settlers were ever extracted for a visit).
+        WorldTarget::Personal if session.central => ClientMsg::ReturnHome {
+            login: auth.login.clone(),
+            password: auth.password.clone(),
+            token: None,
+        },
         WorldTarget::Personal => ClientMsg::Login {
             login: auth.login.clone(),
             password: auth.password.clone(),

@@ -59,11 +59,15 @@ fn leader_alive_boosts_production() {
     let (x, y) = find_sawmill_spot_near_forest(&control);
     sim::apply_command(&mut control, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let control_id = control.buildings.last().unwrap().id;
+    // V0.21: a mill only cuts once its saw bench is in. `finish_all_construction`
+    // fits the first one (and skips the build phase this test doesn't care about).
+    sim::finish_all_construction(&mut control);
     sim::apply_command(&mut control, 1, &PlayerCommand::AdjustWorkers { building: control_id, delta: 2 });
 
     let (x, y) = find_sawmill_spot_near_forest(&experiment);
     sim::apply_command(&mut experiment, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let exp_id = experiment.buildings.last().unwrap().id;
+    sim::finish_all_construction(&mut experiment);
     sim::apply_command(&mut experiment, 1, &PlayerCommand::AdjustWorkers { building: exp_id, delta: 2 });
     experiment.leader = Some(experiment.survivors[0].id);
 
@@ -118,11 +122,15 @@ fn mourning_penalizes_production() {
     let (x, y) = find_sawmill_spot_near_forest(&control);
     sim::apply_command(&mut control, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let control_id = control.buildings.last().unwrap().id;
+    // V0.21: a mill only cuts once its saw bench is in. `finish_all_construction`
+    // fits the first one (and skips the build phase this test doesn't care about).
+    sim::finish_all_construction(&mut control);
     sim::apply_command(&mut control, 1, &PlayerCommand::AdjustWorkers { building: control_id, delta: 2 });
 
     let (x, y) = find_sawmill_spot_near_forest(&experiment);
     sim::apply_command(&mut experiment, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let exp_id = experiment.buildings.last().unwrap().id;
+    sim::finish_all_construction(&mut experiment);
     sim::apply_command(&mut experiment, 1, &PlayerCommand::AdjustWorkers { building: exp_id, delta: 2 });
     // Long enough (and mourning lasts a full in-game day) that the -15% gap
     // reliably lands on a different whole-wood-unit count instead of being

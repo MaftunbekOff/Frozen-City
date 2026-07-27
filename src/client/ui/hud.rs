@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use frozen_city::game::types::FURNACE_COAL_PER_DAY_PER_LEVEL;
 
 use super::super::i18n::Lang;
+use super::super::i18n_furnishing;
 use super::super::i18n_hud;
 use super::super::theme::{
     self, BG_PANEL, BORDER, BTN, BTN_DANGER, FS_BODY, FS_MICRO, FS_SMALL, FS_TITLE, RES_COAL,
@@ -144,10 +145,13 @@ pub fn spawn_hud(
     // screen space every frame) instead of a fixed screen corner; `left`/
     // `top` below are just a harmless first-frame default before that system
     // places it, and get overwritten immediately once a building is picked.
-    // Frostpunk bino-paneli uslubi: markazlashgan mis sarlavha + mis chiziq,
-    // ma'lumot, "ISHCHI KUCHI" bo'limi (− / katta hisob / + va Hech kim /
-    // Maksimum tez-tugmalari, bo'sh-ishchi hisobi), oxirida to'liq-en buzish
-    // tugmasi.
+    //
+    // V0.21: rebuilt to match the reference mobile design — a header (name +
+    // level, an Upgrade button on the right), a Furniture/Survivors tab
+    // strip, and each tab's own content below it (see `spawn_furniture_tab`/
+    // `spawn_survivors_tab`). Per-kind extras that aren't part of either tab
+    // (Furnace burn buttons, Tunnel caravan quick-trade, Relocate, Demolish)
+    // still live at the bottom, unchanged in behavior — see `PanelAction`.
     commands
         .spawn((
             Node {
@@ -155,7 +159,7 @@ pub fn spawn_hud(
                 position_type: PositionType::Absolute,
                 left: Val::Px(12.0),
                 top: Val::Px(12.0),
-                width: Val::Px(300.0),
+                width: Val::Px(320.0),
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(SP_SM),
                 padding: UiRect::all(Val::Px(SP_MD)),
@@ -175,257 +179,123 @@ pub fn spawn_hud(
             Interaction::default(),
             UiBlocker,
             SelPanelRoot,
+            // V0.21: the panel's own tab/slot pick (see `SelTab`/
+            // `SelFurnSlot`'s doc) lives on this SAME entity rather than a
+            // `Resource`, so it survives frame to frame without touching
+            // `ClientPlugin::build` in `mod.rs`.
+            SelTab::default(),
+            SelFurnSlot::default(),
             DespawnOnExit(Screen::Game),
         ))
         .with_children(|p| {
-            p.spawn((
-                theme::text("Building", theme::FS_SECTION, theme::BRASS),
-                Node {
-                    align_self: AlignSelf::Center,
-                    ..default()
-                },
-                SelText::Title,
-            ));
+            // --- Header: "{Name} Lv. N" on the left, Upgrade on the right.
+            p.spawn(Node {
+                width: Val::Percent(100.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::SpaceBetween,
+                column_gap: Val::Px(SP_SM),
+                ..default()
+            })
+            .with_children(|row| {
+                row.spawn((
+                    theme::text("Building", theme::FS_SECTION, theme::BRASS),
+                    Node {
+                        flex_grow: 1.0,
+                        ..default()
+                    },
+                    SelText::Title,
+                ));
+                // V0.8/V0.21: raise the building a level — moved from a
+                // full-width footer button into the header (matching the
+                // reference design); color (afford/maxed) and the
+                // furnish-first explainer are still owned by
+                // `selection_panel_update`.
+                row.spawn((
+                    Button,
+                    Node {
+                        width: Val::Px(84.0),
+                        height: Val::Px(28.0),
+                        flex_shrink: 0.0,
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
+                        ..default()
+                    },
+                    BackgroundColor(theme::BTN_SUCCESS),
+                    UpgradeBtn,
+                ))
+                .with_children(|b| {
+                    b.spawn((theme::text("", FS_MICRO + 1.0, TEXT_PRIMARY), SelText::Upgrade));
+                });
+            });
             p.spawn(theme::brass_divider());
             p.spawn((theme::text("", FS_MICRO + 1.0, TEXT_MUTED), SelText::Info));
-            // V0.8: daraja / qurilish-holati qatori (muz-ko'k urg'u).
+            // V0.8: construction-progress status line — empty once the
+            // building is standing (the header above already says "Lv. N").
             p.spawn((theme::text("", FS_MICRO + 1.0, theme::ACCENT_ICE), SelText::Level));
-            // Furnace level controls — shown only when the Furnace is selected
-            // (`selection_panel_update` toggles this row). The existing
-            // `furnace_buttons` system drives these `FurnaceLvlBtn`s.
-            p.spawn((
-                Node {
-                    display: Display::None,
-                    width: Val::Percent(100.0),
-                    flex_wrap: FlexWrap::Wrap,
-                    column_gap: Val::Px(SP_XS),
-                    row_gap: Val::Px(SP_XS),
-                    ..default()
-                },
-                FurnaceRow,
-            ))
+
+            spawn_furnace_row(p, lang);
+            spawn_caravan_row(p, lang);
+
+            // --- Tab strip: Furniture | Survivors.
+            p.spawn(Node {
+                width: Val::Percent(100.0),
+                column_gap: Val::Px(SP_XS),
+                ..default()
+            })
             .with_children(|row| {
-                for lvl in 0u8..=3 {
-                    row.spawn((
-                        Button,
-                        Node {
-                            min_width: Val::Px(46.0),
-                            height: Val::Px(32.0),
-                            padding: UiRect::horizontal(Val::Px(SP_SM)),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
-                            ..default()
-                        },
-                        BackgroundColor(BTN),
-                        FurnaceLvlBtn(lvl),
-                    ))
-                    .with_children(|b| {
-                        let label = if lvl == 0 {
-                            i18n_hud::furnace_off_label(lang).to_string()
-                        } else {
-                            lvl.to_string()
-                        };
-                        b.spawn(theme::text(label, FS_BODY - 1.0, TEXT_PRIMARY));
-                    });
-                }
-            });
-            // V0.13: Tunnel trade caravan quick-actions — shown only when
-            // the Tunnel is selected and unlocked (`selection_panel_update`
-            // toggles this row). Each button dispatches a fixed
-            // `QUICK_TRADE_AMOUNT` of one good; `caravan_buttons` drives them.
-            p.spawn((
-                Node {
-                    display: Display::None,
-                    width: Val::Percent(100.0),
-                    flex_wrap: FlexWrap::Wrap,
-                    column_gap: Val::Px(SP_XS),
-                    row_gap: Val::Px(SP_XS),
-                    ..default()
-                },
-                CaravanRow,
-            ))
-            .with_children(|row| {
-                for good in frozen_city::game::types::TradeGood::ALL {
-                    for selling in [true, false] {
-                        row.spawn((
-                            Button,
-                            Node {
-                                min_width: Val::Px(84.0),
-                                height: Val::Px(32.0),
-                                padding: UiRect::horizontal(Val::Px(SP_SM)),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
-                                ..default()
-                            },
-                            BackgroundColor(BTN),
-                            CaravanBtn { good, selling },
-                        ))
-                        .with_children(|b| {
-                            b.spawn(theme::text(
-                                i18n_hud::caravan_btn_label(good, selling, lang),
-                                FS_BODY - 2.0,
-                                TEXT_PRIMARY,
-                            ));
-                        });
-                    }
-                }
-            });
-            // Ishchi-kuchi bo'limi bitta konteyner (WorkerRow) — sarlavha,
-            // − / hisob / + qatori, Hech kim/Maksimum tez-tugmalari va bo'sh-
-            // ishchi hisobi birga ko'rinadi/yashirinadi (max_workers == 0
-            // binolarda `selection_panel_update` butun blokni o'chiradi).
-            p.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(SP_XS + 2.0),
-                    ..default()
-                },
-                WorkerRow,
-            ))
-            .with_children(|w| {
-                w.spawn((
-                    theme::text(i18n_hud::workforce_section(lang), FS_MICRO, theme::TEXT_FAINT),
-                    Node {
-                        align_self: AlignSelf::Center,
-                        ..default()
-                    },
-                ));
-                w.spawn(Node {
-                    width: Val::Percent(100.0),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::SpaceBetween,
-                    column_gap: Val::Px(SP_SM),
-                    ..default()
-                })
-                .with_children(|row| {
-                    row.spawn((btn_px(44.0, 32.0, BTN), WorkerMinus))
-                        .with_children(|b| {
-                            b.spawn(theme::text("-", FS_BODY + 2.0, TEXT_PRIMARY));
-                        });
-                    row.spawn((theme::text("0/0", FS_TITLE, TEXT_PRIMARY), SelText::Count));
-                    row.spawn((btn_px(44.0, 32.0, BTN), WorkerPlus))
-                        .with_children(|b| {
-                            b.spawn(theme::text("+", FS_BODY + 2.0, TEXT_PRIMARY));
-                        });
-                });
-                w.spawn(Node {
-                    width: Val::Percent(100.0),
-                    column_gap: Val::Px(SP_SM),
-                    ..default()
-                })
-                .with_children(|row| {
+                for tab in [SelTab::Furniture, SelTab::Survivors] {
+                    let label = match tab {
+                        SelTab::Furniture => i18n_furnishing::tab_furniture(lang),
+                        SelTab::Survivors => i18n_furnishing::tab_survivors(lang),
+                    };
                     row.spawn((
                         Button,
                         Node {
                             flex_grow: 1.0,
                             flex_basis: Val::Px(0.0),
-                            height: Val::Px(26.0),
+                            height: Val::Px(28.0),
                             justify_content: JustifyContent::Center,
                             align_items: AlignItems::Center,
-                            border: UiRect::all(Val::Px(1.0)),
                             border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
                             ..default()
                         },
                         BackgroundColor(BTN),
-                        BaseColor(BTN),
-                        BorderColor::all(BORDER),
-                        WorkerNoneBtn,
+                        TabBtn(tab),
                     ))
                     .with_children(|b| {
-                        b.spawn(theme::text(i18n_hud::worker_none_label(lang), FS_MICRO + 1.0, TEXT_PRIMARY));
+                        b.spawn(theme::text(label, FS_SMALL, TEXT_PRIMARY));
                     });
-                    row.spawn((
-                        Button,
-                        Node {
-                            flex_grow: 1.0,
-                            flex_basis: Val::Px(0.0),
-                            height: Val::Px(26.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            border: UiRect::all(Val::Px(1.0)),
-                            border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
-                            ..default()
-                        },
-                        BackgroundColor(BTN),
-                        BaseColor(BTN),
-                        BorderColor::all(BORDER),
-                        WorkerMaxBtn,
-                    ))
-                    .with_children(|b| {
-                        b.spawn(theme::text(i18n_hud::worker_max_label(lang), FS_MICRO + 1.0, TEXT_PRIMARY));
-                    });
-                });
-                w.spawn((
-                    theme::text("", FS_MICRO, TEXT_MUTED),
-                    Node {
-                        align_self: AlignSelf::Center,
-                        ..default()
-                    },
-                    SelText::Avail,
-                ));
+                }
             });
-            p.spawn((
-                Button,
-                Node {
-                    display: Display::None,
-                    width: Val::Percent(100.0),
-                    height: Val::Px(30.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
-                    ..default()
-                },
-                BackgroundColor(BTN),
-                BaseColor(BTN),
-                AssignHereBtn,
-            ))
-            .with_children(|b| {
-                b.spawn((theme::text("", FS_MICRO + 1.0, TEXT_PRIMARY), AssignHereLabel));
-            });
-            // V0.8: Yangilash tugmasi — rangini (yetarli/yetarsiz) va
-            // ko'rinishini `selection_panel_update` boshqaradi, shuning
-            // uchun BaseColor yo'q (generik hover u bilan urishmasin).
-            p.spawn((
-                Button,
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(30.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
-                    ..default()
-                },
-                BackgroundColor(theme::BTN_SUCCESS),
-                UpgradeBtn,
-            ))
-            .with_children(|b| {
-                b.spawn((theme::text("", FS_SMALL, TEXT_PRIMARY), SelText::Upgrade));
-            });
-            // V0.14: Ko'chirish — bosilganda `RelocateMode`ga o'tadi (bir
-            // martalik, `input::build_input`ning duxligi/qoralamasi orqali
-            // maqsad plitka tasdiqlanadi); ko'rinishini `selection_panel_update`
-            // boshqaradi (faqat qurilishi mumkin, bitgan binolarda).
-            p.spawn((theme::button(Val::Percent(100.0), 30.0, BTN), RelocateBtn))
-                .with_children(|b| {
-                    b.spawn(theme::text(i18n_hud::relocate_label(lang), FS_SMALL, TEXT_PRIMARY));
-                });
-            // V0.16: Aylantirish — bir chorak burish (`RotateBuilding`); ko'chirish
-            // kabi bepul, lekin qayta-qurish vaqti oladi. Ko'rinishini
-            // `selection_panel_update` boshqaradi (relocate bilan bir xil shart).
-            p.spawn((theme::button(Val::Percent(100.0), 30.0, BTN), RotateBuildingBtn))
-                .with_children(|b| {
-                    b.spawn(theme::text(i18n_hud::rotate_label(lang), FS_SMALL, TEXT_PRIMARY));
-                });
-            p.spawn((
+
+            spawn_furniture_tab(p, lang);
+            spawn_survivors_tab(p, lang);
+
+            // V0.14: Ko'chirish — bosilganda `RelocateMode`ga o'tadi;
+            // ko'rinishini `selection_panel_update` boshqaradi (faqat
+            // qurilishi mumkin, bitgan binolarda).
+            //
+            // V0.18: yonida alohida "Aylantirish" tugmasi bor edi — bitta
+            // qarorni ("bino qayerda tursin va qay tomonga qarasin") ikkita
+            // tugmaga bo'lib yuborardi, va binoni joyida burish uchun uni
+            // ko'chirish rejimisiz bosish kerak edi. Endi burish ko'chirish
+            // oqimining ichida: arvoh tushirilgach chiqadigan ✓/⟳/✗ paneli
+            // (`ui::placement`) ikkalasini birga hal qiladi va bitta
+            // `RelocateFacing` buyrug'i bilan yuboradi. Joyida burish ham
+            // shu yerda — o'sha taylning o'ziga tasdiqlash kifoya.
+            spawn_panel_action(
+                p,
+                theme::button(Val::Percent(100.0), 30.0, BTN),
+                PanelAction::Relocate,
+                i18n_hud::relocate_label(lang),
+            );
+            spawn_panel_action(
+                p,
                 theme::button(Val::Percent(100.0), 30.0, BTN_DANGER),
-                DemolishBtn,
-            ))
-            .with_children(|b| {
-                b.spawn(theme::text(i18n_hud::demolish_label(lang), FS_SMALL, TEXT_PRIMARY));
-            });
+                PanelAction::Demolish,
+                i18n_hud::demolish_label(lang),
+            );
         });
 
     // --- Game over overlay --- (starts as `theme::scrim`'s default `Flex`
@@ -467,6 +337,459 @@ pub fn spawn_hud(
                     });
             });
         });
+}
+
+/// V0.21: Furnace burn-level buttons (0-3) — shown only while the Furnace is
+/// selected and controllable (`PanelAction::FurnaceControls`, gated in
+/// `selection_panel_update`). `furnace_buttons` (`buildbar.rs`) drives each
+/// `FurnaceLvlBtn`'s own color; this fn only lays the row out.
+fn spawn_furnace_row(p: &mut ChildSpawnerCommands, lang: Lang) {
+    p.spawn((
+        Node {
+            display: Display::None,
+            width: Val::Percent(100.0),
+            flex_wrap: FlexWrap::Wrap,
+            column_gap: Val::Px(SP_XS),
+            row_gap: Val::Px(SP_XS),
+            ..default()
+        },
+        PanelAction::FurnaceControls,
+    ))
+    .with_children(|row| {
+        for lvl in 0u8..=3 {
+            row.spawn((
+                Button,
+                Node {
+                    min_width: Val::Px(46.0),
+                    height: Val::Px(32.0),
+                    padding: UiRect::horizontal(Val::Px(SP_SM)),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
+                    ..default()
+                },
+                BackgroundColor(BTN),
+                FurnaceLvlBtn(lvl),
+            ))
+            .with_children(|b| {
+                let label = if lvl == 0 {
+                    i18n_hud::furnace_off_label(lang).to_string()
+                } else {
+                    lvl.to_string()
+                };
+                b.spawn(theme::text(label, FS_BODY - 1.0, TEXT_PRIMARY));
+            });
+        }
+    });
+}
+
+/// V0.13: Tunnel trade caravan quick-actions — shown only when the Tunnel is
+/// selected and unlocked (`PanelAction::CaravanControls`, gated in
+/// `selection_panel_update`). Each button dispatches a fixed
+/// `QUICK_TRADE_AMOUNT` of one good; `caravan_buttons` drives them.
+fn spawn_caravan_row(p: &mut ChildSpawnerCommands, lang: Lang) {
+    p.spawn((
+        Node {
+            display: Display::None,
+            width: Val::Percent(100.0),
+            flex_wrap: FlexWrap::Wrap,
+            column_gap: Val::Px(SP_XS),
+            row_gap: Val::Px(SP_XS),
+            ..default()
+        },
+        PanelAction::CaravanControls,
+    ))
+    .with_children(|row| {
+        for good in frozen_city::game::types::TradeGood::ALL {
+            for selling in [true, false] {
+                row.spawn((
+                    Button,
+                    Node {
+                        min_width: Val::Px(84.0),
+                        height: Val::Px(32.0),
+                        padding: UiRect::horizontal(Val::Px(SP_SM)),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
+                        ..default()
+                    },
+                    BackgroundColor(BTN),
+                    CaravanBtn { good, selling },
+                ))
+                .with_children(|b| {
+                    b.spawn(theme::text(
+                        i18n_hud::caravan_btn_label(good, selling, lang),
+                        FS_BODY - 2.0,
+                        TEXT_PRIMARY,
+                    ));
+                });
+            }
+        }
+    });
+}
+
+/// V0.21: Furniture tab — a horizontal strip of up to 3 fitting tiles (icon
+/// glyph + corner level badge, the selected one highlighted), a detail card
+/// for the SELECTED fitting (name/level, description, an Upgrade button with
+/// cost-over-stock), and a 2-per-row stats grid (Production/Consumption,
+/// Stats/Time) — the reference design's shape. Root visibility is
+/// `TabRoot(SelTab::Furniture)`, driven by `selection_panel_update`.
+fn spawn_furniture_tab(p: &mut ChildSpawnerCommands, lang: Lang) {
+    p.spawn((
+        Node {
+            display: Display::None,
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(SP_SM),
+            ..default()
+        },
+        TabRoot(SelTab::Furniture),
+    ))
+    .with_children(|tab| {
+        // Tile strip — one entry per possible slot; `FurnitureCard::Tile`
+        // hides the ones this building's `kind.furnishings()` doesn't have.
+        tab.spawn(Node {
+            width: Val::Percent(100.0),
+            column_gap: Val::Px(SP_XS),
+            ..default()
+        })
+        .with_children(|row| {
+            for slot in 0u8..3 {
+                row.spawn((
+                    Button,
+                    Node {
+                        width: Val::Px(52.0),
+                        height: Val::Px(52.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        border: UiRect::all(Val::Px(2.0)),
+                        border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
+                        ..default()
+                    },
+                    BackgroundColor(theme::BG_SECTION),
+                    BorderColor::all(BORDER),
+                    FurnitureCard::Tile(slot),
+                ))
+                .with_children(|tile| {
+                    tile.spawn((theme::text("", FS_BODY, TEXT_PRIMARY), SelText::TileGlyph(slot)));
+                    tile.spawn((
+                        theme::text("", FS_MICRO - 1.0, theme::ACCENT_ICE),
+                        Node {
+                            position_type: PositionType::Absolute,
+                            right: Val::Px(3.0),
+                            bottom: Val::Px(2.0),
+                            ..default()
+                        },
+                        SelText::TileBadge(slot),
+                    ));
+                });
+            }
+        });
+        // Detail card for whichever tile is selected (`SelFurnSlot`).
+        tab.spawn((
+            Node {
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(2.0),
+                padding: UiRect::all(Val::Px(SP_SM)),
+                border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
+                ..default()
+            },
+            BackgroundColor(theme::BG_SECTION),
+        ))
+        .with_children(|card| {
+            card.spawn((theme::text("", FS_SMALL, TEXT_PRIMARY), SelText::FurnName));
+            card.spawn((theme::text("", FS_MICRO, TEXT_MUTED), SelText::FurnDesc));
+            // No BaseColor: `selection_panel_update` owns this button's
+            // color entirely (affordability/maxed), same reasoning as the
+            // header `UpgradeBtn`.
+            card.spawn((
+                Button,
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(28.0),
+                    margin: UiRect::top(Val::Px(SP_XS)),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
+                    ..default()
+                },
+                BackgroundColor(BTN),
+                FurnitureCard::UpgradeBtn,
+            ))
+            .with_children(|b| {
+                b.spawn((theme::text("", FS_MICRO + 1.0, TEXT_PRIMARY), SelText::FurnUpgrade));
+            });
+        });
+        // Stats grid, two per row.
+        stat_row(
+            tab,
+            [
+                (i18n_furnishing::stat_label_production(lang), SelText::FurnStatProduction),
+                (i18n_furnishing::stat_label_consumption(lang), SelText::FurnStatConsumption),
+            ],
+        );
+        stat_row(
+            tab,
+            [
+                (i18n_furnishing::stat_label_stats(lang), SelText::FurnStatStats),
+                (i18n_furnishing::stat_label_time(lang), SelText::FurnStatTime),
+            ],
+        );
+    });
+}
+
+/// One row of the stats grid: exactly two cells, side by side.
+fn stat_row(parent: &mut ChildSpawnerCommands, cells: [(&str, SelText); 2]) {
+    parent
+        .spawn(Node {
+            width: Val::Percent(100.0),
+            column_gap: Val::Px(SP_XS),
+            ..default()
+        })
+        .with_children(|row| {
+            for (label, marker) in cells {
+                stat_cell(row, label, marker);
+            }
+        });
+}
+
+/// One stats-grid cell: a muted label on top, the live value below. `label`
+/// is fixed at spawn time (it never changes with the selected fitting);
+/// `value_marker` tags the value text for `selection_panel_update` to fill.
+fn stat_cell(parent: &mut ChildSpawnerCommands, label: &str, value_marker: SelText) {
+    parent
+        .spawn((
+            Node {
+                flex_grow: 1.0,
+                flex_basis: Val::Px(0.0),
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(SP_XS)),
+                border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
+                ..default()
+            },
+            BackgroundColor(theme::BG_SECTION),
+        ))
+        .with_children(|cell| {
+            cell.spawn(theme::text(label, FS_MICRO - 1.0, TEXT_MUTED));
+            cell.spawn((theme::text("", FS_SMALL, TEXT_PRIMARY), value_marker));
+        });
+}
+
+/// V0.21: Survivors tab — up to 3 portrait slots (filled = a profession-
+/// colored circle with the survivor's initial, empty/locked = a padlock
+/// glyph), the anonymous `−  N/M  +` staffing control (plus a None/Max
+/// quick-set and the colony's idle-worker count — all four hidden together
+/// in the central world, where only named `AssignSurvivor` works), and the
+/// "assign the roster-selected survivor here" button. Root visibility is
+/// `TabRoot(SelTab::Survivors)`.
+fn spawn_survivors_tab(p: &mut ChildSpawnerCommands, lang: Lang) {
+    p.spawn((
+        Node {
+            display: Display::None,
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(SP_SM),
+            ..default()
+        },
+        TabRoot(SelTab::Survivors),
+    ))
+    .with_children(|tab| {
+        tab.spawn(Node {
+            width: Val::Percent(100.0),
+            column_gap: Val::Px(SP_SM),
+            ..default()
+        })
+        .with_children(|row| {
+            for slot in 0u8..3 {
+                row.spawn((
+                    Node {
+                        width: Val::Px(44.0),
+                        height: Val::Px(44.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::MAX,
+                        ..default()
+                    },
+                    BackgroundColor(theme::BG_SECTION),
+                    BorderColor::all(BORDER),
+                    SurvivorSlot::Root(slot),
+                ))
+                .with_children(|circle| {
+                    circle.spawn((theme::text("", FS_BODY, TEXT_PRIMARY), SelText::SurvivorInitial(slot)));
+                    spawn_lock_glyph(circle, 14.0, slot);
+                });
+            }
+        });
+        // − / count / + control, wrapped together with the None/Max
+        // quick-set and the idle-worker count so all four hide as one block
+        // in the central world.
+        tab.spawn((
+            Node {
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(SP_XS + 2.0),
+                ..default()
+            },
+            PanelAction::WorkerAdjustControls,
+        ))
+        .with_children(|w| {
+            w.spawn(Node {
+                width: Val::Percent(100.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                column_gap: Val::Px(SP_SM),
+                ..default()
+            })
+            .with_children(|row| {
+                row.spawn((btn_px(44.0, 32.0, BTN), WorkerMinus))
+                    .with_children(|b| {
+                        b.spawn(theme::text("-", FS_BODY + 2.0, TEXT_PRIMARY));
+                    });
+                row.spawn((theme::text("0/0", FS_TITLE, TEXT_PRIMARY), SelText::Count));
+                row.spawn((btn_px(44.0, 32.0, BTN), WorkerPlus))
+                    .with_children(|b| {
+                        b.spawn(theme::text("+", FS_BODY + 2.0, TEXT_PRIMARY));
+                    });
+            });
+            w.spawn(Node {
+                width: Val::Percent(100.0),
+                column_gap: Val::Px(SP_SM),
+                ..default()
+            })
+            .with_children(|row| {
+                row.spawn((
+                    Button,
+                    Node {
+                        flex_grow: 1.0,
+                        flex_basis: Val::Px(0.0),
+                        height: Val::Px(26.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
+                        ..default()
+                    },
+                    BackgroundColor(BTN),
+                    BaseColor(BTN),
+                    BorderColor::all(BORDER),
+                    WorkerNoneBtn,
+                ))
+                .with_children(|b| {
+                    b.spawn(theme::text(i18n_hud::worker_none_label(lang), FS_MICRO + 1.0, TEXT_PRIMARY));
+                });
+                row.spawn((
+                    Button,
+                    Node {
+                        flex_grow: 1.0,
+                        flex_basis: Val::Px(0.0),
+                        height: Val::Px(26.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
+                        ..default()
+                    },
+                    BackgroundColor(BTN),
+                    BaseColor(BTN),
+                    WorkerMaxBtn,
+                ))
+                .with_children(|b| {
+                    b.spawn(theme::text(i18n_hud::worker_max_label(lang), FS_MICRO + 1.0, TEXT_PRIMARY));
+                });
+            });
+            w.spawn((
+                theme::text("", FS_MICRO, TEXT_MUTED),
+                Node {
+                    align_self: AlignSelf::Center,
+                    ..default()
+                },
+                SelText::Avail,
+            ));
+        });
+        // Visibility/label owned entirely by `roster/panel.rs`
+        // (`update_assign_here`), unrelated to this tab's own toggle —
+        // nesting it here just means it only shows alongside the portraits
+        // it fills.
+        tab.spawn((
+            Button,
+            Node {
+                display: Display::None,
+                width: Val::Percent(100.0),
+                height: Val::Px(30.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
+                ..default()
+            },
+            BackgroundColor(BTN),
+            BaseColor(BTN),
+            AssignHereBtn,
+        ))
+        .with_children(|b| {
+            b.spawn((theme::text("", FS_MICRO + 1.0, TEXT_PRIMARY), AssignHereLabel));
+        });
+    });
+}
+
+/// A small padlock silhouette (a rounded-top shackle arc over a body) built
+/// from flat colored rectangles — no image asset, same convention
+/// `spawn_hammer_glyph` (`buildbar.rs`) uses. Both pieces are tagged
+/// `SurvivorSlot::Lock(slot)`; `selection_panel_update` hides the whole
+/// group once that slot is filled.
+fn spawn_lock_glyph(parent: &mut ChildSpawnerCommands, w: f32, slot: u8) {
+    parent
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            SurvivorSlot::Lock(slot),
+        ))
+        .with_children(|g| {
+            g.spawn((
+                Node {
+                    width: Val::Px(w * 0.55),
+                    height: Val::Px(w * 0.45),
+                    border: UiRect {
+                        left: Val::Px(2.0),
+                        right: Val::Px(2.0),
+                        top: Val::Px(2.0),
+                        bottom: Val::Px(0.0),
+                    },
+                    border_radius: BorderRadius {
+                        top_left: Val::Px(w * 0.3),
+                        top_right: Val::Px(w * 0.3),
+                        bottom_left: Val::Px(0.0),
+                        bottom_right: Val::Px(0.0),
+                    },
+                    ..default()
+                },
+                BorderColor::all(TEXT_MUTED),
+            ));
+            g.spawn((
+                Node {
+                    width: Val::Px(w),
+                    height: Val::Px(w * 0.68),
+                    margin: UiRect::top(Val::Px(-1.0)),
+                    border_radius: BorderRadius::all(Val::Px(2.0)),
+                    ..default()
+                },
+                BackgroundColor(TEXT_MUTED),
+            ));
+        });
+}
+
+/// One footer action button — Relocate/Demolish — tagged with `PanelAction`
+/// so `selection_panel_update` can toggle it via the SAME query as the
+/// Furnace/Caravan/staffing rows (see that enum's doc for why they share one
+/// component type).
+fn spawn_panel_action(parent: &mut ChildSpawnerCommands, bundle: impl Bundle, action: PanelAction, label: &str) {
+    parent.spawn((bundle, action)).with_children(|b| {
+        b.spawn(theme::text(label, FS_SMALL, TEXT_PRIMARY));
+    });
 }
 
 /// One top-bar stat chip: colored marker dot + a live `HudField` text, inside

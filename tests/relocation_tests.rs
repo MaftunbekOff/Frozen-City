@@ -196,3 +196,117 @@ fn only_the_owning_account_may_relocate_a_central_building() {
     );
 }
 
+
+// --- V0.18: `RelocateFacing` — move and turn in one commit ---
+//
+// The selection panel used to carry two buttons, "Relocate" and "Rotate", for
+// what is one decision. The CoC-style confirm bar now answers both at once
+// (`ui::placement`), and it has to send ONE command: relocating puts the
+// building back under construction, and `can_rotate` refuses a construction
+// site, so a `RelocateBuilding` + `RotateBuilding` pair would silently lose
+// the rotation. These tests pin that.
+
+#[test]
+fn relocate_facing_moves_and_turns_in_a_single_command() {
+    let mut state = sim::new_game(SEED, 12);
+    state.stock.wood = 500.0;
+    let (x, y) = find_spot(&state, BuildingKind::Tent);
+    let id = place_and_finish(&mut state, BuildingKind::Tent, x, y);
+    assert_eq!(state.find_building(id).unwrap().facing, 0, "sanity: placed south-facing");
+    let (tx, ty) = find_spot(&state, BuildingKind::Tent);
+    let wood_before = state.stock.wood;
+
+    sim::apply_command(
+        &mut state,
+        1,
+        &PlayerCommand::RelocateFacing { building: id, x: tx, y: ty, facing: 3 },
+    );
+
+    let b = state.find_building(id).unwrap();
+    assert_eq!((b.x, b.y), (tx, ty), "the building should have moved to the target tile");
+    assert_eq!(b.facing, 3, "and taken the chosen heading in the same command");
+    assert_eq!(state.stock.wood, wood_before, "relocating must never charge wood");
+    assert!(b.under_construction(), "re-entering construction, exactly like RelocateBuilding");
+}
+
+#[test]
+fn relocate_facing_can_turn_a_building_without_moving_it() {
+    // The flow's answer to "just rotate this": confirm on the tile it already
+    // occupies. `can_relocate` excludes the building's own footprint from the
+    // occupancy check, so the same tile is a legal target.
+    let mut state = sim::new_game(SEED, 12);
+    state.stock.wood = 500.0;
+    let (x, y) = find_spot(&state, BuildingKind::Tent);
+    let id = place_and_finish(&mut state, BuildingKind::Tent, x, y);
+
+    sim::apply_command(
+        &mut state,
+        1,
+        &PlayerCommand::RelocateFacing { building: id, x, y, facing: 1 },
+    );
+
+    let b = state.find_building(id).unwrap();
+    assert_eq!((b.x, b.y), (x, y), "it should not have moved");
+    assert_eq!(b.facing, 1, "but it should have turned");
+}
+
+#[test]
+fn relocate_facing_clamps_an_out_of_range_heading() {
+    // Same defensive clamp `Place` applies: a hand-crafted client must not be
+    // able to smuggle a facing outside 0..=3 into the world.
+    let mut state = sim::new_game(SEED, 12);
+    state.stock.wood = 500.0;
+    let (x, y) = find_spot(&state, BuildingKind::Tent);
+    let id = place_and_finish(&mut state, BuildingKind::Tent, x, y);
+
+    sim::apply_command(
+        &mut state,
+        1,
+        &PlayerCommand::RelocateFacing { building: id, x, y, facing: 250 },
+    );
+
+    assert_eq!(state.find_building(id).unwrap().facing, 250 % 4);
+}
+
+#[test]
+fn relocate_facing_obeys_every_relocation_rule() {
+    let mut state = sim::new_game(SEED, 12);
+    state.stock.wood = 500.0;
+    let (x, y) = find_spot(&state, BuildingKind::Tent);
+    let id = place_and_finish(&mut state, BuildingKind::Tent, x, y);
+    // Park a second building on a known tile and try to move onto it.
+    let (bx, by) = find_spot(&state, BuildingKind::Tent);
+    let _blocker = place_and_finish(&mut state, BuildingKind::Tent, bx, by);
+
+    sim::apply_command(
+        &mut state,
+        1,
+        &PlayerCommand::RelocateFacing { building: id, x: bx, y: by, facing: 2 },
+    );
+
+    let b = state.find_building(id).unwrap();
+    assert_eq!((b.x, b.y), (x, y), "an occupied target must be refused");
+    assert_eq!(b.facing, 0, "and a refused move must not apply the heading either");
+}
+
+#[test]
+fn only_the_owning_account_may_relocate_facing_a_central_building() {
+    let mut state = sim::new_game_central(5);
+    sim::player_joined_as(&mut state, 10, "Aziz", Some(1));
+    sim::player_joined_as(&mut state, 20, "Vali", Some(2));
+    let (x, y) = find_spot(&state, BuildingKind::Sawmill);
+    sim::apply_command(&mut state, 10, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
+    let sawmill = state.buildings.iter().find(|b| b.kind == BuildingKind::Sawmill).unwrap().id;
+    sim::finish_all_construction(&mut state);
+    let (tx, ty) = find_spot(&state, BuildingKind::Sawmill);
+
+    let cmd = PlayerCommand::RelocateFacing { building: sawmill, x: tx, y: ty, facing: 1 };
+    assert!(
+        !state.can_issue(20, &cmd),
+        "a stranger account must never relocate another account's central building"
+    );
+    assert!(
+        state.can_issue(10, &cmd),
+        "the owning account may relocate its own central building"
+    );
+}

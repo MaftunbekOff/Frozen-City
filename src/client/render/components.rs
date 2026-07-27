@@ -105,6 +105,70 @@ pub struct WorkerCube {
     pub index: u8,
 }
 
+/// V0.22: tags the "closed" exterior of a room-kind building — walls, a
+/// snow-covered pitched roof, a chimney, lit windows. Visible while this
+/// building is NOT the current `Selection`; hidden (never despawned —
+/// selection changes constantly as the player clicks around) the moment it
+/// is. See [`BuildingInterior`], its sibling and exact complement — between
+/// them is the whole "select a building to see inside it" effect.
+#[derive(Component)]
+pub struct BuildingRoof {
+    pub building: u32,
+}
+
+/// V0.22: tags the "open" interior of a room-kind building — floor, a low
+/// timber wall frame with corner posts, and whichever fittings are actually
+/// bought (`Building::furnishing_level`), each standing at its own
+/// `Building::station`. Visible only while this building IS the current
+/// `Selection`. See [`BuildingRoof`].
+#[derive(Component)]
+pub struct BuildingInterior {
+    pub building: u32,
+}
+
+/// V0.22: root of a construction/upgrade site's floating status overlay — a
+/// progress bar and, once a crew is actually assigned, a `MM:SS` countdown.
+/// Screen-space UI re-projected onto the building every frame (camera and
+/// selection both move independently of snapshots) — the same
+/// `Camera::world_to_viewport` trick `ui::placement::sync_placement_controls`
+/// uses for the placement confirm bar. `fill`/`countdown` are recorded here
+/// at spawn time rather than found via `Query<&Children>` every frame:
+/// `sync_buildings` already knows both entities the moment it creates them.
+/// No `building` id of its own — `sync_buildings` already has it as the key
+/// in `ScaffoldViz` (this entity's value), which is how it finds this
+/// component in the first place.
+#[derive(Component)]
+pub struct ScaffoldBar {
+    pub fill: Entity,
+    pub countdown: Entity,
+}
+
+/// The scaffold bar's fill child — width driven by `Building::build_progress`.
+#[derive(Component)]
+pub struct ScaffoldFill;
+
+/// The scaffold bar's `MM:SS` countdown text — set to an empty string
+/// (simpler than a second `Node` query just to flip `Display`) whenever
+/// `Building::build_eta_secs` is `None`, i.e. nobody is working the site.
+#[derive(Component)]
+pub struct ScaffoldCountdown;
+
+/// Building id -> its [`ScaffoldBar`] root entity, so `sync_buildings` can
+/// spawn one bar per construction site and despawn it once the site
+/// finishes (or the building is demolished). Deliberately a plain struct
+/// used via `Local<ScaffoldViz>` rather than a `Resource`: nothing outside
+/// `sync_buildings` needs this map, and a `Local` needs no
+/// `app.init_resource` registration to exist.
+///
+/// Reconciled from scratch against the CURRENT snapshot's building list on
+/// every gated pass (not incrementally patched) — building ids are only
+/// unique within one world, so a stale entry surviving a world switch (the
+/// entities it pointed at are long despawned by `DespawnOnExit`, but a
+/// `Local` outlives that) must never block a same-id building in the NEW
+/// world from getting its own bar.
+#[derive(Default)]
+pub struct ScaffoldViz(pub HashMap<u32, Entity>);
+
 /// On the furnace root: handle to the animated fire material.
 #[derive(Component)]
 pub struct FurnaceGlow {
@@ -114,10 +178,14 @@ pub struct FurnaceGlow {
 #[derive(Component)]
 pub struct FurnaceLight;
 
-/// V0.16: on a Kitchen's dining-cluster campfire, handle to the animated
-/// flame material — same idea as `FurnaceGlow`, but a distinct type so its
-/// flicker (`animate_meal_fire`) is independent of the player's Furnace
-/// on/off state (`animate_effects`'s `FurnaceGlow` loop).
+/// V0.16: handle to an always-flickering small hearth's flame material —
+/// same idea as `FurnaceGlow`, but a distinct type so its flicker
+/// (`animate_meal_fire`) is independent of the player's Furnace on/off state
+/// (`animate_effects`'s `FurnaceGlow` loop). Originally the Kitchen's own
+/// dining-cluster campfire; V0.22 generalized it to every bought `Heater`
+/// fitting in any room (`render::buildings`'s `spawn_furnishing`) — the
+/// component and the system that animates it didn't need to change, only
+/// which buildings spawn one.
 #[derive(Component)]
 pub struct MealFireGlow {
     pub fire_mat: Handle<StandardMaterial>,

@@ -167,6 +167,12 @@ fn sawmill_produces_wood_and_eats_the_forest() {
     let (x, y) = find_sawmill_spot_near_forest(&state);
     sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
     let id = state.buildings.last().unwrap().id;
+    // V0.21: a mill cuts wood with its SAW BENCH — production comes from the
+    // fitting inside (`FurnishingKind::cycle`), so a bare shed eats no forest
+    // however many people stand in it. This test never finishes the site
+    // through `finish_all_construction` (which fits one for free), so buy it
+    // the way a player would.
+    sim::finish_all_construction(&mut state);
     sim::apply_command(&mut state, 1, &PlayerCommand::AdjustWorkers { building: id, delta: 2 });
 
     let wood_before = state.stock.wood;

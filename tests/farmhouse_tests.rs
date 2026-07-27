@@ -140,12 +140,16 @@ fn farmhouse_gracefully_idles_when_livestock_is_exhausted() {
 #[test]
 fn farmer_matches_farmhouse_for_profession_bonus() {
     // Mirrors `wildlife_tests.rs`'s sibling test but for Farmhouse — a named
-    // Farmer should out-produce an anonymous worker there, same as at their
+    // Farmer should out-produce a mismatched worker there, same as at their
     // other trade (Greenhouse, checked separately below).
     let mut control = sim::new_game(SEED, 12);
     let mut experiment = sim::new_game(SEED, 12);
     for state in [&mut control, &mut experiment] {
         state.stock.wood = 500.0;
+        // `new_game`'s lone survivor is auto-appointed leader, and a leader
+        // earns the profession-match bonus at ANY building — which would hand
+        // the control the very bonus this test is trying to isolate.
+        state.leader = None;
     }
 
     let (x, y) = find_spot(&control, BuildingKind::Farmhouse);
@@ -155,11 +159,17 @@ fn farmer_matches_farmhouse_for_profession_bonus() {
     let cur = control.find_building(control_id).unwrap().workers as i8;
     sim::apply_command(&mut control, 1, &PlayerCommand::AdjustWorkers { building: control_id, delta: -cur });
     let control_survivor = control.survivors[0].id;
-    // Force a Farmer in the control too, but leave them UNASSIGNED
-    // (anonymous pool) so the profession bonus has no identity to attach to.
+    // V0.20: every worker slot holds a NAMED survivor, so an "anonymous
+    // worker" can no longer be produced by any command. The rule under test
+    // contrasts a matching trade against a non-matching one, so the control
+    // gets a named worker of the wrong trade.
     control.survivors.iter_mut().find(|s| s.id == control_survivor).unwrap().profession =
-        Profession::Farmer;
-    sim::apply_command(&mut control, 1, &PlayerCommand::AdjustWorkers { building: control_id, delta: 1 });
+        Profession::Miner;
+    sim::apply_command(
+        &mut control,
+        1,
+        &PlayerCommand::AssignSurvivor { survivor: control_survivor, building: Some(control_id) },
+    );
 
     let (x, y) = find_spot(&experiment, BuildingKind::Farmhouse);
     sim::apply_command(&mut experiment, 1, &PlayerCommand::Place { kind: BuildingKind::Farmhouse, x, y, facing: 0 });
@@ -183,7 +193,7 @@ fn farmer_matches_farmhouse_for_profession_bonus() {
 
     assert!(
         experiment.stock.food > control.stock.food,
-        "a named Farmer in a Farmhouse should out-produce an anonymous worker: \
+        "a named Farmer in a Farmhouse should out-produce a mismatched worker: \
          control={}, experiment={}",
         control.stock.food,
         experiment.stock.food
@@ -210,9 +220,16 @@ fn farmer_still_matches_greenhouse_for_profession_bonus() {
         .find(|s| Some(s.id) != leader_id)
         .expect("bootstrapped world has more than one survivor")
         .id;
+    // V0.20: named-only worker slots (see the sibling test above) — the
+    // control is a named worker of a non-matching trade. Deliberately NOT the
+    // leader, who earns the match bonus at any building whatsoever.
     control.survivors.iter_mut().find(|s| s.id == control_survivor).unwrap().profession =
-        Profession::Farmer;
-    sim::apply_command(&mut control, 1, &PlayerCommand::AdjustWorkers { building: control_id, delta: 1 });
+        Profession::Miner;
+    sim::apply_command(
+        &mut control,
+        1,
+        &PlayerCommand::AssignSurvivor { survivor: control_survivor, building: Some(control_id) },
+    );
 
     let (x, y) = find_spot(&experiment, BuildingKind::Greenhouse);
     let exp_id = place_and_staff(&mut experiment, BuildingKind::Greenhouse, x, y, 0);
@@ -238,7 +255,7 @@ fn farmer_still_matches_greenhouse_for_profession_bonus() {
 
     assert!(
         experiment.stock.food > control.stock.food,
-        "a named Farmer in a Greenhouse should still out-produce an anonymous worker: \
+        "a named Farmer in a Greenhouse should still out-produce a mismatched worker: \
          control={}, experiment={}",
         control.stock.food,
         experiment.stock.food

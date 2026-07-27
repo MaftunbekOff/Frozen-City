@@ -26,7 +26,7 @@ const START_WATER: f32 = 30.0;
 pub fn new_game(seed: u64, win_days: u32) -> GameState {
     let mut rng = Rng::new(seed);
     let mut tiles = vec![
-        Tile { terrain: Terrain::Snow, deposit: 0 };
+        Tile { terrain: Terrain::Snow, deposit: 0, road: false, snow: 0 };
         MAP_W * MAP_H
     ];
 
@@ -53,6 +53,8 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
             tiles[idx] = Tile {
                 terrain: Terrain::Forest,
                 deposit: 25 + rng.below(26) as u16,
+                road: false,
+                snow: 0,
             };
         }
     }
@@ -88,6 +90,8 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
         // (`command.rs`).
         level: 1,
         build_left: FURNACE_LOGS_NEEDED as f32,
+        // The Furnace is a fixture, not a room — it takes no fittings.
+        furnishings: Vec::new(),
         facing: 0,
     };
 
@@ -108,6 +112,7 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
         owner_account: None,
         level: 1,
         build_left: 0.0,
+        furnishings: Vec::new(),
         facing: 0,
     };
     next_id += 1;
@@ -170,6 +175,16 @@ pub fn new_game(seed: u64, win_days: u32) -> GameState {
         livestock: Livestock { cow: COW_START, sheep: SHEEP_START },
         pending_caravan: None,
         illness_rng: Rng::new(seed.rotate_left(37) ^ ILLNESS_RNG_SEED).0,
+        expeditions: Vec::new(),
+        // Two more isolated streams, each seeded off the world seed with its
+        // own rotation/salt so no two streams ever run in lockstep (same
+        // construction as `illness_rng` above).
+        expedition_rng: Rng::new(seed.rotate_left(11) ^ EXPEDITION_RNG_SEED).0,
+        laws: Vec::new(),
+        law_cooldown_until: 0,
+        lifecycle_rng: Rng::new(seed.rotate_left(53) ^ LIFECYCLE_RNG_SEED).0,
+        mission_cycle: 0,
+        clear_orders: Vec::new(),
     };
     push_event(
         &mut state,
@@ -199,6 +214,32 @@ pub fn new_game_central(seed: u64) -> GameState {
         &mut state,
         "The Global World. Settlers arrive through the Tunnel.",
     );
+    state
+}
+
+/// A world for TESTING BY HAND: `new_game_bootstrapped` (furnace already lit,
+/// a real population) plus a stockpile deep enough that nothing in a play
+/// session is gated on scraping resources together. Every building can be
+/// afforded, every fitting bought, every road drawn, immediately.
+///
+/// Deliberately a separate constructor rather than a tweak to `new_game`:
+/// the opening crisis — one survivor chopping the first logs — is the game,
+/// and skipping it must be an explicit choice (`--sandbox`), never something
+/// a normal run can drift into. Not used by any test; `new_game_bootstrapped`
+/// remains the one tests build on, precisely because it does NOT hand out
+/// resources and so still measures an economy.
+pub fn new_game_sandbox(seed: u64, win_days: u32) -> GameState {
+    let mut state = new_game_bootstrapped(seed, win_days);
+    state.stock = Stockpile {
+        wood: 50_000.0,
+        coal: 50_000.0,
+        food: 50_000.0,
+        fur: 5_000.0,
+        cloth: 5_000.0,
+        water: 50_000.0,
+        gold: 5_000.0,
+    };
+    push_event(&mut state, "Sandbox: the stores are full. Build whatever you like.");
     state
 }
 
@@ -264,6 +305,8 @@ fn blob_walk(
                 tiles[idx] = Tile {
                     terrain,
                     deposit: (dep_lo + rng.below(dep_hi - dep_lo + 1)) as u16,
+                    road: false,
+                    snow: 0,
                 };
             }
         }
@@ -302,6 +345,12 @@ pub(crate) fn new_survivor(rng: &mut Rng, next_id: &mut u32) -> Survivor {
         // haven't touched them yet.
         fatigue: 0.0,
         sick_left: 0.0,
+        // V0.18: anyone `new_survivor` makes walked in already grown — a
+        // drawn adult age, never 0. The birth path (`sim::tick`) overwrites
+        // this with 0.0 afterwards, which is the only way a child enters the
+        // colony.
+        age_days: super::lifecycle::starting_age(id),
+        partner: None,
     }
 }
 

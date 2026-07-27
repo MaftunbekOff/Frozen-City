@@ -44,6 +44,22 @@ fn place_and_finish(state: &mut GameState, kind: BuildingKind, x: u8, y: u8) -> 
     id
 }
 
+/// `place_and_finish`, then clears the auto-crewed anonymous construction
+/// crew it leaves behind: `Place` fills up to `CONSTRUCTION_CREW_MAX` idle
+/// survivors in as anonymous workers, and finishing only clamps that down to
+/// the kind's `max_workers()` rather than zeroing it -- so a freshly finished
+/// 1-2-worker building (a Sawmill included) can already be at full capacity
+/// before a test ever calls `AssignSurvivor`, which would then silently
+/// no-op against a building with no room left. Needed anywhere a test relies
+/// on a SPECIFIC named survivor actually holding the slot (fatigue/production
+/// comparisons, the night-walk-to-work tests below).
+fn place_finish_and_clear_crew(state: &mut GameState, kind: BuildingKind, x: u8, y: u8) -> u32 {
+    let id = place_and_finish(state, kind, x, y);
+    let cur = state.find_building(id).unwrap().workers as i8;
+    sim::apply_command(state, 1, &PlayerCommand::AdjustWorkers { building: id, delta: -cur });
+    id
+}
+
 /// Lands `state.tick` at the START of the given `time_of_day` fraction on
 /// whatever day it's currently mid-way through, rounding forward to the NEXT
 /// occurrence so the result is always in the future. Copied verbatim from
@@ -66,7 +82,7 @@ fn assigned_survivor_gains_fatigue_faster_than_an_idle_one() {
     let mut state = sim::new_game_bootstrapped(SEED, 12);
     state.stock.wood = 500.0;
     let (x, y) = find_spot(&state, BuildingKind::Sawmill);
-    let sawmill = place_and_finish(&mut state, BuildingKind::Sawmill, x, y);
+    let sawmill = place_finish_and_clear_crew(&mut state, BuildingKind::Sawmill, x, y);
     let assigned = state.survivors[0].id;
     let idle = state.survivors[1].id;
     sim::apply_command(&mut state, 1, &PlayerCommand::AssignSurvivor { survivor: assigned, building: Some(sawmill) });
@@ -192,7 +208,7 @@ fn a_fully_fatigued_worker_produces_measurably_less_than_a_rested_one() {
     }
 
     let (x, y) = find_sawmill_spot_near_forest(&control);
-    let control_id = place_and_finish(&mut control, BuildingKind::Sawmill, x, y);
+    let control_id = place_finish_and_clear_crew(&mut control, BuildingKind::Sawmill, x, y);
     let control_survivor = control.survivors[0].id;
     sim::apply_command(
         &mut control,
@@ -202,7 +218,7 @@ fn a_fully_fatigued_worker_produces_measurably_less_than_a_rested_one() {
     control.survivors.iter_mut().find(|s| s.id == control_survivor).unwrap().fatigue = 0.0;
 
     let (x2, y2) = find_sawmill_spot_near_forest(&experiment); // same seed -> same spot
-    let exp_id = place_and_finish(&mut experiment, BuildingKind::Sawmill, x2, y2);
+    let exp_id = place_finish_and_clear_crew(&mut experiment, BuildingKind::Sawmill, x2, y2);
     let exp_survivor = experiment.survivors[0].id;
     sim::apply_command(
         &mut experiment,
@@ -267,10 +283,16 @@ fn the_night_walk_never_claims_a_survivor_carrying_wood_home() {
     state.stock.wood = 500.0;
     let (tx, ty) = find_spot(&state, BuildingKind::Tent);
     place_and_finish(&mut state, BuildingKind::Tent, tx, ty);
-    let (sx, sy) = find_spot(&state, BuildingKind::Sawmill);
-    let sawmill = place_and_finish(&mut state, BuildingKind::Sawmill, sx, sy);
+    // `find_sawmill_spot_near_forest`, not the generic `find_spot`: a plain
+    // `find_spot` returns the first free tile in scan order, which lands the
+    // Sawmill on a tile adjacent to the Tent placed just above (also the
+    // first free tile at the time) -- from the survivor's far-off spawn
+    // point, walking toward one is nearly indistinguishable from walking
+    // toward the other, so "distance to the Tent didn't shrink" stops being
+    // a meaningful check unless the two are genuinely apart.
+    let (sx, sy) = find_sawmill_spot_near_forest(&state);
+    let sawmill = place_finish_and_clear_crew(&mut state, BuildingKind::Sawmill, sx, sy);
     let sawmill_pos = (sx as f32 + 0.5, sy as f32 + 0.5);
-    let tent_pos = (tx as f32 + 0.5, ty as f32 + 1.15);
 
     let survivor = state.survivors[0].id; // holds a bunk
     assert!(state.bunked_ids().contains(&survivor));
@@ -283,22 +305,47 @@ fn the_night_walk_never_claims_a_survivor_carrying_wood_home() {
 
     seek_time_of_day(&mut state, 0.80);
     assert!(state.is_night());
-    let s0 = state.survivors.iter().find(|s| s.id == survivor).unwrap();
-    let start_to_sawmill = dist((s0.x, s0.y), sawmill_pos);
-    let start_to_tent = dist((s0.x, s0.y), tent_pos);
+    // Teleport NEAR the assigned building, not exactly onto it: landing
+    // exactly on the goal on tick 1 would trigger `tick`'s "arrived carrying
+    // a log home" delivery side effect (`arrived_carrying_home` in
+    // `sim::tick`), which clears `carrying_wood` back to false on arrival --
+    // correct for the real Furnace errand this flag exists for, but it would
+    // erase the very state this synthetic test wants to hold constant across
+    // the window. A fixed 6-tile offset survives the full 10 ticks below at
+    // `SURVIVOR_SPEED_PER_TICK` (~0.45/tick, ~4.5 tiles total) without ever
+    // arriving, whatever direction the Sawmill and Tent actually ended up in
+    // relative to each other on this map.
+    let s_idx = state.survivors.iter().position(|s| s.id == survivor).unwrap();
+    state.survivors[s_idx].x = sawmill_pos.0 + 6.0;
+    state.survivors[s_idx].y = sawmill_pos.1;
+    let start_to_sawmill = dist((state.survivors[s_idx].x, state.survivors[s_idx].y), sawmill_pos);
 
     for _ in 0..10 {
         sim::tick(&mut state);
     }
 
     let s = state.survivors.iter().find(|s| s.id == survivor).unwrap();
+    // The direct, mechanism-level signal: `carrying_wood` is exactly the
+    // flag that blocks the sleep goal (`sim::tick`'s survivor loop, the
+    // `s.carrying_wood || !routine_furnace_lit` guard just above
+    // `assigned_building`). If it's still true, the sleep goal was never
+    // even considered reachable this whole window -- the survivor could
+    // only have been walking toward `assigned_building` (the Sawmill).
+    // Distance-to-tent isn't checked directly: from far away, walking toward
+    // either of two buildings that happen to sit in a similar direction
+    // looks nearly identical (the bug this test used to have before this
+    // fix), so it's not a reliable signal on its own.
     assert!(
-        dist((s.x, s.y), sawmill_pos) < start_to_sawmill,
-        "a survivor carrying a log home must keep heading to their assigned building, not bed"
+        s.carrying_wood,
+        "a survivor carrying a log home should still be carrying it -- the sleep goal must never have \
+         taken over (it would deliver-then-clear the flag only on arrival at the Sawmill, but it should \
+         never have been diverted toward the Tent in the first place)"
     );
     assert!(
-        dist((s.x, s.y), tent_pos) >= start_to_tent - 0.01,
-        "a survivor carrying a log home must not have been routed toward the tent instead"
+        dist((s.x, s.y), sawmill_pos) < start_to_sawmill,
+        "a survivor carrying a log home must keep heading to their assigned building, not bed: \
+         started {start_to_sawmill} tiles away, now {}",
+        dist((s.x, s.y), sawmill_pos)
     );
 }
 
@@ -308,8 +355,15 @@ fn the_night_walk_never_fires_before_the_furnace_has_ever_been_lit() {
     state.stock.wood = 500.0;
     let (tx, ty) = find_spot(&state, BuildingKind::Tent);
     place_and_finish(&mut state, BuildingKind::Tent, tx, ty);
-    let (sx, sy) = find_spot(&state, BuildingKind::Sawmill);
-    let sawmill = place_and_finish(&mut state, BuildingKind::Sawmill, sx, sy);
+    // `find_sawmill_spot_near_forest`, not the generic `find_spot`: a plain
+    // `find_spot` returns the first free tile in scan order, which lands the
+    // Sawmill on a tile adjacent to the Tent placed just above (also the
+    // first free tile at the time) -- from the survivor's far-off spawn
+    // point, walking toward one is nearly indistinguishable from walking
+    // toward the other, so "distance to the Tent didn't shrink" stops being
+    // a meaningful check unless the two are genuinely apart.
+    let (sx, sy) = find_sawmill_spot_near_forest(&state);
+    let sawmill = place_finish_and_clear_crew(&mut state, BuildingKind::Sawmill, sx, sy);
     let sawmill_pos = (sx as f32 + 0.5, sy as f32 + 0.5);
     let tent_pos = (tx as f32 + 0.5, ty as f32 + 1.15);
 
@@ -324,9 +378,16 @@ fn the_night_walk_never_fires_before_the_furnace_has_ever_been_lit() {
 
     seek_time_of_day(&mut state, 0.80);
     assert!(state.is_night());
-    let s0 = state.survivors.iter().find(|s| s.id == survivor).unwrap();
-    let start_to_sawmill = dist((s0.x, s0.y), sawmill_pos);
-    let start_to_tent = dist((s0.x, s0.y), tent_pos);
+    // Teleport onto the assigned building for the same reason as
+    // `the_night_walk_never_claims_a_survivor_carrying_wood_home` above: from
+    // the survivor's far-off spawn point, walking toward the Sawmill and
+    // walking toward the Tent look almost identical, so "distance to the
+    // Tent didn't shrink" isn't a meaningful signal unless movement starts
+    // from right at the fork.
+    let s_idx = state.survivors.iter().position(|s| s.id == survivor).unwrap();
+    state.survivors[s_idx].x = sawmill_pos.0;
+    state.survivors[s_idx].y = sawmill_pos.1;
+    let start_to_tent = dist(sawmill_pos, tent_pos);
 
     for _ in 0..10 {
         sim::tick(&mut state);
@@ -335,11 +396,12 @@ fn the_night_walk_never_fires_before_the_furnace_has_ever_been_lit() {
     let s = state.survivors.iter().find(|s| s.id == survivor).unwrap();
     assert!(!state.furnace_lit, "sanity: the furnace must still read as unlit");
     assert!(
-        dist((s.x, s.y), sawmill_pos) < start_to_sawmill,
-        "with the furnace never lit, an assigned survivor must keep heading to work, not bed"
+        dist((s.x, s.y), sawmill_pos) < 0.5,
+        "with the furnace never lit, an assigned survivor must stay at work, not walk off to bed: moved {} tiles",
+        dist((s.x, s.y), sawmill_pos)
     );
     assert!(
-        dist((s.x, s.y), tent_pos) >= start_to_tent - 0.01,
+        dist((s.x, s.y), tent_pos) >= start_to_tent - 0.5,
         "with the furnace never lit, a survivor must not have been routed toward the tent"
     );
 }

@@ -69,6 +69,12 @@ fn matching_profession_boosts_production() {
     let mut experiment = sim::new_game(SEED, 12);
     for state in [&mut control, &mut experiment] {
         state.stock.wood = 500.0;
+        // `new_game` starts with one survivor who is also the LEADER, and a
+        // leader earns the profession-match bonus at any building whatsoever
+        // (`survivor_contribution`). Left in place, this comparison would
+        // measure leadership, not trade — which is what it accidentally did
+        // while the control was an identity-less anonymous worker.
+        state.leader = None;
     }
 
     let (x, y) = find_sawmill_spot_near_forest(&control);
@@ -80,11 +86,18 @@ fn matching_profession_boosts_production() {
     let cur = control.find_building(control_id).unwrap().workers as i8;
     sim::apply_command(&mut control, 1, &PlayerCommand::AdjustWorkers { building: control_id, delta: -cur });
     let control_survivor = control.survivors[0].id;
-    // Force a Lumberjack in the control too, but leave them UNASSIGNED
-    // (anonymous pool) so the profession bonus has no identity to attach to.
+    // V0.20: every worker slot is filled by a NAMED survivor now, so an
+    // "anonymous worker" can no longer be produced by any command -- the
+    // control used to rely on that. The contrast the rule actually makes is
+    // matching vs MISMATCHED profession, so the control gets a named worker
+    // of the wrong trade.
     control.survivors.iter_mut().find(|s| s.id == control_survivor).unwrap().profession =
-        Profession::Lumberjack;
-    sim::apply_command(&mut control, 1, &PlayerCommand::AdjustWorkers { building: control_id, delta: 1 });
+        Profession::Miner;
+    sim::apply_command(
+        &mut control,
+        1,
+        &PlayerCommand::AssignSurvivor { survivor: control_survivor, building: Some(control_id) },
+    );
 
     let (x, y) = find_sawmill_spot_near_forest(&experiment);
     sim::apply_command(&mut experiment, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
@@ -111,7 +124,7 @@ fn matching_profession_boosts_production() {
 
     assert!(
         experiment.stock.wood > control.stock.wood,
-        "a named Lumberjack in a Sawmill should out-produce an anonymous worker: \
+        "a named Lumberjack in a Sawmill should out-produce a mismatched worker: \
          control={}, experiment={}",
         control.stock.wood,
         experiment.stock.wood
@@ -122,7 +135,7 @@ fn matching_profession_boosts_production() {
 fn tailor_matches_tailor_shop_for_profession_bonus() {
     // Mirrors `matching_profession_boosts_production` but for the 7th
     // profession/building pair: a named Tailor assigned to a TailorShop
-    // should out-produce an anonymous worker there. Fur is seeded generously
+    // should out-produce a mismatched worker there. Fur is seeded generously
     // in both worlds so cloth output is never fur-capped (isolating the
     // profession bonus from the fur supply mechanic tested separately in
     // wildlife_tests.rs).
@@ -130,6 +143,12 @@ fn tailor_matches_tailor_shop_for_profession_bonus() {
     let mut experiment = sim::new_game(SEED, 12);
     for state in [&mut control, &mut experiment] {
         state.stock.wood = 500.0;
+        // `new_game` starts with one survivor who is also the LEADER, and a
+        // leader earns the profession-match bonus at any building whatsoever
+        // (`survivor_contribution`). Left in place, this comparison would
+        // measure leadership, not trade — which is what it accidentally did
+        // while the control was an identity-less anonymous worker.
+        state.leader = None;
         state.stock.fur = 1000.0;
     }
 
@@ -140,11 +159,18 @@ fn tailor_matches_tailor_shop_for_profession_bonus() {
     let cur = control.find_building(control_id).unwrap().workers as i8;
     sim::apply_command(&mut control, 1, &PlayerCommand::AdjustWorkers { building: control_id, delta: -cur });
     let control_survivor = control.survivors[0].id;
-    // Force a Tailor in the control too, but leave them UNASSIGNED
-    // (anonymous pool) so the profession bonus has no identity to attach to.
+    // V0.20: every worker slot is filled by a NAMED survivor now, so an
+    // "anonymous worker" can no longer be produced by any command -- the
+    // control used to rely on that. The contrast the rule actually makes is
+    // matching vs MISMATCHED profession, so the control gets a named worker
+    // of the wrong trade.
     control.survivors.iter_mut().find(|s| s.id == control_survivor).unwrap().profession =
-        Profession::Tailor;
-    sim::apply_command(&mut control, 1, &PlayerCommand::AdjustWorkers { building: control_id, delta: 1 });
+        Profession::Cook;
+    sim::apply_command(
+        &mut control,
+        1,
+        &PlayerCommand::AssignSurvivor { survivor: control_survivor, building: Some(control_id) },
+    );
 
     let (x, y) = find_spot(&experiment, BuildingKind::TailorShop);
     sim::apply_command(&mut experiment, 1, &PlayerCommand::Place { kind: BuildingKind::TailorShop, x, y, facing: 0 });
@@ -168,7 +194,7 @@ fn tailor_matches_tailor_shop_for_profession_bonus() {
 
     assert!(
         experiment.stock.cloth > control.stock.cloth,
-        "a named Tailor in a Tailor Shop should out-produce an anonymous worker: \
+        "a named Tailor in a Tailor Shop should out-produce a mismatched worker: \
          control={}, experiment={}",
         control.stock.cloth,
         experiment.stock.cloth
@@ -195,7 +221,19 @@ fn mismatched_profession_gets_no_bonus() {
     sim::finish_all_construction(&mut baseline);
     let cur = baseline.find_building(baseline_id).unwrap().workers as i8;
     sim::apply_command(&mut baseline, 1, &PlayerCommand::AdjustWorkers { building: baseline_id, delta: -cur });
-    sim::apply_command(&mut baseline, 1, &PlayerCommand::AdjustWorkers { building: baseline_id, delta: 1 });
+    // V0.20: `AdjustWorkers` binds a NAMED survivor now, so the old
+    // "anonymous baseline" is unreachable. The claim under test is that a
+    // mismatched trade earns nothing extra, so the baseline is a named worker
+    // of a DIFFERENT non-matching trade: two different wrong trades must
+    // produce identically.
+    let baseline_survivor = baseline.survivors[0].id;
+    baseline.survivors.iter_mut().find(|s| s.id == baseline_survivor).unwrap().profession =
+        Profession::Medic;
+    sim::apply_command(
+        &mut baseline,
+        1,
+        &PlayerCommand::AssignSurvivor { survivor: baseline_survivor, building: Some(baseline_id) },
+    );
 
     let (x, y) = find_sawmill_spot_near_forest(&mismatched);
     sim::apply_command(&mut mismatched, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
@@ -244,7 +282,20 @@ fn leader_gets_the_profession_match_bonus_at_any_building() {
     sim::finish_all_construction(&mut baseline);
     let cur = baseline.find_building(baseline_id).unwrap().workers as i8;
     sim::apply_command(&mut baseline, 1, &PlayerCommand::AdjustWorkers { building: baseline_id, delta: -cur });
-    sim::apply_command(&mut baseline, 1, &PlayerCommand::AdjustWorkers { building: baseline_id, delta: 1 });
+    // V0.20: every worker slot holds a NAMED survivor, so the old anonymous
+    // baseline is gone. What this test contrasts is leadership, so the
+    // baseline is the same mismatched Cook doing the same job with NO leader
+    // seat -- `new_game` auto-appoints its lone survivor, which would
+    // otherwise hand the baseline the very bonus under test.
+    let baseline_survivor = baseline.survivors[0].id;
+    baseline.survivors.iter_mut().find(|s| s.id == baseline_survivor).unwrap().profession =
+        Profession::Cook;
+    baseline.leader = None;
+    sim::apply_command(
+        &mut baseline,
+        1,
+        &PlayerCommand::AssignSurvivor { survivor: baseline_survivor, building: Some(baseline_id) },
+    );
 
     let (x, y) = find_sawmill_spot_near_forest(&led);
     sim::apply_command(&mut led, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
@@ -269,12 +320,24 @@ fn leader_gets_the_profession_match_bonus_at_any_building() {
     // still alive — an asymmetry that has nothing to do with what this test
     // is actually checking (leader-bonus reverting). Keep everyone alive
     // and fed so the comparison stays about profession/leader bonuses only.
+    //
+    // V0.17 added a second out-of-scope confound the same way: with no Tent
+    // anywhere in this test, led's survivor -- the only one of the two
+    // NAMED and therefore the only one `fatigue_factor()` actually touches
+    // (baseline's anonymous slot is a flat 1.0 regardless of anyone's
+    // condition) -- accrues work fatigue every tick and never recovers
+    // (`FATIGUE_TENT_REST_PER_DAY` needs a bunk that doesn't exist here).
+    // Over the multi-day windows below that reaches deep into
+    // `fatigue_factor()`'s penalty band and swamps the profession/leader
+    // signal this test exists to isolate. Pin it at 0 every tick, the same
+    // way the hp floor just above neutralizes cold.
     for _ in 0..(TICKS_PER_DAY * 3) {
         for state in [&mut baseline, &mut led] {
             state.stock.food = 999.0;
             state.stock.water = 999.0;
             for s in state.survivors.iter_mut() {
                 s.hp = s.hp.max(80.0);
+                s.fatigue = 0.0;
             }
         }
         sim::tick(&mut baseline);
@@ -283,7 +346,7 @@ fn leader_gets_the_profession_match_bonus_at_any_building() {
 
     assert!(
         led.stock.wood > baseline.stock.wood,
-        "a mismatched-profession leader should still out-produce an anonymous worker: \
+        "a mismatched-profession LEADER should out-produce the same worker with no leader seat: \
          baseline={}, led={}",
         baseline.stock.wood,
         led.stock.wood
@@ -301,13 +364,14 @@ fn leader_gets_the_profession_match_bonus_at_any_building() {
     // harvest lands on) — over just a few harvests, a single whole-unit
     // boundary shift is noise; over two full days there are enough harvests
     // that a single unit's slop stays well below what an actual lingering
-    // bonus would produce. Same alive-and-fed guard as phase 1, above.
+    // bonus would produce. Same alive-fed-rested guard as phase 1, above.
     for _ in 0..(TICKS_PER_DAY * 2) {
         for state in [&mut baseline, &mut led] {
             state.stock.food = 999.0;
             state.stock.water = 999.0;
             for s in state.survivors.iter_mut() {
                 s.hp = s.hp.max(80.0);
+                s.fatigue = 0.0;
             }
         }
         sim::tick(&mut baseline);

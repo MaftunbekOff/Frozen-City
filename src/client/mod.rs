@@ -6,7 +6,8 @@ use std::sync::Mutex;
 use bevy::prelude::*;
 
 use frozen_city::game::types::{
-    Building, BuildingKind, GameState, Profession, Terrain, Tile, MAP_H, MAP_W,
+    Building, BuildingKind, GameState, Profession, Terrain, Tile, MAP_H, MAP_W, ROAD_SNOW_PENALTY,
+    SNOW_MAX,
 };
 use frozen_city::net::client::ClientConn;
 use frozen_city::net::protocol::ClientMsg;
@@ -16,8 +17,13 @@ use frozen_city::net::server::ServerHandle;
 pub mod audio;
 pub mod chat;
 pub mod events;
+// V0.18: each new mechanic gets its own panel module, registered below —
+// separate files so the three can be built (and edited) independently.
+pub mod expedition;
 pub mod i18n;
 pub mod input;
+pub mod laws;
+pub mod market;
 #[cfg(target_arch = "wasm32")]
 pub mod local_server;
 pub mod menu;
@@ -27,6 +33,9 @@ pub mod missions;
 pub mod net_sync;
 pub mod render;
 pub mod research;
+// V0.19: road drawing + the tool's mode/preview/confirm-bar — its own module
+// like the V0.18 panels above, self-registering via `roads::plugin`.
+pub mod roads;
 pub mod roles;
 pub mod roster;
 pub mod social;
@@ -35,10 +44,16 @@ pub mod touch;
 pub mod ui;
 
 // i18n matn kataloglari (har UI sohasi o'z faylida — parallel tahrirga qulay).
+pub mod i18n_expedition;
+pub mod i18n_furnishing;
 pub mod i18n_hud;
+pub mod i18n_laws;
+pub mod i18n_market;
 pub mod i18n_menu;
 pub mod i18n_names;
 pub mod i18n_panels;
+pub mod i18n_roads;
+pub mod i18n_v018;
 
 /// One grid tile = one 3D world unit. The map lies on the XZ plane
 /// (sim grid y -> world Z), +Y is up, the furnace center is the origin.
@@ -192,6 +207,15 @@ pub struct GameView {
     /// `ServerMsg::ResetCountdown`); `None` while the game runs, or on a
     /// server that never resets (singleplayer sends no countdown).
     pub reset_countdown: Option<u32>,
+    /// V0.18: the last global-market book received (`ServerMsg::Market`), and
+    /// what the market still owes this account. Kept out of `state` on
+    /// purpose: the order book is server-side (the accounts DB), not part of
+    /// any world's snapshot, and it only refreshes when asked for.
+    pub market: Vec<frozen_city::net::protocol::MarketOrder>,
+    pub wallet: Option<frozen_city::net::protocol::Wallet>,
+    /// Bumped on every received `Market` message, so a panel can redraw only
+    /// when the book actually changed.
+    pub market_version: u64,
 }
 
 /// Credentials for an account sign-in, kept in memory only for the life of
@@ -352,6 +376,15 @@ pub struct PendingPlaceData {
     pub tx: u8,
     pub ty: u8,
     pub facing: u8,
+    /// V0.18: `Some(building)` when this pending drop is an existing building
+    /// being MOVED rather than a new one being placed. Relocation used to
+    /// commit on the first click, with a separate "Rotate" button in the
+    /// selection panel for turning a building in place — two buttons for what
+    /// is one decision ("where should this sit, and which way should it
+    /// face"). Now relocation goes through the same confirm bar placement
+    /// does, so ⟳ is available while choosing the spot, and ✓ commits both at
+    /// once via `PlayerCommand::RelocateFacing`.
+    pub relocating: Option<u32>,
 }
 
 /// V0.14: the building currently being relocated, if any — set by the
@@ -435,6 +468,9 @@ pub fn kind_color(k: BuildingKind) -> Color {
         BuildingKind::Wall | BuildingKind::Gate => Color::srgb(0.50, 0.48, 0.46), // weathered stone-grey
         BuildingKind::Well => Color::srgb(0.32, 0.52, 0.68), // clear water blue
         BuildingKind::Farmhouse => Color::srgb(0.70, 0.30, 0.24), // barn red
+        // Hi-vis working orange: the one building whose job is to be seen
+        // out in a whiteout.
+        BuildingKind::SnowCrew => Color::srgb(0.90, 0.55, 0.18),
         BuildingKind::Tunnel => Color::srgb(0.40, 0.38, 0.40),
     }
 }
@@ -470,8 +506,33 @@ pub fn profession_head_color(p: Profession) -> Color {
     }
 }
 
+/// Linear-interpolates two sRGB colors — used below to blend the terrain
+/// palette by snow depth/road wear instead of adding new mesh geometry (see
+/// the V0.19 doc comment on [`terrain_color`] for why).
+fn lerp_color(a: Color, b: Color, t: f32) -> Color {
+    let t = t.clamp(0.0, 1.0);
+    let (a, b) = (a.to_srgba(), b.to_srgba());
+    Color::srgb(
+        a.red + (b.red - a.red) * t,
+        a.green + (b.green - a.green) * t,
+        a.blue + (b.blue - a.blue) * t,
+    )
+}
+
+/// A laid road's clear-weather color — packed earth/gravel, distinct from
+/// every terrain color it can sit on (roads only lay on `Terrain::Snow`, see
+/// `GameState::can_lay_road`).
+const ROAD_SURFACE_COLOR: Color = Color::srgb(0.42, 0.35, 0.27);
+/// What deep snow fades every surface toward, regardless of what's under it.
+const SNOW_DRIFT_COLOR: Color = Color::srgb(0.94, 0.96, 1.0);
+
+/// V0.19: `ground_mesh` (`render/meshes.rs`) calls this per vertex to build the
+/// merged terrain mesh, so a road/snow depth change reaches the screen for
+/// free the next time `sync_terrain` re-uploads on `tiles_version` — no extra
+/// per-frame work, no new geometry, just more input to the same per-tile
+/// color this mesh already computed.
 pub fn terrain_color(t: &Tile, x: u8, y: u8) -> Color {
-    match t.terrain {
+    let base = match t.terrain {
         Terrain::Snow => {
             let v = ((x as u32 * 7 + y as u32 * 13) % 5) as f32 * 0.012;
             Color::srgb(0.80 + v, 0.85 + v, 0.92 + v * 0.5)
@@ -487,7 +548,23 @@ pub fn terrain_color(t: &Tile, x: u8, y: u8) -> Color {
                 Color::srgb(0.48, 0.49, 0.53)
             }
         }
-    }
+    };
+    // A laid road reads as packed earth, fading back toward the plain ground
+    // color as it buries — the exact same `buried` curve `Tile::speed_factor`
+    // runs, so a road looks precisely as "gone" as it mechanically is at
+    // every depth: fully faded right at `ROAD_SNOW_PENALTY`, the same tick it
+    // stops helping (`Tile::road_is_buried`).
+    let surface = if t.road {
+        let buried = (t.snow as f32 / ROAD_SNOW_PENALTY as f32).clamp(0.0, 1.0);
+        lerp_color(ROAD_SURFACE_COLOR, base, buried)
+    } else {
+        base
+    };
+    // Snow depth brightens whatever is underneath — a light dusting barely
+    // changes the look, a real drift reads as clearly, visibly deeper. This is
+    // the only place `Tile::snow` feeds the ground's look outside a road.
+    let depth = t.snow as f32 / SNOW_MAX as f32;
+    lerp_color(surface, SNOW_DRIFT_COLOR, depth * 0.5)
 }
 
 const PLAYER_PALETTE: [(f32, f32, f32); 8] = [
@@ -648,6 +725,12 @@ impl Plugin for ClientPlugin {
                     touch::touch_control,
                     input::camera_control,
                     input::build_input,
+                    // V0.19: the road/erase drag itself — a separate system
+                    // because it spans many frames (`buttons.pressed`, not
+                    // `just_pressed`) unlike every click `build_input`
+                    // resolves in one frame. `build_input` already skips its
+                    // own click routing while `RoadMode` is armed.
+                    input::road_drag_input,
                     input::send_cursor,
                 )
                     .chain()
@@ -663,6 +746,7 @@ impl Plugin for ClientPlugin {
                     ui::morale_bar_update,
                     ui::fps_update,
                     ui::build_buttons,
+                    ui::road_tool_buttons,
                     ui::furnace_buttons,
                     ui::caravan_buttons,
                     ui::build_panel_toggle,
@@ -690,6 +774,11 @@ impl Plugin for ClientPlugin {
         app.add_plugins(events::plugin);
         app.add_plugins(social::plugin);
         app.add_plugins(audio::plugin);
+        // V0.18 panels.
+        app.add_plugins(expedition::plugin);
+        app.add_plugins(laws::plugin);
+        app.add_plugins(market::plugin);
+        app.add_plugins(roads::plugin);
         #[cfg(target_arch = "wasm32")]
         app.add_plugins(local_server::plugin);
     }
@@ -762,6 +851,9 @@ fn teardown_social(
     mut social_open: ResMut<social::SocialOpen>,
     mut pending: ResMut<PendingPlace>,
     mut relocate: ResMut<RelocateMode>,
+    mut road_mode: ResMut<roads::RoadMode>,
+    mut road_paint: ResMut<roads::RoadPaint>,
+    mut road_viz: ResMut<roads::RoadPreviewViz>,
 ) {
     *avatars = Default::default();
     // Close the social modal so a new game doesn't start with it stuck open
@@ -771,6 +863,14 @@ fn teardown_social(
     // doesn't boot with a stray ghost + confirm buttons floating.
     pending.0 = None;
     relocate.0 = None;
+    // V0.19: same reasoning for the road tool — a stroke mid-drag (or armed
+    // but idle) when the player quits to menu must not survive into the next
+    // game, where the painted tiles would refer to a map that no longer
+    // exists (`RoadPreviewViz`'s stale entity ids would then double-despawn
+    // too, since `DespawnOnExit` already took the entities themselves).
+    *road_mode = Default::default();
+    *road_paint = Default::default();
+    *road_viz = Default::default();
 }
 
 /// In `--smoke` mode, exit automatically after a few seconds of rendering.

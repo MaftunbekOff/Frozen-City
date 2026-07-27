@@ -10,7 +10,9 @@
 
 mod config;
 mod listener;
-mod messages;
+/// `pub(crate)` so `market.rs` can reuse `system_bubble` for its refusals —
+/// the same private-feedback channel every other server-side refusal uses.
+pub(crate) mod messages;
 mod native;
 mod ratelimit;
 mod simloop;

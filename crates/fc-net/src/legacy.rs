@@ -215,6 +215,158 @@ impl From<SurvivorV13> for Survivor {
             // bedridden because its save predated the mechanic.
             fatigue: 0.0,
             sick_left: 0.0,
+            // V0.18: see `migrated_age` — a deterministic adult age, never 0
+            // (a city of newborns cannot work).
+            age_days: migrated_age(s.id),
+            partner: None,
+        }
+    }
+}
+
+/// `Survivor`'s shape through V14 — everything the live `Survivor` has today
+/// except `age_days`/`partner`, added in V15 (V0.18) for the life-cycle
+/// system. `GameStateV14` mirrors its survivors as this frozen type instead
+/// of the live one, same reasoning as `SurvivorV8`/`SurvivorV13`.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct SurvivorV14 {
+    pub id: u32,
+    pub name: String,
+    pub hp: f32,
+    pub hunger: f32,
+    pub assigned_building: Option<u32>,
+    pub owner: Option<i64>,
+    pub x: f32,
+    pub y: f32,
+    pub move_target: Option<(u8, u8)>,
+    pub profession: Profession,
+    pub xp: f32,
+    pub trained_kind: Option<fc_game::types::BuildingKind>,
+    pub chop_target: Option<(u8, u8)>,
+    pub carrying_wood: bool,
+    pub thirst: f32,
+    pub bury_target: Option<u32>,
+    pub fatigue: f32,
+    pub sick_left: f32,
+}
+
+impl From<SurvivorV14> for Survivor {
+    fn from(s: SurvivorV14) -> Survivor {
+        Survivor {
+            id: s.id,
+            name: s.name,
+            hp: s.hp,
+            hunger: s.hunger,
+            assigned_building: s.assigned_building,
+            owner: s.owner,
+            x: s.x,
+            y: s.y,
+            move_target: s.move_target,
+            profession: s.profession,
+            xp: s.xp,
+            trained_kind: s.trained_kind,
+            chop_target: s.chop_target,
+            carrying_wood: s.carrying_wood,
+            thirst: s.thirst,
+            bury_target: s.bury_target,
+            fatigue: s.fatigue,
+            sick_left: s.sick_left,
+            // Pre-V0.18 worlds record no age at all. Zero would be a very
+            // literal reading of "no data" — it would turn every existing
+            // colony into a city of newborns who cannot work (see
+            // `Survivor::age_work_factor`), i.e. an instant, silent famine on
+            // load. A drawn adult age derived from the survivor's own id is
+            // the safe default: deterministic (no RNG state to thread through
+            // a migration), stable across reloads of the same save, and
+            // spread across the working band so an old colony doesn't all
+            // turn elderly on the same day.
+            age_days: migrated_age(s.id),
+            partner: None,
+        }
+    }
+}
+
+/// `Tile`'s shape through V15 — terrain and deposit only, with no `road` or
+/// `snow` (both added in V16/V0.19 for the road network and snowfall). There
+/// is one of these per map tile, so every pre-V16 `GameState` mirror carries
+/// its grid as this frozen type rather than the live one.
+#[derive(Serialize, Deserialize, Clone, Copy)]
+pub struct TileV15 {
+    pub terrain: fc_game::types::Terrain,
+    pub deposit: u16,
+}
+
+impl From<TileV15> for Tile {
+    fn from(t: TileV15) -> Tile {
+        Tile {
+            terrain: t.terrain,
+            deposit: t.deposit,
+            // A world that predates roads has none, and its snow starts at
+            // zero rather than at whatever the weather "should" have piled up
+            // — the safe direction. Loading a save should never bury a colony
+            // it was never buried in, and the next blizzard will do the job
+            // honestly.
+            road: false,
+            snow: 0,
+        }
+    }
+}
+
+/// Convenience for tests fabricating legacy bytes from a live `GameState` —
+/// drops exactly the two fields V15 predates.
+impl From<&Tile> for TileV15 {
+    fn from(t: &Tile) -> TileV15 {
+        TileV15 { terrain: t.terrain, deposit: t.deposit }
+    }
+}
+
+/// The two V0.18 RNG streams' values for any world saved before them, seeded
+/// deterministically off that world's existing `rng` with the same rotate/xor
+/// `mapgen::new_game` uses on the world seed. Shared by every pre-V15 hop so
+/// the seeding can't drift between them (and so a given save always migrates
+/// to the same streams instead of re-rolling on every restart).
+fn v018_streams(rng: u64) -> (u64, u64) {
+    (
+        fc_game::rng::Rng::new(rng.rotate_left(11) ^ fc_game::types::EXPEDITION_RNG_SEED).0,
+        fc_game::rng::Rng::new(rng.rotate_left(53) ^ fc_game::types::LIFECYCLE_RNG_SEED).0,
+    )
+}
+
+/// Deterministic adult age for a migrated (pre-V0.18) survivor — see the
+/// `age_days` note in the V14 -> V15 hop. Uses the same SplitMix64 finalizer
+/// `Profession::from_id_hash` uses, salted differently so the two derived
+/// values aren't correlated.
+fn migrated_age(id: u32) -> f32 {
+    let mut z = (id as u64 ^ 0x00A6_E1D5_9C33_7701) ^ 0x9E37_79B9_7F4A_7C15;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^= z >> 31;
+    let span = fc_game::types::ARRIVAL_AGE_MAX_DAYS - fc_game::types::ARRIVAL_AGE_MIN_DAYS;
+    fc_game::types::ARRIVAL_AGE_MIN_DAYS + (z % span.max(1.0) as u64) as f32
+}
+
+/// Convenience for tests fabricating legacy bytes from a live `GameState` —
+/// drops exactly the two fields V14 predates.
+impl From<&Survivor> for SurvivorV14 {
+    fn from(s: &Survivor) -> SurvivorV14 {
+        SurvivorV14 {
+            id: s.id,
+            name: s.name.clone(),
+            hp: s.hp,
+            hunger: s.hunger,
+            assigned_building: s.assigned_building,
+            owner: s.owner,
+            x: s.x,
+            y: s.y,
+            move_target: s.move_target,
+            profession: s.profession,
+            xp: s.xp,
+            trained_kind: s.trained_kind,
+            chop_target: s.chop_target,
+            carrying_wood: s.carrying_wood,
+            thirst: s.thirst,
+            bury_target: s.bury_target,
+            fatigue: s.fatigue,
+            sick_left: s.sick_left,
         }
     }
 }
@@ -386,6 +538,9 @@ impl From<BuildingV12> for Building {
             // predates it, so its buildings load in the default south-facing
             // pose they were always drawn in.
             facing: 0,
+            // V17 (V0.20) added interiors — see `BuildingV16`'s conversion for
+            // why an empty vec is both correct and sufficient here.
+            furnishings: Vec::new(),
         }
     }
 }
@@ -394,7 +549,7 @@ impl From<BuildingV12> for Building {
 pub struct GameStateV1 {
     pub tick: u64,
     pub win_days: u32,
-    pub tiles: Vec<Tile>,
+    pub tiles: Vec<TileV15>,
     pub buildings: Vec<BuildingV2>,
     pub survivors: Vec<SurvivorV1>,
     pub stock: StockpileV7,
@@ -433,7 +588,7 @@ pub struct GameStateV1 {
 pub struct GameStateV2 {
     pub tick: u64,
     pub win_days: u32,
-    pub tiles: Vec<Tile>,
+    pub tiles: Vec<TileV15>,
     pub buildings: Vec<BuildingV2>,
     pub survivors: Vec<SurvivorV3>,
     pub stock: StockpileV7,
@@ -592,7 +747,7 @@ impl From<GameStateV2> for GameStateV3 {
 pub struct GameStateV3 {
     pub tick: u64,
     pub win_days: u32,
-    pub tiles: Vec<Tile>,
+    pub tiles: Vec<TileV15>,
     pub buildings: Vec<BuildingV4>,
     pub survivors: Vec<SurvivorV3>,
     pub stock: StockpileV7,
@@ -633,7 +788,7 @@ pub struct GameStateV3 {
 pub struct GameStateV4 {
     pub tick: u64,
     pub win_days: u32,
-    pub tiles: Vec<Tile>,
+    pub tiles: Vec<TileV15>,
     pub buildings: Vec<BuildingV4>,
     pub survivors: Vec<SurvivorV5>,
     pub stock: StockpileV7,
@@ -747,7 +902,7 @@ impl From<GameStateV3> for GameStateV4 {
 pub struct GameStateV5 {
     pub tick: u64,
     pub win_days: u32,
-    pub tiles: Vec<Tile>,
+    pub tiles: Vec<TileV15>,
     pub buildings: Vec<BuildingV12>,
     pub survivors: Vec<SurvivorV5>,
     pub stock: StockpileV7,
@@ -847,7 +1002,7 @@ impl From<GameStateV4> for GameStateV5 {
 pub struct GameStateV6 {
     pub tick: u64,
     pub win_days: u32,
-    pub tiles: Vec<Tile>,
+    pub tiles: Vec<TileV15>,
     pub buildings: Vec<BuildingV12>,
     pub survivors: Vec<SurvivorV8>,
     pub stock: StockpileV7,
@@ -952,7 +1107,7 @@ impl From<GameStateV5> for GameStateV6 {
 pub struct GameStateV7 {
     pub tick: u64,
     pub win_days: u32,
-    pub tiles: Vec<Tile>,
+    pub tiles: Vec<TileV15>,
     pub buildings: Vec<BuildingV12>,
     pub survivors: Vec<SurvivorV8>,
     pub stock: StockpileV7,
@@ -1095,7 +1250,7 @@ impl From<GameStateV7> for GameStateV8 {
 pub struct GameStateV8 {
     pub tick: u64,
     pub win_days: u32,
-    pub tiles: Vec<Tile>,
+    pub tiles: Vec<TileV15>,
     pub buildings: Vec<BuildingV12>,
     pub survivors: Vec<SurvivorV8>,
     pub stock: StockpileV8,
@@ -1139,7 +1294,7 @@ pub struct GameStateV8 {
 pub struct GameStateV9 {
     pub tick: u64,
     pub win_days: u32,
-    pub tiles: Vec<Tile>,
+    pub tiles: Vec<TileV15>,
     pub buildings: Vec<BuildingV12>,
     pub survivors: Vec<SurvivorV13>,
     pub stock: StockpileV10,
@@ -1268,7 +1423,7 @@ impl From<GameStateV8> for GameStateV9 {
 pub struct GameStateV10 {
     pub tick: u64,
     pub win_days: u32,
-    pub tiles: Vec<Tile>,
+    pub tiles: Vec<TileV15>,
     pub buildings: Vec<BuildingV12>,
     pub survivors: Vec<SurvivorV13>,
     pub stock: StockpileV10,
@@ -1366,7 +1521,7 @@ impl From<GameStateV9> for GameStateV10 {
 pub struct GameStateV11 {
     pub tick: u64,
     pub win_days: u32,
-    pub tiles: Vec<Tile>,
+    pub tiles: Vec<TileV15>,
     pub buildings: Vec<BuildingV12>,
     pub survivors: Vec<SurvivorV13>,
     pub stock: Stockpile,
@@ -1472,7 +1627,7 @@ impl From<GameStateV11> for GameState {
         GameState {
             tick: v11.tick,
             win_days: v11.win_days,
-            tiles: v11.tiles,
+            tiles: v11.tiles.into_iter().map(Tile::from).collect(),
             // V11 buildings predate the `facing` field (V13) — lift each
             // frozen `BuildingV12` to a live south-facing `Building`.
             buildings: v11.buildings.into_iter().map(Building::from).collect(),
@@ -1518,6 +1673,15 @@ impl From<GameStateV11> for GameState {
             // migrates to the same stream instead of every server restart
             // re-rolling the colony's illness future.
             illness_rng: fc_game::rng::Rng::new(v11.rng.rotate_left(37) ^ fc_game::types::ILLNESS_RNG_SEED).0,
+            // V0.18: nobody on the road, no law standing (see `v018_streams`).
+            expeditions: Vec::new(),
+            laws: Vec::new(),
+            law_cooldown_until: 0,
+            mission_cycle: 0,
+            // V0.19: nobody was shovelling in a world that predates snow.
+            clear_orders: Vec::new(),
+            expedition_rng: v018_streams(v11.rng).0,
+            lifecycle_rng: v018_streams(v11.rng).1,
         }
     }
 }
@@ -1531,7 +1695,7 @@ impl From<GameStateV11> for GameState {
 pub struct GameStateV12 {
     pub tick: u64,
     pub win_days: u32,
-    pub tiles: Vec<Tile>,
+    pub tiles: Vec<TileV15>,
     pub buildings: Vec<BuildingV12>,
     pub survivors: Vec<SurvivorV13>,
     pub stock: Stockpile,
@@ -1574,7 +1738,7 @@ impl From<GameStateV12> for GameState {
         GameState {
             tick: v12.tick,
             win_days: v12.win_days,
-            tiles: v12.tiles,
+            tiles: v12.tiles.into_iter().map(Tile::from).collect(),
             // The only field that changed shape V12->V13: lift each frozen
             // `BuildingV12` to a live south-facing `Building`.
             buildings: v12.buildings.into_iter().map(Building::from).collect(),
@@ -1620,6 +1784,15 @@ impl From<GameStateV12> for GameState {
             // migrates to the same stream instead of every server restart
             // re-rolling the colony's illness future.
             illness_rng: fc_game::rng::Rng::new(v12.rng.rotate_left(37) ^ fc_game::types::ILLNESS_RNG_SEED).0,
+            // V0.18: nobody on the road, no law standing (see `v018_streams`).
+            expeditions: Vec::new(),
+            laws: Vec::new(),
+            law_cooldown_until: 0,
+            mission_cycle: 0,
+            // V0.19: nobody was shovelling in a world that predates snow.
+            clear_orders: Vec::new(),
+            expedition_rng: v018_streams(v12.rng).0,
+            lifecycle_rng: v018_streams(v12.rng).1,
         }
     }
 }
@@ -1723,8 +1896,8 @@ impl From<GameStateV1> for GameState {
 pub struct GameStateV13 {
     pub tick: u64,
     pub win_days: u32,
-    pub tiles: Vec<Tile>,
-    pub buildings: Vec<Building>,
+    pub tiles: Vec<TileV15>,
+    pub buildings: Vec<BuildingV16>,
     pub survivors: Vec<SurvivorV13>,
     pub stock: Stockpile,
     pub furnace_level: u8,
@@ -1766,8 +1939,8 @@ impl From<GameStateV13> for GameState {
         GameState {
             tick: v13.tick,
             win_days: v13.win_days,
-            tiles: v13.tiles,
-            buildings: v13.buildings,
+            tiles: v13.tiles.into_iter().map(Tile::from).collect(),
+            buildings: v13.buildings.into_iter().map(Building::from).collect(),
             survivors: v13.survivors.into_iter().map(Survivor::from).collect(),
             stock: v13.stock,
             furnace_level: v13.furnace_level,
@@ -1805,6 +1978,411 @@ impl From<GameStateV13> for GameState {
             // See the identical note on the V12 hop: a deterministic
             // stream seeded off this world's existing `rng`.
             illness_rng: fc_game::rng::Rng::new(v13.rng.rotate_left(37) ^ fc_game::types::ILLNESS_RNG_SEED).0,
+            // V0.18: nobody on the road, no law standing (see `v018_streams`).
+            expeditions: Vec::new(),
+            laws: Vec::new(),
+            law_cooldown_until: 0,
+            mission_cycle: 0,
+            // V0.19: nobody was shovelling in a world that predates snow.
+            clear_orders: Vec::new(),
+            expedition_rng: v018_streams(v13.rng).0,
+            lifecycle_rng: v018_streams(v13.rng).1,
+        }
+    }
+}
+
+/// V14 (pre-expeditions/laws/life-cycle) — every field the live `GameState`
+/// has today except the six V0.18 additions, with survivors in their
+/// pre-V0.18 shape. What `persist.rs` wrote under the `FCWORLD14` header
+/// before V15 added expeditions, the law book, the life-cycle streams and
+/// the mission-cycle counter.
+#[derive(Serialize, Deserialize)]
+pub struct GameStateV14 {
+    pub tick: u64,
+    pub win_days: u32,
+    pub tiles: Vec<TileV15>,
+    pub buildings: Vec<BuildingV16>,
+    pub survivors: Vec<SurvivorV14>,
+    pub stock: Stockpile,
+    pub furnace_level: u8,
+    pub furnace_lit: bool,
+    pub cold_snap: bool,
+    pub players: Vec<PlayerInfo>,
+    pub phase: GamePhase,
+    pub events: Vec<GameEvent>,
+    pub total_events: u64,
+    pub chat: Vec<ChatLine>,
+    pub total_chat: u64,
+    pub pings: Vec<Ping>,
+    pub missions: Vec<Mission>,
+    pub tunnel: TunnelState,
+    pub graduated: bool,
+    pub central: bool,
+    pub techs: Vec<Tech>,
+    pub disease_until: u64,
+    pub blizzard_until: u64,
+    pub pending_event: Option<CaravanOffer>,
+    pub event_rng: u64,
+    pub owner_id: Option<u64>,
+    pub next_id: u32,
+    pub rng: u64,
+    pub central_ledger: Vec<LedgerEntry>,
+    pub leader: Option<u32>,
+    pub mourning_until: u64,
+    pub morale: f32,
+    pub pending_migrant: Option<TunnelMigrant>,
+    pub wildlife: Wildlife,
+    pub corpses: Vec<Corpse>,
+    pub graves: Vec<Grave>,
+    pub livestock: Livestock,
+    pub pending_caravan: Option<TradeCaravan>,
+    pub illness_rng: u64,
+}
+
+impl From<GameStateV14> for GameState {
+    fn from(v14: GameStateV14) -> GameState {
+        GameState {
+            tick: v14.tick,
+            win_days: v14.win_days,
+            tiles: v14.tiles.into_iter().map(Tile::from).collect(),
+            buildings: v14.buildings.into_iter().map(Building::from).collect(),
+            survivors: v14.survivors.into_iter().map(Survivor::from).collect(),
+            stock: v14.stock,
+            furnace_level: v14.furnace_level,
+            furnace_lit: v14.furnace_lit,
+            cold_snap: v14.cold_snap,
+            players: v14.players,
+            phase: v14.phase,
+            events: v14.events,
+            total_events: v14.total_events,
+            chat: v14.chat,
+            total_chat: v14.total_chat,
+            pings: v14.pings,
+            missions: v14.missions,
+            tunnel: v14.tunnel,
+            graduated: v14.graduated,
+            central: v14.central,
+            techs: v14.techs,
+            disease_until: v14.disease_until,
+            blizzard_until: v14.blizzard_until,
+            pending_event: v14.pending_event,
+            event_rng: v14.event_rng,
+            owner_id: v14.owner_id,
+            next_id: v14.next_id,
+            rng: v14.rng,
+            central_ledger: v14.central_ledger,
+            leader: v14.leader,
+            mourning_until: v14.mourning_until,
+            morale: v14.morale,
+            pending_migrant: v14.pending_migrant,
+            wildlife: v14.wildlife,
+            corpses: v14.corpses,
+            graves: v14.graves,
+            livestock: v14.livestock,
+            pending_caravan: v14.pending_caravan,
+            illness_rng: v14.illness_rng,
+            // Nobody is on the road and no law stands in a world that
+            // predates both — the empty/zero state is the correct one here,
+            // unlike `age_days` (see `SurvivorV14`'s conversion).
+            expeditions: Vec::new(),
+            laws: Vec::new(),
+            law_cooldown_until: 0,
+            mission_cycle: 0,
+            // V0.19: nobody was shovelling in a world that predates snow.
+            clear_orders: Vec::new(),
+            // Two more deterministic streams seeded off this world's existing
+            // `rng`, exactly as the V13 -> V14 hop seeds `illness_rng`.
+            expedition_rng: v018_streams(v14.rng).0,
+            lifecycle_rng: v018_streams(v14.rng).1,
+        }
+    }
+}
+
+/// V15 (pre-roads/snow) — every field the live `GameState` has today except
+/// `clear_orders`, with the tile grid in its pre-V0.19 shape. What
+/// `persist.rs` wrote under the `FCWORLD15` header before V16 (V0.19) gave
+/// `Tile` a `road` flag and a `snow` depth. `Survivor`/`Building` are
+/// unchanged in this hop (V0.19 added no field to either), so both reuse the
+/// live types.
+#[derive(Serialize, Deserialize)]
+pub struct GameStateV15 {
+    pub tick: u64,
+    pub win_days: u32,
+    pub tiles: Vec<TileV15>,
+    pub buildings: Vec<BuildingV16>,
+    pub survivors: Vec<Survivor>,
+    pub stock: Stockpile,
+    pub furnace_level: u8,
+    pub furnace_lit: bool,
+    pub cold_snap: bool,
+    pub players: Vec<PlayerInfo>,
+    pub phase: GamePhase,
+    pub events: Vec<GameEvent>,
+    pub total_events: u64,
+    pub chat: Vec<ChatLine>,
+    pub total_chat: u64,
+    pub pings: Vec<Ping>,
+    pub missions: Vec<Mission>,
+    pub tunnel: TunnelState,
+    pub graduated: bool,
+    pub central: bool,
+    pub techs: Vec<Tech>,
+    pub disease_until: u64,
+    pub blizzard_until: u64,
+    pub pending_event: Option<CaravanOffer>,
+    pub event_rng: u64,
+    pub owner_id: Option<u64>,
+    pub next_id: u32,
+    pub rng: u64,
+    pub central_ledger: Vec<LedgerEntry>,
+    pub leader: Option<u32>,
+    pub mourning_until: u64,
+    pub morale: f32,
+    pub pending_migrant: Option<TunnelMigrant>,
+    pub wildlife: Wildlife,
+    pub corpses: Vec<Corpse>,
+    pub graves: Vec<Grave>,
+    pub livestock: Livestock,
+    pub pending_caravan: Option<TradeCaravan>,
+    pub illness_rng: u64,
+    pub expeditions: Vec<fc_game::types::Expedition>,
+    pub expedition_rng: u64,
+    pub laws: Vec<fc_game::types::Law>,
+    pub law_cooldown_until: u64,
+    pub lifecycle_rng: u64,
+    pub mission_cycle: u32,
+}
+
+impl From<GameStateV15> for GameState {
+    fn from(v15: GameStateV15) -> GameState {
+        GameState {
+            tick: v15.tick,
+            win_days: v15.win_days,
+            // The only field that changed shape V15 -> V16: lift each frozen
+            // tile to a live, road-less, snow-free one.
+            tiles: v15.tiles.into_iter().map(Tile::from).collect(),
+            buildings: v15.buildings.into_iter().map(Building::from).collect(),
+            survivors: v15.survivors,
+            stock: v15.stock,
+            furnace_level: v15.furnace_level,
+            furnace_lit: v15.furnace_lit,
+            cold_snap: v15.cold_snap,
+            players: v15.players,
+            phase: v15.phase,
+            events: v15.events,
+            total_events: v15.total_events,
+            chat: v15.chat,
+            total_chat: v15.total_chat,
+            pings: v15.pings,
+            missions: v15.missions,
+            tunnel: v15.tunnel,
+            graduated: v15.graduated,
+            central: v15.central,
+            techs: v15.techs,
+            disease_until: v15.disease_until,
+            blizzard_until: v15.blizzard_until,
+            pending_event: v15.pending_event,
+            event_rng: v15.event_rng,
+            owner_id: v15.owner_id,
+            next_id: v15.next_id,
+            rng: v15.rng,
+            central_ledger: v15.central_ledger,
+            leader: v15.leader,
+            mourning_until: v15.mourning_until,
+            morale: v15.morale,
+            pending_migrant: v15.pending_migrant,
+            wildlife: v15.wildlife,
+            corpses: v15.corpses,
+            graves: v15.graves,
+            livestock: v15.livestock,
+            pending_caravan: v15.pending_caravan,
+            illness_rng: v15.illness_rng,
+            expeditions: v15.expeditions,
+            expedition_rng: v15.expedition_rng,
+            laws: v15.laws,
+            law_cooldown_until: v15.law_cooldown_until,
+            lifecycle_rng: v15.lifecycle_rng,
+            mission_cycle: v15.mission_cycle,
+            // Nobody was shovelling in a world that predates snow.
+            clear_orders: Vec::new(),
+        }
+    }
+}
+
+/// `Building`'s shape through V16 — everything the live `Building` has today
+/// except `furnishings`, added in V17 (V0.20) for building interiors. Every
+/// pre-V17 `GameState` mirror carries its buildings as this frozen type.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct BuildingV16 {
+    pub id: u32,
+    pub kind: fc_game::types::BuildingKind,
+    pub x: u8,
+    pub y: u8,
+    pub workers: u8,
+    pub progress: f32,
+    pub owner: Option<u64>,
+    pub owner_account: Option<i64>,
+    pub level: u8,
+    pub build_left: f32,
+    pub facing: u8,
+}
+
+impl From<BuildingV16> for Building {
+    fn from(b: BuildingV16) -> Building {
+        Building {
+            id: b.id,
+            kind: b.kind,
+            x: b.x,
+            y: b.y,
+            workers: b.workers,
+            progress: b.progress,
+            owner: b.owner,
+            owner_account: b.owner_account,
+            level: b.level,
+            build_left: b.build_left,
+            // A building from before interiors existed is simply unfurnished.
+            // An EMPTY vec, not one zero per slot: `Building::furnishing_level`
+            // already reads a short vec as all-zero, so the migration never
+            // has to know each kind's slot count.
+            //
+            // This deliberately leaves already-upgraded buildings ABOVE the
+            // level their (absent) fittings would now allow. That is the right
+            // way round: the interior gate is checked on the NEXT upgrade
+            // (`furnishings_keep_pace`), so an old colony keeps everything it
+            // earned and simply has to furnish its rooms before growing them
+            // further. Retro-demoting them would take back wood already spent.
+            furnishings: Vec::new(),
+            facing: b.facing,
+        }
+    }
+}
+
+/// Convenience for tests fabricating pre-V17 bytes from a live `GameState` —
+/// drops exactly the field V16 predates.
+impl From<&Building> for BuildingV16 {
+    fn from(b: &Building) -> BuildingV16 {
+        BuildingV16 {
+            id: b.id,
+            kind: b.kind,
+            x: b.x,
+            y: b.y,
+            workers: b.workers,
+            progress: b.progress,
+            owner: b.owner,
+            owner_account: b.owner_account,
+            level: b.level,
+            build_left: b.build_left,
+            facing: b.facing,
+        }
+    }
+}
+
+/// V16 (pre-interiors) — every field the live `GameState` has today, with
+/// buildings in their pre-`furnishings` shape. What `persist.rs` wrote under
+/// the `FCWORLD16` header before V17 (V0.20) gave `Building` its interior.
+/// Nothing else changed in this hop, so every other field reuses its live
+/// type — including `tiles`, since V16 is the first version whose grid is
+/// already in the current road/snow shape.
+#[derive(Serialize, Deserialize)]
+pub struct GameStateV16 {
+    pub tick: u64,
+    pub win_days: u32,
+    pub tiles: Vec<Tile>,
+    pub buildings: Vec<BuildingV16>,
+    pub survivors: Vec<Survivor>,
+    pub stock: Stockpile,
+    pub furnace_level: u8,
+    pub furnace_lit: bool,
+    pub cold_snap: bool,
+    pub players: Vec<PlayerInfo>,
+    pub phase: GamePhase,
+    pub events: Vec<GameEvent>,
+    pub total_events: u64,
+    pub chat: Vec<ChatLine>,
+    pub total_chat: u64,
+    pub pings: Vec<Ping>,
+    pub missions: Vec<Mission>,
+    pub tunnel: TunnelState,
+    pub graduated: bool,
+    pub central: bool,
+    pub techs: Vec<Tech>,
+    pub disease_until: u64,
+    pub blizzard_until: u64,
+    pub pending_event: Option<CaravanOffer>,
+    pub event_rng: u64,
+    pub owner_id: Option<u64>,
+    pub next_id: u32,
+    pub rng: u64,
+    pub central_ledger: Vec<LedgerEntry>,
+    pub leader: Option<u32>,
+    pub mourning_until: u64,
+    pub morale: f32,
+    pub pending_migrant: Option<TunnelMigrant>,
+    pub wildlife: Wildlife,
+    pub corpses: Vec<Corpse>,
+    pub graves: Vec<Grave>,
+    pub livestock: Livestock,
+    pub pending_caravan: Option<TradeCaravan>,
+    pub illness_rng: u64,
+    pub expeditions: Vec<fc_game::types::Expedition>,
+    pub expedition_rng: u64,
+    pub laws: Vec<fc_game::types::Law>,
+    pub law_cooldown_until: u64,
+    pub lifecycle_rng: u64,
+    pub mission_cycle: u32,
+    pub clear_orders: Vec<fc_game::types::ClearOrder>,
+}
+
+impl From<GameStateV16> for GameState {
+    fn from(v16: GameStateV16) -> GameState {
+        GameState {
+            tick: v16.tick,
+            win_days: v16.win_days,
+            tiles: v16.tiles,
+            // The only field that changed shape in this hop.
+            buildings: v16.buildings.into_iter().map(Building::from).collect(),
+            survivors: v16.survivors,
+            stock: v16.stock,
+            furnace_level: v16.furnace_level,
+            furnace_lit: v16.furnace_lit,
+            cold_snap: v16.cold_snap,
+            players: v16.players,
+            phase: v16.phase,
+            events: v16.events,
+            total_events: v16.total_events,
+            chat: v16.chat,
+            total_chat: v16.total_chat,
+            pings: v16.pings,
+            missions: v16.missions,
+            tunnel: v16.tunnel,
+            graduated: v16.graduated,
+            central: v16.central,
+            techs: v16.techs,
+            disease_until: v16.disease_until,
+            blizzard_until: v16.blizzard_until,
+            pending_event: v16.pending_event,
+            event_rng: v16.event_rng,
+            owner_id: v16.owner_id,
+            next_id: v16.next_id,
+            rng: v16.rng,
+            central_ledger: v16.central_ledger,
+            leader: v16.leader,
+            mourning_until: v16.mourning_until,
+            morale: v16.morale,
+            pending_migrant: v16.pending_migrant,
+            wildlife: v16.wildlife,
+            corpses: v16.corpses,
+            graves: v16.graves,
+            livestock: v16.livestock,
+            pending_caravan: v16.pending_caravan,
+            illness_rng: v16.illness_rng,
+            expeditions: v16.expeditions,
+            expedition_rng: v16.expedition_rng,
+            laws: v16.laws,
+            law_cooldown_until: v16.law_cooldown_until,
+            lifecycle_rng: v16.lifecycle_rng,
+            mission_cycle: v16.mission_cycle,
+            clear_orders: v16.clear_orders,
         }
     }
 }

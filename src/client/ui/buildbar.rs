@@ -1,18 +1,27 @@
 use bevy::prelude::*;
 
-use frozen_city::game::types::{BuildingKind, PlayerCommand};
+use frozen_city::game::types::{BuildingKind, PlayerCommand, ROAD_COST_WOOD, ROAD_REFUND};
 use frozen_city::net::protocol::ClientMsg;
 
 use super::super::chat::ChatState;
 use super::super::i18n::Lang;
 use super::super::i18n_hud;
 use super::super::i18n_names;
+use super::super::i18n_roads;
+use super::super::roads::RoadMode;
 use super::super::theme::{
     self, BG_PANEL, BTN, BTN_ACTIVE, BTN_DIM, BTN_HOVER, FS_SMALL, SP_SM, SP_XS, TEXT_MUTED,
     TEXT_PRIMARY,
 };
 use super::super::*;
 use super::*;
+
+/// V0.19: a road/erase tool tile in the Infrastructure category — mirrors
+/// `BuildBtn` in shape, but clicking one arms `RoadMode` instead of
+/// `BuildMode` (a drag paints a batch of tiles, there's no single kind to
+/// place). See `road_tool_buttons`.
+#[derive(Component)]
+pub struct RoadToolBtn(pub RoadMode);
 
 #[allow(clippy::too_many_arguments)]
 pub fn build_buttons(
@@ -22,6 +31,7 @@ pub fn build_buttons(
     time: Res<Time>,
     mut build: ResMut<BuildMode>,
     mut pending: ResMut<PendingPlace>,
+    mut road: super::super::roads::RoadModes,
     mut open: ResMut<BuildPanelOpen>,
     clicked: Query<(&Interaction, &BuildBtn), Changed<Interaction>>,
     mut all: Query<(&Interaction, &BuildBtn, &mut BackgroundColor)>,
@@ -63,6 +73,11 @@ pub fn build_buttons(
             // hotkeys in `input::build_input` — otherwise the frozen ghost
             // and its ✓ button would still commit the OLD kind.
             pending.0 = None;
+            // V0.19: a normal building and the road tool are mutually
+            // exclusive — picking one always backs the other out cleanly,
+            // same reasoning as `road_tool_buttons` clearing `BuildMode`.
+            *road.mode = RoadMode::Off;
+            road.paint.reset();
             // Bino tanlandi — modal yopiladi, joylashtirish uchun olam ochiq
             // bo'lsin (bekor qilish bosishida esa ochiq qoladi).
             if build.0.is_some() {
@@ -377,6 +392,8 @@ fn build_menu_content(p: &mut ChildSpawnerCommands, ff: theme::FormFactor, lang:
         ff,
         lang,
     );
+    // V0.19: roads + the Snow Crew that keeps them clear.
+    infra_category(p, ff, lang);
 }
 
 /// Bolg'a glifi — burchak tugmasining ichidagi yassi piktogramma (ko'ndalang
@@ -433,15 +450,89 @@ fn build_category(
             ..default()
         })
         .with_children(|row| {
-            let btn_h = if ff.compact() { 54.0_f32.max(ff.btn_h()) } else { 56.0 };
             for &kind in kinds {
-                // Number-key hotkey (desktop only) still keys off the building's
-                // position in `BUILDABLE`, not its position in this panel.
-                let hotkey = if ff.compact() {
-                    None
-                } else {
-                    BuildingKind::BUILDABLE.iter().position(|&k| k == kind).map(|i| i + 1)
-                };
+                build_kind_tile(row, kind, ff, lang);
+            }
+        });
+}
+
+/// One `BuildBtn` tile — split out of `build_category` so `infra_category`
+/// can drop `BuildingKind::SnowCrew` into its own row alongside the (non-
+/// `BuildingKind`) road tool tiles below, without duplicating this markup.
+fn build_kind_tile(row: &mut ChildSpawnerCommands, kind: BuildingKind, ff: theme::FormFactor, lang: Lang) {
+    let btn_h = if ff.compact() { 54.0_f32.max(ff.btn_h()) } else { 56.0 };
+    // Number-key hotkey (desktop only) still keys off the building's
+    // position in `BUILDABLE`, not its position in this panel.
+    let hotkey = if ff.compact() {
+        None
+    } else {
+        BuildingKind::BUILDABLE.iter().position(|&k| k == kind).map(|i| i + 1)
+    };
+    row.spawn((
+        Button,
+        Node {
+            width: Val::Px(88.0),
+            height: Val::Px(btn_h),
+            flex_direction: FlexDirection::Column,
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            row_gap: Val::Px(2.0),
+            flex_shrink: 0.0,
+            border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
+            ..default()
+        },
+        BackgroundColor(BTN),
+        BaseColor(BTN),
+        BuildBtn(kind),
+    ))
+    .with_children(|b| {
+        b.spawn(theme::text(
+            i18n_names::building_name(kind, lang),
+            FS_SMALL - 1.0,
+            TEXT_PRIMARY,
+        ));
+        b.spawn((
+            theme::text(
+                i18n_hud::build_cost_badge(kind.cost_wood(), hotkey, lang),
+                FS_SMALL - 2.0,
+                TEXT_MUTED,
+            ),
+            BuildCostBadge(kind),
+        ));
+    });
+}
+
+/// V0.19: roads + the Snow Crew that keeps them clear, grouped as their own
+/// "Infrastructure" category — distinct from a plain `build_category` call
+/// because two of its three tiles (`RoadToolBtn`) aren't `BuildingKind`s at
+/// all: dragging a road paints a batch of tiles rather than dropping one
+/// building, so they arm `roads::RoadMode` instead of `BuildMode` (see
+/// `road_tool_buttons`).
+fn infra_category(parent: &mut ChildSpawnerCommands, ff: theme::FormFactor, lang: Lang) {
+    parent.spawn(theme::text(i18n_roads::build_cat_infra(lang), FS_SMALL, TEXT_MUTED));
+    parent
+        .spawn(Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            flex_wrap: FlexWrap::Wrap,
+            column_gap: Val::Px(SP_XS),
+            row_gap: Val::Px(SP_XS),
+            ..default()
+        })
+        .with_children(|row| {
+            let btn_h = if ff.compact() { 54.0_f32.max(ff.btn_h()) } else { 56.0 };
+            for (mode, label, badge) in [
+                (
+                    RoadMode::Draw,
+                    i18n_roads::road_tool_draw(lang),
+                    i18n_roads::road_tool_draw_badge(ROAD_COST_WOOD as u32, lang),
+                ),
+                (
+                    RoadMode::Erase,
+                    i18n_roads::road_tool_erase(lang),
+                    i18n_roads::road_tool_erase_badge((ROAD_COST_WOOD * ROAD_REFUND) as u32, lang),
+                ),
+            ] {
                 row.spawn((
                     Button,
                     Node {
@@ -456,26 +547,55 @@ fn build_category(
                         ..default()
                     },
                     BackgroundColor(BTN),
-                    BaseColor(BTN),
-                    BuildBtn(kind),
+                    RoadToolBtn(mode),
                 ))
                 .with_children(|b| {
-                    b.spawn(theme::text(
-                        i18n_names::building_name(kind, lang),
-                        FS_SMALL - 1.0,
-                        TEXT_PRIMARY,
-                    ));
-                    b.spawn((
-                        theme::text(
-                            i18n_hud::build_cost_badge(kind.cost_wood(), hotkey, lang),
-                            FS_SMALL - 2.0,
-                            TEXT_MUTED,
-                        ),
-                        BuildCostBadge(kind),
-                    ));
+                    b.spawn(theme::text(label, FS_SMALL - 1.0, TEXT_PRIMARY));
+                    b.spawn(theme::text(badge, FS_SMALL - 2.0, TEXT_MUTED));
                 });
             }
+            // Snow Crew is a normal placeable building — reuses `BuildBtn`
+            // exactly like every other category, just grouped here since its
+            // whole job is keeping this category's roads open.
+            build_kind_tile(row, BuildingKind::SnowCrew, ff, lang);
         });
+    parent.spawn(theme::text(i18n_roads::road_tool_hint(lang), FS_SMALL - 2.0, TEXT_MUTED));
+}
+
+/// Handles the two road-tool tiles: click arms/toggles `RoadMode` (mirroring
+/// `build_buttons`' toggle-on-reclick) and clears `BuildMode`/`PendingPlace`/
+/// `RelocateMode` — a road tool and a building placement can never both be
+/// live, same mutual exclusion `build_buttons` enforces in the other
+/// direction.
+pub fn road_tool_buttons(
+    mut road: super::super::roads::RoadModes,
+    mut build: ResMut<BuildMode>,
+    mut pending: ResMut<PendingPlace>,
+    mut relocate: ResMut<RelocateMode>,
+    clicked: Query<(&Interaction, &RoadToolBtn), Changed<Interaction>>,
+    mut all: Query<(&Interaction, &RoadToolBtn, &mut BackgroundColor)>,
+) {
+    for (interaction, btn) in &clicked {
+        if *interaction == Interaction::Pressed {
+            *road.mode = if *road.mode == btn.0 { RoadMode::Off } else { btn.0 };
+            road.paint.reset();
+            build.0 = None;
+            pending.0 = None;
+            relocate.0 = None;
+        }
+    }
+    for (interaction, btn, mut bg) in &mut all {
+        let color = if *road.mode == btn.0 {
+            BTN_ACTIVE
+        } else if *interaction == Interaction::Hovered {
+            BTN_HOVER
+        } else {
+            BTN
+        };
+        if bg.0 != color {
+            bg.0 = color;
+        }
+    }
 }
 
 /// Burchak tugmasi bosilishi (yoki `B`) modalni ochadi/yopadi; ochiq holatda

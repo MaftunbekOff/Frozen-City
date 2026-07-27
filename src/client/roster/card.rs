@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use frozen_city::game::types::{PlayerCommand, FATIGUE_EXHAUSTED, FATIGUE_TIRED, TICKS_PER_DAY};
+use frozen_city::game::types::{LifeStage, PlayerCommand, FATIGUE_EXHAUSTED, FATIGUE_TIRED, TICKS_PER_DAY};
 use frozen_city::net::protocol::ClientMsg;
 
 use super::super::i18n::Lang;
@@ -151,7 +151,10 @@ pub(crate) fn update_card(
         &mut Text,
         (With<CardUnassignLabel>, Without<CardText>, Without<CardLeaderLabel>),
     >,
-    mut fatigue_fill: Query<(&mut Node, &mut BackgroundColor), (With<CardFatigueFill>, Without<CardRoot>)>,
+    mut fatigue_fill: Query<
+        (&mut Node, &mut BackgroundColor),
+        (With<CardFatigueFill>, Without<CardRoot>, Without<CardLeaderBtn>, Without<CardUnassignBtn>),
+    >,
 ) {
     let lang = *lang;
     let Some(state) = view.state.as_ref() else { return };
@@ -199,6 +202,19 @@ pub(crate) fn update_card(
                     None => i18n_panels::status_idle(lang).to_string(),
                 };
                 let leader_tag = if state.leader == Some(s.id) { i18n_panels::leader_tag(lang) } else { "" };
+                // V0.18: life stage — Adult is the common case and stays
+                // untagged (same "only show when it's not the default"
+                // convention `health_tag` in `panel.rs` uses); a Child or
+                // Elder gets a short suffix next to the profession tag.
+                // `i18n_panels` has no life-stage catalog entry yet (V0.18
+                // landed after V1.0's UI catalogs were built out, and that
+                // file isn't ours to extend) — unlocalized name-only text
+                // (`LifeStage::name()`) is the documented fallback until it
+                // does.
+                let stage_tag = match s.stage() {
+                    LifeStage::Adult => String::new(),
+                    other => format!(" · {}", other.name()),
+                };
                 // Sick line only appears while `is_sick()` — `sick_left`
                 // (ticks) converted to in-game days for the player, same unit
                 // the rest of the UI reasons in (`GameState::day`, TICKS_PER_DAY).
@@ -208,8 +224,15 @@ pub(crate) fn update_card(
                 } else {
                     String::new()
                 };
+                // V0.18: who this survivor is partnered with, if anyone —
+                // name only (a proper noun needs no translation), same
+                // unlocalized-fallback reasoning as `stage_tag` above.
+                let partner_line = match s.partner.and_then(|pid| state.survivors.iter().find(|o| o.id == pid)) {
+                    Some(partner) => format!("\n♥ {}", partner.name),
+                    None => String::new(),
+                };
                 format!(
-                    "{}{leader_tag}\n{}\n{}{sick_line}\n{}",
+                    "{}{stage_tag}{leader_tag}\n{}\n{}{sick_line}\n{}{partner_line}",
                     profession_level_tag(s, lang),
                     i18n_panels::card_stats_line(s.hp, s.hunger, lang),
                     i18n_panels::card_fatigue_line(s.fatigue, fatigue_tag, lang),

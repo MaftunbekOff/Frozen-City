@@ -93,7 +93,16 @@ pub fn tick(mut server: ResMut<ServerRes>, time: Res<Time>) {
                         | ClientMsg::RefreshSocial
                         | ClientMsg::Invite { .. }
                         | ClientMsg::RefreshShowcase
-                        | ClientMsg::SetVisitPolicy { .. },
+                        | ClientMsg::SetVisitPolicy { .. }
+                        // V0.18: the return trip and the global market are
+                        // both multi-world features; in-browser singleplayer
+                        // has neither a central world to come back from nor
+                        // anyone to trade with.
+                        | ClientMsg::ReturnHome { .. }
+                        | ClientMsg::RefreshMarket
+                        | ClientMsg::PostOrder { .. }
+                        | ClientMsg::TakeOrder { .. }
+                        | ClientMsg::CancelOrder { .. },
                     ) => {}
                     // Singleplayer is a solo owner: nobody to kick.
                     Ok(ClientMsg::Kick { .. }) => {}

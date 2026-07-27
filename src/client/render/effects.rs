@@ -80,7 +80,20 @@ pub fn animate_environment(
         } else {
             Color::srgb(0.65, 0.72, 1.0)
         };
-        let elev = 0.18 + 1.15 * daylight;
+        // The sun never grazes the horizon, however "dawn" the clock says it
+        // is. At the old floor (0.18 rad, about 10 degrees) every object threw
+        // a shadow roughly six times its own height, and the shadow map — two
+        // cascades over 70 units, see `assets.rs` — has nowhere near the
+        // precision to resolve one at that angle: the whole valley filled with
+        // long thin dark streaks radiating from every survivor and building.
+        // It read as corrupted geometry, not as sunrise.
+        //
+        // 0.45 rad (~26 degrees) keeps shadows to about twice an object's
+        // height, which the cascades resolve cleanly, and still leaves a
+        // visible low-sun rake at dawn and dusk. The warm light colour above
+        // is what actually sells the time of day; the angle was only ever
+        // meant to support it.
+        let elev = 0.45 + 0.85 * daylight;
         let az = 2.35 + (t - 0.5) * 0.9;
         let sun_dir = -Vec3::new(az.cos() * elev.cos(), elev.sin(), az.sin() * elev.cos());
         *tr = Transform::default().looking_to(sun_dir, Vec3::Y);

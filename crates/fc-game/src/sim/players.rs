@@ -190,6 +190,101 @@ pub fn inject_migrants(
     settled
 }
 
+/// V0.18: the way BACK. Removes every settler `account` owns from the central
+/// world so they can be re-settled in that account's personal world — the
+/// mirror image of [`inject_migrants`], and the second half of the round trip
+/// the Tunnel always implied but never had.
+///
+/// Unlike `extract_migrants` there is no "always leave one behind" floor: the
+/// central world is a meeting place, not a colony, and an account taking all
+/// of its own people home is exactly the intended outcome. Buildings that
+/// account placed there stay where they are (`Building::owner_account` keeps
+/// them theirs), so going home never demolishes anyone's contribution to the
+/// shared city.
+pub fn extract_settlers(state: &mut GameState, account: i64) -> Vec<Survivor> {
+    let mut out = Vec::new();
+    let ids: Vec<u32> = state
+        .survivors
+        .iter()
+        .filter(|s| s.owner == Some(account))
+        .map(|s| s.id)
+        .collect();
+    for id in ids {
+        let Some(idx) = state.survivors.iter().position(|s| s.id == id) else {
+            continue;
+        };
+        // Vacate any post they held in the shared city, exactly as the
+        // death/migration paths do — a building must never count a worker who
+        // isn't standing in it.
+        if let Some(b_id) = state.survivors[idx].assigned_building {
+            if let Some(b) = state.buildings.iter_mut().find(|b| b.id == b_id) {
+                b.workers = b.workers.saturating_sub(1);
+            }
+        }
+        let mut s = state.survivors.remove(idx);
+        s.assigned_building = None;
+        s.move_target = None;
+        out.push(s);
+    }
+    if !out.is_empty() {
+        let plural = if out.len() == 1 { "" } else { "s" };
+        push_event(
+            state,
+            format!("{} settler{} went back through the Tunnel.", out.len(), plural),
+        );
+    }
+    out
+}
+
+/// V0.18: settle returning travellers back into their own personal world —
+/// the mirror of [`inject_migrants`]. Re-ids them from THIS world's counter
+/// (ids are only unique within a world) and clears the central-world
+/// `owner` tag: at home nobody is an account's settler, they're just people
+/// again. Bounded by `MAX_POPULATION` so a returning group can never push a
+/// colony past the population ceiling; anyone who doesn't fit stays behind in
+/// the central world (the caller keeps them there rather than dropping them).
+///
+/// Also refuses everyone (same "stays behind" outcome) while the world is
+/// Won/Lost: `server::simloop`'s `WORLD_RESET_AFTER` replaces
+/// `GameState::survivors` wholesale a short while after game-over, and
+/// settling travellers into a colony that's about to be swept away would
+/// silently erase them the moment that reset fires. Treating a non-`Running`
+/// world as zero capacity reuses the exact same "leave them in the central
+/// world" path `MAX_POPULATION` already relies on, so a returning group
+/// timed badly against the reset just waits for the next run instead of
+/// vanishing. Returns how many actually settled.
+pub fn inject_returnees(state: &mut GameState, travellers: Vec<Survivor>) -> usize {
+    if state.phase != GamePhase::Running {
+        return 0;
+    }
+    let mut settled = 0usize;
+    for mut s in travellers {
+        if state.survivors.len() >= MAX_POPULATION as usize {
+            break;
+        }
+        s.id = state.next_id;
+        state.next_id += 1;
+        s.assigned_building = None;
+        // Home again: no longer an account-owned settler on a shared map.
+        s.owner = None;
+        (s.x, s.y) = GameState::spawn_position(s.id);
+        s.move_target = None;
+        s.chop_target = None;
+        s.bury_target = None;
+        s.carrying_wood = false;
+        state.survivors.push(s);
+        settled += 1;
+    }
+    if settled > 0 {
+        let plural = if settled == 1 { "" } else { "s" };
+        push_event(
+            state,
+            format!("{} traveller{} came home through the Tunnel.", settled, plural),
+        );
+    }
+    settled
+}
+
 /// Restore a previously-connected player's roster entry (reconnect flow).
 /// Preserves their id/name/color/stats but resets the transient cursor.
 pub fn player_rejoined(state: &mut GameState, saved: PlayerInfo) {

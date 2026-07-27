@@ -153,23 +153,33 @@ fn assign_survivor_is_noop_for_unknown_or_zero_capacity_building() {
 }
 
 #[test]
-fn adjust_workers_cannot_evict_a_named_assignment() {
+fn adjust_workers_sends_a_named_worker_home() {
+    // Until V0.20 the `-` button refused to touch a named assignment: it only
+    // drained "anonymous slack", the headcount a building carried with nobody
+    // actually bound to it. V0.20 binds a real survivor to every slot, which
+    // leaves no slack for `-` to drain — so the old rule would have made the
+    // button permanently dead. `-` now means what it looks like: send someone
+    // home. `AssignSurvivor { building: None }` is still the way to release
+    // one SPECIFIC person; this releases the most recently added.
     let mut state = sim::new_game(SEED, 12);
     let kitchen = place(&mut state, BuildingKind::Kitchen); // max_workers() == 1
     let survivor = state.survivors[0].id;
 
     sim::apply_command(&mut state, 1, &PlayerCommand::AssignSurvivor { survivor, building: Some(kitchen) });
+    assert_eq!(state.find_building(kitchen).unwrap().workers, 1, "sanity: assigned");
+
     sim::apply_command(&mut state, 1, &PlayerCommand::AdjustWorkers { building: kitchen, delta: -1 });
 
     assert_eq!(
-        state.find_building(kitchen).unwrap().workers, 1,
-        "AdjustWorkers must not drain a named assignment's slot"
+        state.find_building(kitchen).unwrap().workers, 0,
+        "`-` must actually free the slot"
     );
     assert_eq!(
         state.survivors.iter().find(|s| s.id == survivor).unwrap().assigned_building,
-        Some(kitchen),
-        "the named survivor must remain assigned"
+        None,
+        "and the survivor it freed must really be unassigned, not just uncounted"
     );
+    assert_eq!(state.idle_workers(), state.survivors.len() as u32, "everyone is idle again");
 }
 
 #[test]
@@ -244,4 +254,114 @@ fn total_workers_and_idle_workers_stay_consistent_with_named_assignment() {
 
     assert_eq!(state.total_workers(), 3, "1 named + 2 anonymous");
     assert_eq!(state.idle_workers(), pop - 3);
+}
+
+// --- Headcount integrity: a named assignment must never double-count ---
+//
+// `Building.workers` is a headcount of named survivors plus anonymous slack.
+// Reported from play: placing a building auto-crews it from the idle pool
+// ("1 building, 0 idle"), and then assigning that same survivor to the site by
+// name made it read "2 building" — one person counted twice.
+
+/// The colony can never have more people at work than it has people.
+fn assert_headcount_sane(state: &GameState, when: &str) {
+    let total: u32 = state.buildings.iter().map(|b| b.workers as u32).sum();
+    assert!(
+        total <= state.survivors.len() as u32,
+        "{when}: {total} at work but only {} survivors exist",
+        state.survivors.len()
+    );
+    for b in &state.buildings {
+        let named = state.survivors.iter().filter(|s| s.assigned_building == Some(b.id)).count();
+        assert!(
+            named <= b.workers as usize,
+            "{when}: building {} has {named} named workers but a headcount of {}",
+            b.id,
+            b.workers
+        );
+    }
+}
+
+#[test]
+fn a_placed_site_crews_itself_with_real_named_survivors() {
+    // Reported from play: a freshly placed Tent said "1 building" while the
+    // idle count read 0 and the only survivor stood around with an empty
+    // workplace, walking nowhere. `Place` used to raise `workers` anonymously
+    // — a headcount bound to nobody — so the number claimed a worker the
+    // world never actually sent. V0.20 crews by NAME.
+    let mut state = sim::new_game_bootstrapped(7, 12);
+    state.stock.wood = 500.0;
+    let idle_before = state.idle_workers();
+    assert!(idle_before > 0, "sanity: somebody is free to be crewed");
+
+    let (x, y) = find_spot(&state, BuildingKind::Tent);
+    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y, facing: 0 });
+    let site = state.buildings.last().unwrap().id;
+
+    let crewed = state.find_building(site).unwrap().workers as usize;
+    let named = state.survivors.iter().filter(|s| s.assigned_building == Some(site)).count();
+    assert!(crewed > 0, "a new site should pull a crew off the idle pool");
+    assert_eq!(
+        named, crewed,
+        "every worker the site counts must be a real survivor standing in it —          that mismatch is the whole bug"
+    );
+    assert_eq!(
+        state.idle_workers() as usize,
+        idle_before as usize - crewed,
+        "the idle pool should drop by exactly the people who took the job"
+    );
+    assert_headcount_sane(&state, "after placing");
+}
+
+#[test]
+fn naming_a_survivor_to_the_site_that_already_crewed_them_is_a_noop() {
+    // The other half of the same story: once the site has crewed someone by
+    // name, the player clicking that same person onto that same site must not
+    // count them twice (`AssignSurvivor`'s `prev == Some(new_id)` guard).
+    let mut state = sim::new_game_bootstrapped(7, 12);
+    state.stock.wood = 500.0;
+    let (x, y) = find_spot(&state, BuildingKind::Tent);
+    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Tent, x, y, facing: 0 });
+    let site = state.buildings.last().unwrap().id;
+
+    let before = state.find_building(site).unwrap().workers;
+    let who = state
+        .survivors
+        .iter()
+        .find(|s| s.assigned_building == Some(site))
+        .map(|s| s.id)
+        .expect("the site crewed somebody");
+    sim::apply_command(&mut state, 1, &PlayerCommand::AssignSurvivor { survivor: who, building: Some(site) });
+
+    assert_eq!(
+        state.find_building(site).unwrap().workers, before,
+        "re-naming someone already working here must not add a second slot"
+    );
+    assert_headcount_sane(&state, "after re-naming");
+}
+
+#[test]
+fn naming_a_survivor_with_real_slack_still_grows_the_headcount() {
+    // The other half of the rule: when the colony genuinely has idle hands,
+    // a named assignment is a NEW worker and the headcount must rise.
+    let mut state = sim::new_game_bootstrapped(7, 12);
+    state.stock.wood = 500.0;
+    let (x, y) = find_spot(&state, BuildingKind::Sawmill);
+    sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::Sawmill, x, y, facing: 0 });
+    let mill = state.buildings.last().unwrap().id;
+    sim::finish_all_construction(&mut state);
+    // Clear whatever crew the placement left behind, so the building starts
+    // empty with the colony still full of idle people.
+    let crew = state.find_building(mill).unwrap().workers as i8;
+    if crew > 0 {
+        sim::apply_command(&mut state, 1, &PlayerCommand::AdjustWorkers { building: mill, delta: -crew });
+    }
+    assert_eq!(state.find_building(mill).unwrap().workers, 0);
+    assert!(state.idle_workers() > 0, "sanity: the colony has slack");
+
+    let who = state.survivors[0].id;
+    sim::apply_command(&mut state, 1, &PlayerCommand::AssignSurvivor { survivor: who, building: Some(mill) });
+
+    assert_eq!(state.find_building(mill).unwrap().workers, 1);
+    assert_headcount_sane(&state, "after naming with slack");
 }

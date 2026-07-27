@@ -134,6 +134,14 @@ pub fn pump_net(
             ServerMsg::ResetCountdown { seconds_left } => {
                 view.reset_countdown = Some(seconds_left);
             }
+            // V0.18: the global market's order book. Answers every market
+            // command as well as `RefreshMarket`, so this is the one place
+            // the client's copy is ever written.
+            ServerMsg::Market { orders, wallet } => {
+                view.market = orders;
+                view.wallet = wallet;
+                view.market_version += 1;
+            }
         }
     }
 }
@@ -197,6 +205,15 @@ pub fn watch_disconnect(
 /// personal world mid-outage), `Login` for a personal-world account session,
 /// otherwise a guest `Hello`. Either way carries the last known session
 /// token so a successful redial resumes the same player identity.
+///
+/// V0.18: `ClientMsg::ReturnHome` never appears here. It's a first message
+/// only for the one moment settlers actually cross back from the central
+/// world (`menu::start::pending_switch` sends it, and only then); by the
+/// time `session.central` has flipped to `false` the round trip already
+/// happened server-side, so a later reconnect into the personal world is
+/// exactly a `Login` — replaying `ReturnHome` again would just ask the
+/// (already empty, for this account) central world for settlers a second
+/// time, which is harmless but pointless.
 fn reconnect_hello(session: &Session) -> ClientMsg {
     match &session.auth {
         Some(auth) if session.central => ClientMsg::EnterCentral {

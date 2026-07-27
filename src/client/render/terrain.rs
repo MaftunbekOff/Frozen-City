@@ -3,6 +3,14 @@ use bevy::prelude::*;
 use super::*;
 use crate::client::*;
 
+/// V0.19: roads and snow depth (`Tile::road`/`Tile::snow`) need no changes
+/// here — `ground_mesh` (`render/meshes.rs`) already calls `terrain_color`
+/// (`client::mod`) per vertex to build this merged mesh, and that function
+/// now folds road/snow into its output (see its doc comment). So a laid
+/// road or a deepening drift reaches the screen through the exact same path
+/// a chopped-down forest tile always has: change the `Tile`, wait for the
+/// next `tiles_version` bump, `sync_terrain` re-diffs below and rebuilds.
+/// Nothing here needed its own per-frame or per-tile work.
 pub fn sync_terrain(
     mut commands: Commands,
     view: Res<GameView>,

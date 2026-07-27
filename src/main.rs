@@ -108,6 +108,14 @@ fn parse_cli() -> Cli {
                 }
             }
             "--smoke" => cli.smoke = true,
+            // Hand-testing: start with a lit furnace, a real population and
+            // full stores, so a session goes straight to whatever is being
+            // tried out instead of through the opening scramble. Set as an
+            // env var because that is how `fc-net` already takes its other
+            // operator switches (see `simloop`'s `fresh`), and it reaches
+            // every world this process starts without threading a field
+            // through `ServerConfig`.
+            "--sandbox" => std::env::set_var("FC_SANDBOX", "1"),
             "--lang" => {
                 if let Some(l) = next.as_deref().and_then(client::i18n::Lang::from_code) {
                     cli.lang = Some(l);
@@ -126,7 +134,8 @@ fn parse_cli() -> Cli {
                      --seed <n>         map seed\n\
                      --days <n>         days to survive (default {DEFAULT_WIN_DAYS})\n\
                      --lang <uz|en|ru>  UI language (default: saved preference, or uz)\n\
-                     --smoke            auto-exit after a few seconds (CI smoke test)"
+                     --sandbox          start rich: lit furnace, people, full stores (testing)
+\n                     --smoke            auto-exit after a few seconds (CI smoke test)"
                 );
                 std::process::exit(0);
             }

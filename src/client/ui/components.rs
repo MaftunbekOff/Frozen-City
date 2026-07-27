@@ -37,12 +37,6 @@ pub struct BuildBtn(pub BuildingKind);
 #[derive(Component)]
 pub struct FurnaceLvlBtn(pub u8);
 
-/// Row of furnace-level buttons inside the selection panel; shown only while
-/// the Furnace is the selected building (see `selection_panel_update`), so the
-/// furnace level is adjusted from the furnace's own click-info.
-#[derive(Component)]
-pub struct FurnaceRow;
-
 /// V0.13: one quick trade-caravan action — dispatches `QUICK_TRADE_AMOUNT` of
 /// `good`, selling if `selling` else buying. Row shown only while the Tunnel
 /// is selected and unlocked (see `selection_panel_update`).
@@ -51,11 +45,6 @@ pub struct CaravanBtn {
     pub good: TradeGood,
     pub selling: bool,
 }
-
-/// Row of `CaravanBtn`s inside the selection panel; shown only while the
-/// Tunnel is the selected building (see `selection_panel_update`).
-#[derive(Component)]
-pub struct CaravanRow;
 
 // --- Build modal (corner button + centered modal) ---
 
@@ -103,25 +92,116 @@ pub enum SelText {
     Info,
     Count,
     /// "Bo'sh ishchi: N" — the colony's idle-worker pool, shown inside the
-    /// workforce section so the player can see headroom without checking the
+    /// Survivors tab so the player can see headroom without checking the
     /// top bar (mirrors the "N available" column in the reference layout).
     Avail,
-    /// V0.8: "Daraja 3/10" (bitgan bino) yoki "Qurilmoqda: 64% ustalar 2/3"
-    /// (maydoncha); pech/buildable-bo'lmaganlarda bo'sh.
+    /// V0.8: "Qurilmoqda: 64% ustalar 2/3" while a construction site is
+    /// unfinished; empty once the building is standing (the header's own
+    /// "{Name} Lv. N" already says the level — see `panel_header`).
     Level,
-    /// V0.8: Yangilash tugmasining yorlig'i — "Yangilash → L4 (50 yog'och)"
-    /// yoki maksimal darajada mos matn.
+    /// V0.8: the header's Upgrade button label — "Yangilash → L4 (50
+    /// yog'och)", the `furnish_first_btn` explainer, or the max-level text.
     Upgrade,
+    /// V0.21: Furniture tab tile `slot`'s corner level badge ("L2", or "-"
+    /// while that fitting hasn't been bought yet) — an index into the
+    /// selected building's `kind.furnishings()`.
+    TileBadge(u8),
+    /// V0.21: Furniture tab tile `slot`'s one/two-letter fitting glyph
+    /// (`furnishing_glyph`, not localized — a visual mark, not a word, same
+    /// convention as `BuildingKind::letter()`).
+    TileGlyph(u8),
+    /// V0.21: detail card header — the SELECTED fitting's name + level
+    /// status (`i18n_furnishing::furnishing_header`).
+    FurnName,
+    /// V0.21: detail card's one-line description of the selected fitting.
+    FurnDesc,
+    /// V0.21: detail card's buy/upgrade button label (cost over current
+    /// stock, or the max-level text).
+    FurnUpgrade,
+    /// V0.21: stats grid cell — the selected fitting's production cycle
+    /// output, or a dash when it isn't the room's producer.
+    FurnStatProduction,
+    /// V0.21: stats grid cell — resources the cycle spends per run (only the
+    /// Tailor Shop's Workbench has one today; a dash everywhere else).
+    FurnStatConsumption,
+    /// V0.21: stats grid cell — the fitting's own per-level effect (e.g. a
+    /// Heater's fatigue reduction, Shelving's XP bonus).
+    FurnStatStats,
+    /// V0.21: stats grid cell — the production cycle's duration, with the
+    /// next level's delta ("7.8s -0.2s") when there is a next level.
+    FurnStatTime,
+    /// V0.21: Survivors tab portrait slot `slot`'s initial-letter label,
+    /// empty while that slot is unfilled or past capacity.
+    SurvivorInitial(u8),
 }
 
-/// V0.8: raise the selected building one level (`UpgradeBuilding`). Shown
-/// only for finished, buildable, below-max buildings; its color is owned by
+/// V0.21: which half of the selection panel's Furniture/Survivors tab strip
+/// is showing — the reference design's two-tab layout. A component on
+/// `SelPanelRoot`'s own entity (not a `Resource`: adding one means
+/// registering it in `ClientPlugin::build`, `src/client/mod.rs`, which this
+/// panel does not own) so a pick survives frame to frame. `TabBtn`/`TabRoot`
+/// tag the matching button/content-root entities with the same value so
+/// `selection_panel_update`/`selection_panel_buttons` can compare by it.
+#[derive(Component, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SelTab {
+    #[default]
+    Furniture,
+    Survivors,
+}
+
+/// One Furniture/Survivors tab button. `selection_panel_buttons` writes `.0`
+/// into the `SelTab` component on `SelPanelRoot` when clicked;
+/// `selection_panel_update` colors it active/inactive and hides it entirely
+/// when the selected building has nothing for that tab to show.
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+pub struct TabBtn(pub SelTab);
+
+/// The Furniture/Survivors tab's own content area — visible while the
+/// `SelTab` on `SelPanelRoot` equals `.0` AND that tab applies to the
+/// selected building.
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+pub struct TabRoot(pub SelTab);
+
+/// V0.21: which Furniture-tab tile's detail card is showing — an index into
+/// the selected building's `kind.furnishings()`. A component on
+/// `SelPanelRoot`'s entity, same reasoning as `SelTab`.
+#[derive(Component, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SelFurnSlot(pub u8);
+
+/// V0.21: one piece of the Furniture tab's content. `Tile(slot)` is the
+/// selectable strip entry (visible while `slot` exists on this building,
+/// highlighted while it equals `SelFurnSlot`'s current pick); `UpgradeBtn`
+/// is the detail card's own buy/upgrade button (visible while the panel's
+/// Furniture tab applies at all, colored by afford/maxed exactly like the
+/// header's `UpgradeBtn`). Bundles both roles under one component type —
+/// `selection_panel_update`'s `&mut Node` `ParamSet` is at Bevy's 8-tuple
+/// cap (see that fn's doc comment), so a marker per role would not fit.
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+pub enum FurnitureCard {
+    Tile(u8),
+    UpgradeBtn,
+}
+
+/// V0.21: one portrait slot in the Survivors tab's roster strip. Up to 3 are
+/// pre-spawned — the highest of any `BuildingKind::max_workers()`/
+/// `CONSTRUCTION_CREW_MAX`. `Root(slot)` is the slot's own circle (visible
+/// while `slot` is within the building's current worker capacity, tinted by
+/// the assigned survivor's profession color while filled); `Lock(slot)` is
+/// the padlock glyph drawn inside it (visible only while that slot is within
+/// capacity but UNFILLED). Bundled for the same `ParamSet`-cap reason as
+/// `FurnitureCard`.
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+pub enum SurvivorSlot {
+    Root(u8),
+    Lock(u8),
+}
+
+/// V0.8: raise the selected building one level (`UpgradeBuilding`). Lives in
+/// the panel's header, next to the title. Shown only for finished,
+/// buildable, below-max buildings; its color is owned by
 /// `selection_panel_update` (affordability), so no `BaseColor` hover.
 #[derive(Component)]
 pub struct UpgradeBtn;
-
-#[derive(Component)]
-pub struct WorkerRow;
 
 #[derive(Component)]
 pub struct WorkerMinus;
@@ -145,25 +225,38 @@ pub struct WorkerMaxBtn;
 #[derive(Component)]
 pub struct MoraleBarFill;
 
-#[derive(Component)]
-pub struct DemolishBtn;
+/// V0.21: the panel's per-kind extra controls that live OUTSIDE the two tabs
+/// — Furnace burn-level buttons, Tunnel caravan quick-trade, Relocate,
+/// Demolish, and the Survivors tab's anonymous −/count/+ (+ None/Max) block
+/// (hidden in the central world, where only named `AssignSurvivor` works —
+/// see `AssignHereBtn`). Each is a plain Node-visibility toggle with no
+/// color logic of its own here (the buttons INSIDE `FurnaceControls`/
+/// `CaravanControls` style themselves — `furnace_buttons`/`caravan_buttons`
+/// in `buildbar.rs`), so bundling all five under one component/query is a
+/// pure win against the `ParamSet` cap, not a compromise.
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+pub enum PanelAction {
+    Demolish,
+    Relocate,
+    FurnaceControls,
+    CaravanControls,
+    WorkerAdjustControls,
+}
 
-/// V0.14: enter `RelocateMode` for the selected building. Shown only for
-/// finished, buildable buildings — same condition `DemolishBtn` uses.
-#[derive(Component)]
-pub struct RelocateBtn;
-
-/// V0.16: turn the selected building a quarter-turn in place
-/// (`PlayerCommand::RotateBuilding`). Shown under the same condition as
-/// `RelocateBtn` (finished, buildable). Distinct from `placement::RotateBtn`,
-/// which spins a not-yet-placed ghost during the CoC confirm step.
-#[derive(Component)]
-pub struct RotateBuildingBtn;
+// V0.16's `RotateBuildingBtn` (a "Rotate" button in the selection panel,
+// sending `PlayerCommand::RotateBuilding`) was removed in V0.18: turning a
+// building is not a separate decision from placing it, and having both
+// buttons meant the panel asked "where?" and "which way?" in two places. Both
+// now live in the relocate flow's confirm bar (`placement::RotateBtn`), which
+// commits them together as one `RelocateFacing`. The COMMAND is still there
+// and still tested — only this button is gone.
 
 /// Assigns the survivor currently selected in the roster panel (`roster.rs`)
 /// to the building selected here. Only visible/enabled when both a building
 /// and a roster survivor are selected — logic lives in `roster.rs` since it
-/// needs `SurvivorSelection`, but the button is part of this panel's layout.
+/// needs `SurvivorSelection`, but the button is part of this panel's layout
+/// (nested inside the Survivors tab, so it only shows alongside the portrait
+/// strip it fills).
 #[derive(Component)]
 pub struct AssignHereBtn;
 

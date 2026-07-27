@@ -386,15 +386,9 @@ pub fn relocate_label(l: Lang) -> &'static str {
     }
 }
 
-/// V0.16: turn a finished building a quarter-turn in place — free of wood,
-/// but re-squaring it takes rebuild time, same as relocating.
-pub fn rotate_label(l: Lang) -> &'static str {
-    match l {
-        Lang::Uz => "Aylantirish (bepul)",
-        Lang::En => "Rotate (free)",
-        Lang::Ru => "Повернуть (бесплатно)",
-    }
-}
+// V0.16's `rotate_label` went with the selection panel's Rotate button in
+// V0.18 — the confirm bar's ⟳ is a glyph, so there is no string to translate
+// (see `ui::components`'s note on `RotateBuildingBtn`).
 
 /// Worker count row, e.g. "3/4 workers".
 pub fn worker_count(cur: u8, max: u8, l: Lang) -> String {
@@ -689,6 +683,22 @@ pub fn sel_info_farmhouse(production: f32, cow: f32, sheep: f32, l: Lang) -> Str
         ),
         Lang::Ru => format!(
             "+{production:.0} еды/день при полном составе.\nСкот: {cow:.0} коров, {sheep:.0} овец.",
+        ),
+    }
+}
+
+/// V0.19: the Snow Crew produces nothing — what it sells is a radius that
+/// stays walkable, so its info line talks about reach, not output.
+pub fn sel_info_snow_crew(radius: i32, l: Lang) -> String {
+    match l {
+        Lang::Uz => format!(
+            "Ishchi qo'yilsa, atrofdagi {radius} tayl radiusda qorni tozalab turadi.\nYo'llar ochiq qolsa, aholi tezroq yuradi.",
+        ),
+        Lang::En => format!(
+            "Staffed, it clears snow within {radius} tiles.\nOpen roads mean people move faster.",
+        ),
+        Lang::Ru => format!(
+            "С рабочими убирает снег в радиусе {radius} клеток.\nОткрытые дороги — люди ходят быстрее.",
         ),
     }
 }

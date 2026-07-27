@@ -11,6 +11,27 @@ use frozen_city::game::types::*;
 
 const SEED: u64 = 777;
 
+/// V0.20: bring every fitting in `building` to `FURNISHING_MAX_LEVEL`, so the
+/// interior gate on `UpgradeBuilding` (`Building::furnishings_keep_pace`) is
+/// satisfied for every level a test wants to climb. A no-op for a kind with no
+/// interior (Tent, Wall, the Furnace), which is exactly right — those never
+/// had a gate to satisfy.
+fn furnish_fully(state: &mut GameState, building: u32) {
+    let slots = state
+        .find_building(building)
+        .map(|b| b.kind.furnishings().len())
+        .unwrap_or(0);
+    for slot in 0..slots {
+        for _ in 0..FURNISHING_MAX_LEVEL {
+            sim::apply_command(
+                state,
+                1,
+                &PlayerCommand::UpgradeFurnishing { building, slot: slot as u8 },
+            );
+        }
+    }
+}
+
 fn find_spot(state: &GameState, kind: BuildingKind) -> (u8, u8) {
     for y in 0..MAP_H as u8 {
         for x in 0..MAP_W as u8 {
@@ -129,6 +150,19 @@ fn crew_finishes_the_site_and_it_starts_working() {
         "completion must trim the crew to what the building can employ"
     );
 
+    // V0.21: finishing the walls is not the same as being able to work. The
+    // hut produces through the workbench inside it (`FurnishingKind::cycle`),
+    // and this site was finished by its own CREW rather than by
+    // `finish_all_construction`'s shortcut, so nothing has been fitted yet —
+    // buy the workbench the way a player would.
+    let slot = BuildingKind::HunterHut
+        .furnishings()
+        .iter()
+        .position(|f| *f == FurnishingKind::Workbench)
+        .expect("a Hunter's Hut takes a workbench") as u8;
+    experiment.stock.wood = 500.0;
+    sim::apply_command(&mut experiment, 1, &PlayerCommand::UpgradeFurnishing { building: id, slot });
+
     // Bitgach ovchilar oziq keltira boshlaydi — control esa hali maydoncha.
     sim::apply_command(&mut experiment, 1, &PlayerCommand::AdjustWorkers { building: id, delta: 2 });
     for _ in 0..TICKS_PER_DAY {
@@ -152,6 +186,14 @@ fn upgrades_chain_one_level_at_a_time_to_max() {
     sim::apply_command(&mut state, 1, &PlayerCommand::Place { kind: BuildingKind::HunterHut, x, y, facing: 0 });
     let id = state.buildings.last().unwrap().id;
     sim::finish_all_construction(&mut state);
+
+    // V0.20: a room has to be furnished before it can be enlarged
+    // (`Building::furnishings_keep_pace`, enforced by the `UpgradeBuilding`
+    // arm). This test is about the LEVEL chain, not the interior gate — which
+    // has its own coverage in `furnishing_tests.rs` — so bring every fitting
+    // straight to `FURNISHING_MAX_LEVEL` up front and the gate is satisfied
+    // for the whole climb to `BUILDING_MAX_LEVEL`.
+    furnish_fully(&mut state, id);
 
     // L2: narx aynan formulaga mos tushadi va sayt yana qurilishga o'tadi.
     let wood_before = state.stock.wood;

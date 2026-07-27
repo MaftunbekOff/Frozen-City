@@ -64,6 +64,7 @@ fn can_issue_guest_has_full_authority_including_others_buildings() {
         owner_account: None,
         level: 1,
         build_left: 0.0,
+        furnishings: Vec::new(),
         facing: 0,
     });
 

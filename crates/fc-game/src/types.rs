@@ -13,6 +13,9 @@ mod building;
 mod command;
 mod economy;
 mod events;
+mod expedition;
+mod furnishing;
+mod law;
 mod people;
 mod progression;
 mod state;
@@ -22,6 +25,9 @@ pub use building::*;
 pub use command::*;
 pub use economy::*;
 pub use events::*;
+pub use expedition::*;
+pub use furnishing::*;
+pub use law::*;
 pub use people::*;
 pub use progression::*;
 pub use state::*;
@@ -446,6 +452,207 @@ pub const MAX_INFECT_CHANCE_PER_DAY: f32 = 0.75;
 /// infection rolls can never shift the existing `rng`/`event_rng` sequences
 /// (and so every pre-V0.17 save migrates to a deterministic, non-zero seed).
 pub const ILLNESS_RNG_SEED: u64 = 0x5EED_1117;
+
+// --- V0.18: ekspeditsiyalar (see `expedition::Expedition`) ---
+
+/// Party-size band. Below the minimum a "party" is one person alone in the
+/// wastes (and the colony learns nothing from losing them); above the maximum
+/// an expedition would just be a way to empty the city on purpose.
+pub const EXPEDITION_MIN_PARTY: usize = 2;
+pub const EXPEDITION_MAX_PARTY: usize = 4;
+/// A colony must keep at least this many people at home — the same
+/// "a personal world is never emptied" invariant `extract_migrants` enforces
+/// for the Tunnel, applied to the other way out of the valley.
+pub const EXPEDITION_MIN_STAY_HOME: usize = 2;
+/// Only one party may be on the road at a time (same single-slot convention
+/// as `pending_caravan`/`pending_migrant`, just expressed as a cap on the
+/// `expeditions` vec so the type doesn't have to change if that ever grows).
+pub const EXPEDITION_MAX_ACTIVE: usize = 1;
+/// Expeditions are gated on the same "the colony has found its feet" signal
+/// the rest of the mid-game uses.
+pub const EXPEDITION_MIN_DAY: u32 = 3;
+/// HP a hazard costs the unlucky member (never lethal on its own: the floor
+/// below keeps a party from silently wiping, which would read as a bug).
+pub const EXPEDITION_HAZARD_HP: f32 = 22.0;
+/// Nobody comes home below this HP — a hazard can maim, only the colony's own
+/// cold and hunger can kill.
+pub const EXPEDITION_MIN_RETURN_HP: f32 = 8.0;
+/// Chance a hazard also sends that member home ill (on top of the HP loss).
+pub const EXPEDITION_HAZARD_SICK_CHANCE: f32 = 0.35;
+/// Fatigue a member accrues per day on the road, regardless of law/tent
+/// state at home — travelling is tiring by definition.
+pub const EXPEDITION_FATIGUE_PER_DAY: f32 = 34.0;
+/// XP a member banks per day away, credited to their `trained_kind` on
+/// return (an expedition teaches generally useful work).
+pub const EXPEDITION_XP_PER_DAY: f32 = 0.5;
+/// Morale the colony gains when a party comes home whole, and loses when it
+/// comes home hurt.
+pub const MORALE_EXPEDITION_RETURN: f32 = 4.0;
+pub const MORALE_EXPEDITION_HURT: f32 = 3.0;
+/// Seed offset for `GameState.expedition_rng` — its own stream, so hazard
+/// rolls never re-sequence `rng`/`event_rng`/`illness_rng` (same reasoning as
+/// `ILLNESS_RNG_SEED`).
+pub const EXPEDITION_RNG_SEED: u64 = 0x0E_7BED_1180;
+
+// --- V0.18: aholi hayoti — yosh, juftlik, farzand, qarilik ---
+
+/// Age is measured in DAYS LIVED, and the whole scale is calibrated against
+/// the length of an actual run — not against a human lifespan. A world ends
+/// at `DEFAULT_WIN_DAYS` (12) and then resets, so thresholds on a human scale
+/// (adult at 14, elder at 90) would make this entire system invisible: no
+/// child would ever grow up and no elder would ever exist. These numbers are
+/// chosen so the arc is visible inside one run — a child born early is
+/// working before the run ends, and a colony that survives well past its
+/// victory day starts to age.
+///
+/// A survivor becomes a working adult at this age. Children below it are fed
+/// and housed but contribute no work.
+pub const ADULT_AGE_DAYS: f32 = 6.0;
+/// Past this age a survivor is an elder: less output, more fragile. Reachable
+/// within a long-lived world, and reached almost immediately by the oldest
+/// arrivals (see `ARRIVAL_AGE_MAX_DAYS`, deliberately just short of it), so
+/// elders are part of the colony from early on rather than a late-game
+/// curiosity nobody ever sees.
+pub const ELDER_AGE_DAYS: f32 = 40.0;
+/// Work multiplier for a child (0.0 — they don't work) and an elder.
+pub const CHILD_WORK_FACTOR: f32 = 0.0;
+pub const ELDER_WORK_FACTOR: f32 = 0.7;
+/// Food a child eats, as a fraction of an adult's `FOOD_PER_SURVIVOR_DAY`.
+pub const CHILD_FOOD_FACTOR: f32 = 0.6;
+/// Age band a newly arriving (non-born) survivor is drawn from — grown (well
+/// past `ADULT_AGE_DAYS`), with a life already behind them, and at the top of
+/// the band only a few days short of `ELDER_AGE_DAYS`. The band is wide on
+/// purpose: a founding population drawn from a narrow one would cross into
+/// old age all together, in a single cliff, instead of ageing out gradually.
+pub const ARRIVAL_AGE_MIN_DAYS: f32 = 8.0;
+pub const ARRIVAL_AGE_MAX_DAYS: f32 = 34.0;
+/// Per-day chance two unpartnered adults pair up (checked once a day, one
+/// pairing at most — courtship is not a batch job).
+pub const PARTNER_CHANCE_PER_DAY: f32 = 0.22;
+/// Morale a new pairing gives the colony.
+pub const MORALE_PARTNER_BONUS: f32 = 3.0;
+/// Birth (see `BIRTH_CHANCE`) is multiplied by this when the colony has at
+/// least one partnered couple — V0.11's birth roll stays as the floor so a
+/// colony with no couples yet is never sterile, just slower.
+pub const BIRTH_COUPLE_MULTIPLIER: f32 = 2.5;
+/// Per-day chance an elder dies of old age, scaled by how far past
+/// `ELDER_AGE_DAYS` they are (see `sim::lifecycle`).
+pub const OLD_AGE_DEATH_PER_DAY: f32 = 0.02;
+/// Illness-chance multiplier for children and elders — the fragile ends of
+/// the colony, mirroring `EXHAUSTION_SICK_MULTIPLIER`'s shape.
+pub const FRAIL_SICK_MULTIPLIER: f32 = 1.6;
+/// Seed offset for `GameState.lifecycle_rng`.
+pub const LIFECYCLE_RNG_SEED: u64 = 0x11FE_C7C1;
+
+// --- V0.18: qonunlar kitobi (see `law::Law`) ---
+
+/// How long after enacting or repealing a law before the book can be touched
+/// again — a policy is a decision the city lives with, not a dial to spin
+/// every tick.
+pub const LAW_COOLDOWN_TICKS: u64 = TICKS_PER_DAY / 2;
+/// Most laws that may stand at once, so a colony can't simply enact the whole
+/// book and keep only the upsides that happen to matter today.
+pub const MAX_ACTIVE_LAWS: usize = 3;
+/// Laws unlock once the colony is past its opening crisis.
+pub const LAW_MIN_DAY: u32 = 2;
+
+// --- V0.18: takroriy missiya tsikllari ---
+
+/// Once every mission in the current cycle is done, a fresh, harder cycle is
+/// issued — the Tunnel unlock still keys off cycle 0 (`all_missions_done`
+/// stays true the moment the FIRST cycle completes, see `tunnel_unlocked`),
+/// so this only adds content after the gate rather than moving it.
+pub const MISSION_CYCLE_TARGET_GROWTH: f32 = 1.6;
+pub const MISSION_CYCLE_REWARD_GROWTH: f32 = 1.5;
+/// Cycles stop being issued past this many, so a very long-lived world
+/// doesn't end up with absurd six-digit targets.
+pub const MAX_MISSION_CYCLES: u32 = 8;
+
+// --- V0.19: yo'llar va qor (see `world::Tile`) ---
+
+/// Deepest a tile's snow ever gets (`Tile::snow` is a byte; this is the top of
+/// its meaningful range, not 255, so the depth-to-speed curve has a defined
+/// end).
+pub const SNOW_MAX: u8 = 100;
+/// Speed multiplier at `SNOW_MAX` on open ground — deep drift is a crawl, but
+/// never a wall (see `Tile::speed_factor`'s doc for why nothing ever blocks).
+pub const SNOW_SLOWEST_FACTOR: f32 = 0.35;
+/// Speed multiplier on a fully cleared road. The whole point of a road: it is
+/// worth walking around for, which is what makes `sim::tick`'s step chooser
+/// follow one instead of cutting straight across.
+pub const TILE_ROAD_SPEED: f32 = 1.6;
+/// Snow depth at which a road has stopped being a road (`road_is_buried`) and
+/// crossing it is no better than crossing open ground. Well below `SNOW_MAX`:
+/// a road should close long before the map itself bogs down, or clearing
+/// would never feel urgent.
+pub const ROAD_SNOW_PENALTY: u8 = 45;
+
+/// Snow that falls on every tile per in-game day in ordinary weather, and
+/// during a blizzard.
+///
+/// The blizzard rate is calibrated to do ONE specific thing: a single storm
+/// must close a road outright. A blizzard lasts exactly `BLIZZARD_TICKS`
+/// (one in-game day), so this has to clear `ROAD_SNOW_PENALTY` on its own —
+/// at the original 34 it fell 11 short, and since a road people actually walk
+/// on sheds `SNOW_TRAMPLE_PER_DAY` (6) against fair weather's 3, a used road
+/// simply never closed. Measured over 40 days across five seeds: roads were
+/// buried on 0% of blizzard days. The whole point of the mechanic — a storm
+/// shuts the network and somebody has to go dig it out — never fired once.
+pub const SNOW_FALL_PER_DAY: f32 = 3.0;
+pub const SNOW_FALL_BLIZZARD_PER_DAY: f32 = 52.0;
+/// Snow packed down per in-game day on a tile a survivor is standing on —
+/// paths worn by ordinary traffic stay a little clearer than untouched
+/// ground, without the player doing anything.
+pub const SNOW_TRAMPLE_PER_DAY: f32 = 6.0;
+
+/// Wood per tile of road. Cheap — a road buys no production, no housing and
+/// no capacity, only movement, and a useful road is dozens of tiles long.
+/// Priced near `Wall` (4) for the same reason that one is cheap.
+pub const ROAD_COST_WOOD: f32 = 3.0;
+/// Wood returned per tile when a road is torn up.
+pub const ROAD_REFUND: f32 = 0.4;
+/// Most tiles one `BuildRoad` command may lay at once — a drag across the
+/// whole map should not be a single unbounded allocation from the wire.
+pub const MAX_ROAD_TILES_PER_COMMAND: usize = 256;
+
+/// Worker-days one survivor spends clearing one tile by hand
+/// (`PlayerCommand::ClearSnow`) — short, since the point of hand-clearing is
+/// reopening one blocked stretch, not maintaining the whole network.
+pub const CLEAR_SNOW_WORKDAYS: f32 = 0.06;
+/// Snow a staffed Snow Crew removes per worker-unit per in-game day, spread
+/// over the tiles inside its radius. Measured in the same profession/XP-
+/// boosted units `survivor_contribution` returns, so a trained crew clears
+/// visibly faster.
+pub const SNOW_CREW_CLEAR_PER_UNIT_DAY: f32 = 900.0;
+/// Chebyshev radius a Snow Crew keeps clear around itself.
+pub const SNOW_CREW_RADIUS: i32 = 7;
+
+// --- V0.22: bino xonalari (see `BuildingKind::size`) ---
+
+/// Side length, in tiles, of a building that has an interior. Three is the
+/// smallest size that reads as a ROOM once a wall frame is drawn around it:
+/// a 2x2 leaves no floor between opposite walls, and anything larger starts
+/// eating the valley (a 64x64 map still holds well over a hundred of these,
+/// far past what a colony ever builds).
+pub const ROOM_SIZE: u8 = 3;
+
+// --- V0.20: bino ichki jihozlari (see `furnishing::FurnishingKind`) ---
+
+/// Highest a single fitting goes. Deliberately far below
+/// `BUILDING_MAX_LEVEL` (10): interiors are meant to shape the EARLY life of
+/// a building — the first few upgrades — and then stop being a gate, not to
+/// become a second ten-step ladder shadowing the first.
+pub const FURNISHING_MAX_LEVEL: u8 = 3;
+
+/// The building level a fitting must keep pace with before the building
+/// itself may be upgraded again: every fitting the building takes must be at
+/// least `min(building.level, FURNISHING_MAX_LEVEL)`. So a bare room can
+/// never climb past level 1, a half-furnished one stalls, and once the
+/// fittings are maxed the gate opens for good and ordinary wood-and-time
+/// upgrades carry on to 10.
+pub fn required_furnishing_level(building_level: u8) -> u8 {
+    building_level.min(FURNISHING_MAX_LEVEL)
+}
 
 pub fn tile_index(x: u8, y: u8) -> usize {
     y as usize * MAP_W + x as usize

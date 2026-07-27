@@ -112,6 +112,17 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
     let fresh = || {
         if config.central {
             sim::new_game_central(config.seed)
+        } else if std::env::var_os("FC_SANDBOX").is_some() {
+            // Hand-testing mode (`frozen_city --sandbox`, which sets this):
+            // a lit furnace, a real population and a full stockpile, so a
+            // session can go straight to whatever is actually being tried
+            // out. An env var rather than a `ServerConfig` field on purpose —
+            // this crate already routes its other operator switches this way
+            // (`FC_WORLD_SAVE`, `FC_ACCOUNTS_DB`, `FC_TELEMETRY_PATH`), and a
+            // new required field would touch every one of the twenty-odd
+            // `ServerConfig` literals across the e2e suite for a flag none of
+            // them will ever set.
+            sim::new_game_sandbox(config.seed, config.win_days)
         } else {
             sim::new_game(config.seed, config.win_days)
         }
@@ -233,6 +244,16 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                 Ok(ToServer::InjectMigrants { account, name, survivors }) => {
                     sim::inject_migrants(&mut state, account, &name, survivors);
                 }
+                // V0.18: the return trip. Unlike `ExtractMigrants` there is no
+                // graduation gate — an account with settlers in the shared
+                // city has already graduated, by definition of how they got
+                // there.
+                Ok(ToServer::ExtractSettlers { account, reply }) => {
+                    let _ = reply.send(sim::extract_settlers(&mut state, account));
+                }
+                Ok(ToServer::InjectReturnees { survivors, reply }) => {
+                    let _ = reply.send(sim::inject_returnees(&mut state, survivors));
+                }
                 Ok(ToServer::OwnerOnline { owner, reply }) => {
                     let online = state.players.iter().any(|p| p.account == Some(owner));
                     let _ = reply.send(online);
@@ -298,6 +319,14 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                         } else if state.owner_id == Some(player_id) {
                             state.owner_id = None;
                         }
+                    }
+
+                    // V0.18: pay out whatever the global market owes this
+                    // account BEFORE the Welcome snapshot below, so the
+                    // stockpile the client first sees already includes it
+                    // (a no-op for guests and in the central world).
+                    if let Some(acc) = account {
+                        crate::market::claim_wallet(acc, &mut state);
                     }
 
                     player_of.insert(client_id, player_id);
@@ -381,6 +410,7 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                         | ClientMsg::Login { .. }
                         | ClientMsg::EnterCentral { .. }
                         | ClientMsg::Register { .. }
+                        | ClientMsg::ReturnHome { .. }
                         | ClientMsg::VisitFriend { .. } => false,
                         // Social traffic shares the chat budget: all of it is
                         // human-scale (a click or a said line), and Add/Remove
@@ -406,6 +436,16 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                         // Rare owner-only setting change; same reasoning as
                         // Kick above.
                         ClientMsg::SetVisitPolicy { .. } => true,
+                        // V0.18 market traffic: every one of these hits the
+                        // accounts DB (order book + wallets), so it shares the
+                        // chat budget for exactly the same reason Add/Remove
+                        // friend does.
+                        ClientMsg::RefreshMarket
+                        | ClientMsg::PostOrder { .. }
+                        | ClientMsg::TakeOrder { .. }
+                        | ClientMsg::CancelOrder { .. } => limiters
+                            .get_mut(&client)
+                            .is_some_and(|l| l.allow_chat(now)),
                     };
                     if allowed {
                         match msg {
@@ -417,7 +457,25 @@ pub(crate) fn sim_loop(config: ServerConfig, rx: Receiver<ToServer>, shutdown: A
                             | ClientMsg::Login { .. }
                             | ClientMsg::EnterCentral { .. }
                             | ClientMsg::Register { .. }
+                            | ClientMsg::ReturnHome { .. }
                             | ClientMsg::VisitFriend { .. } => {}
+                            // V0.18 global market — handled in `market.rs`
+                            // (the accounts DB is the order book's home, not
+                            // the world snapshot). A market command from a
+                            // guest connection has no account to bill and is
+                            // dropped.
+                            ClientMsg::RefreshMarket
+                            | ClientMsg::PostOrder { .. }
+                            | ClientMsg::TakeOrder { .. }
+                            | ClientMsg::CancelOrder { .. } => {
+                                if let Some(account) = state.player_account(pid) {
+                                    let reply =
+                                        crate::market::handle(account, &msg, &mut state);
+                                    if let Some(out) = clients.get(&client) {
+                                        let _ = out.send(reply);
+                                    }
+                                }
+                            }
                             ClientMsg::ChatLocal { text } => {
                                 let text = sim::sanitize_public_text(&text);
                                 if !text.trim().is_empty() {

@@ -195,7 +195,15 @@ pub fn tick(state: &mut GameState) {
         if workers == 0 {
             continue;
         }
-        let per_day = kind.production_per_worker_day();
+        // V0.21: the rate comes from the workbench inside, not from the
+        // building itself — see `FurnishingKind::cycle`. A room with no
+        // workbench yields NOTHING: there are no tools to work with. A
+        // level-1 one restores exactly the throughput this building always
+        // had, and each level above shortens the cycle.
+        let Some(cycle) = state.buildings[i].production_cycle() else {
+            continue;
+        };
+        let per_day = cycle.per_day();
         if per_day == 0.0 {
             continue;
         }
@@ -308,7 +316,14 @@ pub fn tick(state: &mut GameState) {
             BuildingKind::CoalMine => {
                 state.buildings[i].progress += amount;
                 while state.buildings[i].progress >= 1.0 {
-                    let idx = tile_index(bx, by);
+                    // V0.22: a mine covers a 3x3 room and only needs SOME
+                    // coal beneath it (see `footprint_is_clear`), so it draws
+                    // from the richest tile it sits on rather than assuming
+                    // the corner one is a seam.
+                    let Some(idx) = state.richest_coal_under(kind, bx, by) else {
+                        state.buildings[i].progress = 1.0;
+                        break;
+                    };
                     if state.tiles[idx].deposit > 0 {
                         state.tiles[idx].deposit -= 1;
                         state.stock.coal += 1.0;
@@ -336,6 +351,20 @@ pub fn tick(state: &mut GameState) {
             }
         }
     }
+
+    // --- V0.19: snow falls on the map, crews and shovels take it back off.
+    // Before the movement block below, so this tick's walking already feels
+    // the ground as it is right now rather than as it was last tick.
+    snow::tick_snowfall(state);
+    snow::tick_snow_crews(state);
+    snow::tick_clear_orders(state);
+
+    // --- V0.18: life cycle (aging, pairing, old age). Runs BEFORE the
+    // survivor loop below on purpose: an old-age death is written as `hp = 0`
+    // and picked up by that loop's existing death detection in the same tick,
+    // so every cause of death still flows through exactly one death path
+    // (corpse, mourning, morale, worker slots, partner cleanup).
+    lifecycle::tick_lifecycle(state);
 
     // --- Survivors: hunger, warmth, health ---
     let temp = state.temperature();
@@ -413,7 +442,14 @@ pub fn tick(state: &mut GameState) {
     } else {
         1.0
     };
-    let portion = FOOD_PER_SURVIVOR_DAY / TICKS_PER_DAY as f32 * kitchen_efficiency * rationing_factor;
+    // V0.18: the law book joins Kitchen efficiency and Rationing as another
+    // colony-wide multiplier on the same portion (Extra Rations feeds people
+    // better and costs more; Communal Meals is the reverse) — 1.0 with an
+    // empty book, so an unlegislated colony eats exactly as it always did.
+    let portion = FOOD_PER_SURVIVOR_DAY / TICKS_PER_DAY as f32
+        * kitchen_efficiency
+        * rationing_factor
+        * state.law_food_multiplier();
     // V0.11: thirst mirrors hunger's Kitchen/Rationing discount shape
     // exactly (a kitchen serves both food and drink; the same Rationing
     // tech now covers "eats and drinks more carefully") — reuses the same
@@ -453,6 +489,40 @@ pub fn tick(state: &mut GameState) {
         0.0
     };
     let mut deaths: Vec<(u32, String, &'static str)> = Vec::new();
+    // V0.18: training rate under the current law book, resolved before the
+    // movement/XP loop borrows `survivors` mutably (1.0 with an empty book).
+    let law_xp = state.law_xp_multiplier();
+    // V0.20: per-building training bonus from shelving, snapshotted for the
+    // same borrow reason. Absent = 1.0, so an unfurnished building trains at
+    // exactly the old rate.
+    let shelving_xp: std::collections::HashMap<u32, f32> = state
+        .buildings
+        .iter()
+        .filter(|b| b.furnishing_of(FurnishingKind::Shelving) > 0)
+        .map(|b| (b.id, b.furnishing_factor(FurnishingKind::Shelving)))
+        .collect();
+
+    // V0.22: where each assigned survivor actually STANDS inside their
+    // building. Workers take the fittings' stations in order — one at the
+    // stove, one at the workbench — instead of every one of them walking to
+    // the same tile centre, which is what a 3x3 room made look absurd (three
+    // people stacked on one square in the middle of an empty floor).
+    // Snapshotted here because the movement loop below borrows `survivors`
+    // mutably and this needs to read both vecs.
+    let worker_stations: std::collections::HashMap<u32, (f32, f32)> = {
+        let mut out = std::collections::HashMap::new();
+        for b in &state.buildings {
+            for (i, s) in state
+                .survivors
+                .iter()
+                .filter(|s| s.assigned_building == Some(b.id))
+                .enumerate()
+            {
+                out.insert(s.id, b.worker_station(i));
+            }
+        }
+        out
+    };
 
     // --- Movement + XP accrual: needs a building lookup snapshot taken
     // before the loop below (can't borrow `state.buildings` immutably while
@@ -544,9 +614,9 @@ pub fn tick(state: &mut GameState) {
                 sleep_goal(routine_is_night, bunked.contains(&s.id), s, &tent_positions)
             })
             .or_else(|| {
-                s.assigned_building
-                    .and_then(|id| building_lookup.get(&id))
-                    .map(|(_, bx, by, _)| (*bx as f32 + 0.5, *by as f32 + 0.5))
+                // V0.22: head for YOUR station inside the room, not the
+                // building's corner tile (see `worker_stations` above).
+                s.assigned_building.and(worker_stations.get(&s.id).copied())
             })
             .or_else(|| routine_goal(routine_time_of_day, kitchen_pos));
         let mut arrived_at_chop_target = false;
@@ -567,8 +637,26 @@ pub fn tick(state: &mut GameState) {
                     burying_now.push(corpse_id);
                 }
             } else {
-                s.x += dx / dist * SURVIVOR_SPEED_PER_TICK;
-                s.y += dy / dist * SURVIVOR_SPEED_PER_TICK;
+                // V0.19: the ground now has an opinion. Speed scales with the
+                // tile underfoot (deep snow is a crawl, a cleared road is
+                // quick), and the direction is chosen one tile at a time by
+                // comparing the neighbours' cost — which is what makes people
+                // walk ALONG a road instead of straight across the drift
+                // beside it.
+                //
+                // This is deliberately a local heuristic, not a pathfinder:
+                // the map has no obstacles and snow never blocks (see
+                // `Tile::speed_factor`), so cost is finite everywhere and a
+                // greedy step can never trap anyone. A real search would buy
+                // prettier routes around nothing at all.
+                let speed = state
+                    .tiles
+                    .get(tile_of(s.x, s.y))
+                    .map_or(1.0, |t| t.speed_factor())
+                    * SURVIVOR_SPEED_PER_TICK;
+                let (sx, sy) = road_step(&state.tiles, s.x, s.y, gx, gy);
+                s.x += sx * speed;
+                s.y += sy * speed;
             }
         }
 
@@ -613,7 +701,15 @@ pub fn tick(state: &mut GameState) {
         // sees it, `trained_kind` already matches the current building.
         if let Some((kind, _, _, workers)) = s.assigned_building.and_then(|id| building_lookup.get(&id)) {
             if *workers > 0 && s.trained_kind == Some(*kind) {
-                s.xp += 1.0 / TICKS_PER_DAY as f32;
+                // V0.18: Apprenticeship (and any future law touching training)
+                // scales the rate — 1.0 with an empty book. V0.20: so does
+                // the room's own shelving — 1.0 without any.
+                let shelves = s
+                    .assigned_building
+                    .and_then(|id| shelving_xp.get(&id))
+                    .copied()
+                    .unwrap_or(1.0);
+                s.xp += law_xp * shelves / TICKS_PER_DAY as f32;
             }
         }
     }
@@ -720,20 +816,44 @@ pub fn tick(state: &mut GameState) {
     let illness_recovery_per_tick =
         1.0 + hospital_units * HOSPITAL_RECOVERY_PER_UNIT_DAY / TICKS_PER_DAY as f32;
     let fatigue_night = state.is_night();
+    // V0.18: the law book's two fatigue dials, resolved once before the loop
+    // (they're whole-`state` queries; inside the loop `survivors` is borrowed
+    // mutably). Both are exactly 1.0 with an empty book.
+    let law_fatigue = state.law_fatigue_multiplier();
+    let law_rest = state.law_rest_multiplier();
+    // V0.20: per-building heater relief, snapshotted before the loop borrows
+    // `survivors` mutably (reading `buildings` inside it would be fine, but
+    // the lookup is per-survivor and this is once per building).
+    let heater_relief: std::collections::HashMap<u32, f32> = state
+        .buildings
+        .iter()
+        .filter(|b| b.furnishing_of(FurnishingKind::Heater) > 0)
+        .map(|b| {
+            (
+                b.id,
+                FurnishingKind::Heater.per_level() * b.furnishing_of(FurnishingKind::Heater) as f32,
+            )
+        })
+        .collect();
     for (i, s) in state.survivors.iter_mut().enumerate() {
         // --- V0.17: fatigue. Awake work/idle accrual by day, recovery by
         // night at one of two rates depending on whether this survivor holds
         // a Tent bunk (`bunked`, the same set the sleep walk above used).
         let fatigue_per_day = if fatigue_night {
             if bunked.contains(&s.id) {
-                -FATIGUE_TENT_REST_PER_DAY
+                -FATIGUE_TENT_REST_PER_DAY * law_rest
             } else {
-                -FATIGUE_ROUGH_REST_PER_DAY
+                -FATIGUE_ROUGH_REST_PER_DAY * law_rest
             }
-        } else if s.assigned_building.is_some() {
-            FATIGUE_WORK_PER_DAY
+        } else if let Some(b_id) = s.assigned_building {
+            // V0.20: a stove where you work takes the edge off the shift.
+            // `heater_relief` is 0.0 for an unfurnished (or heater-less)
+            // building, so this is exactly `FATIGUE_WORK_PER_DAY * law_fatigue`
+            // everywhere it was before.
+            let relief = heater_relief.get(&b_id).copied().unwrap_or(0.0);
+            FATIGUE_WORK_PER_DAY * law_fatigue * (1.0 - relief).max(0.2)
         } else {
-            FATIGUE_IDLE_PER_DAY
+            FATIGUE_IDLE_PER_DAY * law_fatigue
         };
         s.fatigue = (s.fatigue + fatigue_per_day / TICKS_PER_DAY as f32).clamp(0.0, 100.0);
         if s.fatigue >= FATIGUE_EXHAUSTED {
@@ -755,8 +875,11 @@ pub fn tick(state: &mut GameState) {
         }
 
         s.hunger = (s.hunger + hunger_per_tick).min(120.0);
-        if s.hunger >= 25.0 && state.stock.food >= portion {
-            state.stock.food -= portion;
+        // V0.18: a child eats a smaller share of the same portion (water is
+        // deliberately not age-scaled — thirst doesn't care how old you are).
+        let s_portion = portion * s.food_factor();
+        if s.hunger >= 25.0 && state.stock.food >= s_portion {
+            state.stock.food -= s_portion;
             s.hunger = (s.hunger - 0.4).max(0.0);
         }
         if s.hunger >= 80.0 {
@@ -817,6 +940,14 @@ pub fn tick(state: &mut GameState) {
                 // V0.17: attributed to THIS survivor's own illness, not to a
                 // colony-wide outbreak flag they may never have caught.
                 "succumbed to illness"
+            } else if s.stage() == LifeStage::Elder {
+                // V0.18: an elder who wasn't hungry, thirsty or ill is
+                // overwhelmingly likely to be here because `lifecycle`'s
+                // once-daily old-age roll zeroed their HP this tick. An elder
+                // who genuinely froze is mislabeled — event-log text only,
+                // and the alternative (a persisted "dying of old age" flag on
+                // every survivor) costs a save-format field to fix a caption.
+                "died of old age"
             } else {
                 "froze to death"
             };
@@ -864,6 +995,23 @@ pub fn tick(state: &mut GameState) {
         if state.leader_alive() {
             delta += per_tick(MORALE_LEADER_PER_DAY);
         }
+        // V0.18: the law book's own standing morale term — a sum of the
+        // enacted laws' daily adjustments (Extra Rations lifts, Long Shifts
+        // grinds), joining the additive terms above rather than multiplying
+        // them. Exactly 0.0 with an empty book.
+        delta += per_tick(state.law_morale_per_day());
+        // V0.20: somewhere to sit down. Only counts in a building that is
+        // actually staffed and finished — an empty room full of chairs
+        // cheers nobody up. Exactly 0.0 with no seating anywhere.
+        let seating: f32 = state
+            .buildings
+            .iter()
+            .filter(|b| b.workers > 0 && !b.under_construction())
+            .map(|b| {
+                FurnishingKind::Seating.per_level() * b.furnishing_of(FurnishingKind::Seating) as f32
+            })
+            .sum();
+        delta += per_tick(seating);
         // Slow drift toward the baseline, on top of the specific adjustments
         // above — moves at most `MORALE_DRIFT_PER_DAY` worth per day, and
         // never overshoots past the baseline in one tick.
@@ -912,8 +1060,20 @@ pub fn tick(state: &mut GameState) {
                 push_event(state, format!("The leader {} has died - the city mourns.", name));
             }
         }
+        // V0.18: nobody's partner may outlive them as a dangling id — cleared
+        // before the removal, while both sides are still in the roster.
+        let dead_ids: Vec<u32> = deaths.iter().map(|(id, _, _)| *id).collect();
+        lifecycle::clear_partner_links(state, &dead_ids);
         state.survivors.retain(|s| s.hp > 0.0);
-        state.morale = (state.morale - MORALE_DEATH_PENALTY * deaths.len() as f32).clamp(0.0, 100.0);
+        // V0.18: Funeral Rites softens the blow and charges wood for it. Both
+        // are no-ops (x1.0, 0.0) with an empty law book.
+        let funeral_wood = state.law_funeral_wood() * deaths.len() as f32;
+        if funeral_wood > 0.0 {
+            state.stock.wood = (state.stock.wood - funeral_wood).max(0.0);
+        }
+        let death_penalty =
+            MORALE_DEATH_PENALTY * deaths.len() as f32 * state.law_death_morale_multiplier();
+        state.morale = (state.morale - death_penalty).clamp(0.0, 100.0);
         for (_, name, cause) in deaths {
             push_event(state, format!("{} has {}.", name, cause));
         }
@@ -943,15 +1103,24 @@ pub fn tick(state: &mut GameState) {
         let outbreak = state.disease_active();
         let sick_now = state.sick_count();
         if outbreak || sick_now > 0 {
-            let base = if outbreak { OUTBREAK_INFECT_CHANCE_PER_DAY } else { 0.0 }
-                + sick_now as f32 * CONTAGION_CHANCE_PER_SICK_PER_DAY;
+            // V0.18: Quarantine (and any future law touching contagion) scales
+            // the whole daily chance — 1.0 with an empty book.
+            let law_contagion = state.law_contagion_multiplier();
+            let base = (if outbreak { OUTBREAK_INFECT_CHANCE_PER_DAY } else { 0.0 }
+                + sick_now as f32 * CONTAGION_CHANCE_PER_SICK_PER_DAY)
+                * law_contagion;
             let mut fell_ill: Vec<String> = Vec::new();
             for s in state.survivors.iter_mut() {
                 if s.is_sick() {
                     continue;
                 }
                 let exhausted = s.fatigue >= FATIGUE_EXHAUSTED;
-                let chance = (base * if exhausted { EXHAUSTION_SICK_MULTIPLIER } else { 1.0 })
+                // V0.18: children and elders catch it more easily — composes
+                // multiplicatively with exhaustion, so an exhausted elder is
+                // scaled by both rather than by whichever branch won.
+                let chance = (base
+                    * if exhausted { EXHAUSTION_SICK_MULTIPLIER } else { 1.0 }
+                    * if s.is_frail() { FRAIL_SICK_MULTIPLIER } else { 1.0 })
                     .min(MAX_INFECT_CHANCE_PER_DAY);
                 if irng.chance(chance) {
                     s.sick_left = SICKNESS_TICKS;
@@ -1036,12 +1205,18 @@ pub fn tick(state: &mut GameState) {
         && state.survivors.len() >= 2
         && state.morale >= BIRTH_MIN_MORALE
         && state.stock.food >= BIRTH_MIN_FOOD_STOCK
-        && rng.chance(BIRTH_CHANCE)
+        // V0.18: a colony with a couple in it is markedly more fertile; one
+        // with none keeps V0.11's plain `BIRTH_CHANCE` as the floor, so this
+        // only ever raises the rate, never gates births behind pairing.
+        && rng.chance(BIRTH_CHANCE * lifecycle::birth_chance_multiplier(state))
     {
         let pop = state.survivors.len() as i32;
         let space = state.housing_capacity() as i32 + 2 - pop;
         if space > 0 && pop < MAX_POPULATION {
-            let s = new_survivor(&mut rng, &mut state.next_id);
+            let mut s = new_survivor(&mut rng, &mut state.next_id);
+            // V0.18: born here — the ONLY way into the colony at age 0
+            // (`new_survivor` otherwise draws a grown arrival's age).
+            s.age_days = 0.0;
             let name = s.name.clone();
             state.survivors.push(s);
             push_event(state, format!("A newborn, {}, has joined the city.", name));
@@ -1108,6 +1283,9 @@ pub fn tick(state: &mut GameState) {
         state.tunnel.unlocked = true;
         push_event(state, "All missions complete - the Tunnel can now be excavated!");
     }
+    // V0.18: once the current cycle is cleared (and the Tunnel gate above has
+    // latched), issue a fresh, harder one — see `sim::missions`.
+    missions::tick_mission_cycles(state);
 
     // --- Tunnel migrants ---
     // Once the Tunnel is unlocked it starts letting travelers through — this
@@ -1172,8 +1350,21 @@ pub fn tick(state: &mut GameState) {
         }
     }
 
+    // --- V0.18: expeditions come home ---
+    // Placed after every survivor-facing system above so a party that returns
+    // this tick isn't immediately hungry/tired/frozen on arrival — they land
+    // in the roster and start living a normal life next tick. Also before the
+    // defeat check below, so a colony whose last people were away is not
+    // declared lost on the very tick they walk back in.
+    expedition::tick_expeditions(state);
+
     // --- Defeat ---
-    if state.survivors.is_empty() {
+    // V0.18: an empty valley is only a defeat when there is genuinely nobody
+    // left — a party still on the road is coming back, and `can_launch_
+    // expedition` already refuses to send out so many that the colony empties
+    // on purpose. Without this a colony whose last home-stayers died while a
+    // party was out would be declared lost seconds before they walked in.
+    if state.survivors.is_empty() && state.people_away() == 0 {
         state.phase = GamePhase::Lost;
         state.pings.clear();
         push_event(state, "The last survivor has perished. The city falls silent.");
@@ -1181,6 +1372,73 @@ pub fn tick(state: &mut GameState) {
 
     state.rng = rng.0;
     state.event_rng = erng.0;
+}
+
+/// V0.19: index of the tile a survivor at `(x, y)` is standing on. Out-of-
+/// bounds floats collapse to tile 0, which is harmless: the callers use it
+/// only to look up a speed/cost, and a survivor is never outside the map (see
+/// `sim::set_cursor`'s clamp and `spawn_position`'s).
+fn tile_of(x: f32, y: f32) -> usize {
+    let tx = (x.floor() as i32).clamp(0, MAP_W as i32 - 1) as u8;
+    let ty = (y.floor() as i32).clamp(0, MAP_H as i32 - 1) as u8;
+    tile_index(tx, ty)
+}
+
+/// V0.19: pick this tick's unit step toward `(gx, gy)`, preferring cheap
+/// ground. Scores the eight neighbouring tiles (plus standing still, which
+/// only wins if every neighbour is worse than being here) by
+/// `cost(neighbour) + distance(neighbour -> goal)` and heads for the best.
+///
+/// Ties break toward the straight line, so on uniform ground — every tile the
+/// same cost, which is exactly what a fresh map is — this reduces to the old
+/// straight-line walk and nothing about existing movement changes.
+fn road_step(tiles: &[Tile], x: f32, y: f32, gx: f32, gy: f32) -> (f32, f32) {
+    let (dx, dy) = (gx - x, gy - y);
+    let dist = (dx * dx + dy * dy).sqrt();
+    let straight = if dist > 0.0 { (dx / dist, dy / dist) } else { (0.0, 0.0) };
+    if tiles.is_empty() {
+        // Delta snapshots ship an empty tile grid (see `GameState::tile`);
+        // a consumer ticking one of those still has to move people.
+        return straight;
+    }
+    let (cx, cy) = (x.floor() as i32, y.floor() as i32);
+    // Close enough that neighbour-picking would overshoot the goal: just aim
+    // at it. Without this, the last step could wander off a road it is
+    // standing on rather than stepping onto the goal tile.
+    if dist <= 1.5 {
+        return straight;
+    }
+    let mut best: Option<(f32, (f32, f32))> = None;
+    for (ndx, ndy) in [
+        (0i32, -1i32), (1, -1), (1, 0), (1, 1),
+        (0, 1), (-1, 1), (-1, 0), (-1, -1),
+    ] {
+        let (nx, ny) = (cx + ndx, cy + ndy);
+        if !in_bounds(nx, ny) {
+            continue;
+        }
+        let Some(tile) = tiles.get(tile_index(nx as u8, ny as u8)) else {
+            continue;
+        };
+        // Centre of the candidate tile, and how far the goal still is from
+        // there — the heuristic half of the score.
+        let (mx, my) = (nx as f32 + 0.5, ny as f32 + 0.5);
+        let remaining = ((gx - mx).powi(2) + (gy - my).powi(2)).sqrt();
+        // Diagonal moves cover more ground, so they pay proportionally more
+        // of the tile's cost — otherwise diagonals would always look cheap.
+        let leg = if ndx != 0 && ndy != 0 { std::f32::consts::SQRT_2 } else { 1.0 };
+        let score = tile.move_cost() * leg + remaining;
+        // A small bias toward the straight-line direction settles ties in
+        // favour of the old behaviour (see this fn's doc).
+        let alignment = straight.0 * ndx as f32 + straight.1 * ndy as f32;
+        let score = score - alignment * 0.001;
+        if best.is_none_or(|(b, _)| score < b) {
+            let len = (ndx * ndx + ndy * ndy) as f32;
+            let len = len.sqrt().max(1.0);
+            best = Some((score, (ndx as f32 / len, ndy as f32 / len)));
+        }
+    }
+    best.map(|(_, dir)| dir).unwrap_or(straight)
 }
 
 /// A Kitchen's meal-gathering point (if a finished one exists) and every

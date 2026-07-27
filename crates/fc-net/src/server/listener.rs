@@ -273,6 +273,36 @@ pub(crate) fn route_first_msg(
                 None => FirstMsgOutcome::Refused(AUTH_FAILED_REASON),
             }
         }
+        // V0.18 — the way back. Mirrors `EnterCentral` above, minus its
+        // refusal cases: `return_home` has no graduation gate (having settlers
+        // centrally is the proof), and an account with nobody out there is
+        // simply joining its own world, which is never an error.
+        ClientMsg::ReturnHome {
+            login,
+            password,
+            token,
+        } => {
+            match accounts::authenticate(&login, &password) {
+                Some((account_id, display_name)) => {
+                    let name = sanitize_name(&display_name);
+                    match world_manager {
+                        Some(wm) => match wm.return_home(account_id, name, token) {
+                            Some((target, id, out_rx)) => {
+                                FirstMsgOutcome::Joined(target, Some((id, out_rx)))
+                            }
+                            None => FirstMsgOutcome::Refused(SERVER_FULL_REASON),
+                        },
+                        // Without a world manager there is no central world to
+                        // come back FROM — treat it as a plain sign-in.
+                        None => FirstMsgOutcome::Joined(
+                            to_server.clone(),
+                            join(to_server, name, token, Some(account_id)),
+                        ),
+                    }
+                }
+                None => FirstMsgOutcome::Refused(AUTH_FAILED_REASON),
+            }
+        }
         _ => FirstMsgOutcome::Drop,
     }
 }

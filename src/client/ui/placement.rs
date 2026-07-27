@@ -132,26 +132,46 @@ pub fn placement_buttons(
     net: Res<NetConn>,
     mut pending: ResMut<PendingPlace>,
     mut build: ResMut<BuildMode>,
+    mut relocate: ResMut<RelocateMode>,
     confirm: Query<&Interaction, (Changed<Interaction>, With<ConfirmBtn>)>,
     cancel: Query<&Interaction, (Changed<Interaction>, With<CancelBtn>)>,
     rotate: Query<&Interaction, (Changed<Interaction>, With<RotateBtn>)>,
 ) {
     let Some(p) = pending.0 else { return };
     if confirm.iter().any(|i| *i == Interaction::Pressed) {
-        net.send(ClientMsg::Cmd(PlayerCommand::Place {
-            kind: p.kind,
-            x: p.tx,
-            y: p.ty,
-            facing: p.facing,
-        }));
+        // V0.18: the same bar commits both flows — a brand-new building with
+        // `Place`, an existing one being moved with `RelocateFacing` (one
+        // command, since relocating re-enters construction and `can_rotate`
+        // would then refuse a follow-up turn).
+        let cmd = match p.relocating {
+            Some(building) => PlayerCommand::RelocateFacing {
+                building,
+                x: p.tx,
+                y: p.ty,
+                facing: p.facing,
+            },
+            None => PlayerCommand::Place {
+                kind: p.kind,
+                x: p.tx,
+                y: p.ty,
+                facing: p.facing,
+            },
+        };
+        net.send(ClientMsg::Cmd(cmd));
         // CoC-style: one placement per confirm — disarm build mode instead of
-        // leaving it hot (the old "still selected after building" bug).
+        // leaving it hot (the old "still selected after building" bug). A
+        // relocation is one-shot by nature: it targets one specific building,
+        // not a repeatable kind.
         pending.0 = None;
         build.0 = None;
+        relocate.0 = None;
     } else if cancel.iter().any(|i| *i == Interaction::Pressed) {
-        // Full cancel: drop the pending building and disarm.
+        // Full cancel: drop the pending building and disarm both modes. For a
+        // relocation this leaves the building exactly where it was — nothing
+        // was ever sent.
         pending.0 = None;
         build.0 = None;
+        relocate.0 = None;
     } else if rotate.iter().any(|i| *i == Interaction::Pressed) {
         pending.0 = Some(PendingPlaceData { facing: (p.facing + 1) % 4, ..p });
     }

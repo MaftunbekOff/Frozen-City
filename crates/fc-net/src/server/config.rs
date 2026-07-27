@@ -114,6 +114,22 @@ pub enum ToServer {
         account: i64,
         msg: Box<ServerMsg>,
     },
+    /// V0.18, central world only: hand back every settler `account` owns
+    /// there so they can be re-settled at home — the mirror of
+    /// `InjectMigrants`. Replies with the removed survivors (possibly empty:
+    /// an account with nobody centrally is simply going home alone).
+    ExtractSettlers {
+        account: i64,
+        reply: Sender<Vec<Survivor>>,
+    },
+    /// V0.18, personal world only: settle travellers coming back through the
+    /// Tunnel (`sim::inject_returnees`). Replies with how many actually fit
+    /// (`MAX_POPULATION` bounds it), so the caller can leave the rest in the
+    /// central world instead of dropping them on the floor.
+    InjectReturnees {
+        survivors: Vec<Survivor>,
+        reply: Sender<usize>,
+    },
 }
 
 #[derive(Clone)]

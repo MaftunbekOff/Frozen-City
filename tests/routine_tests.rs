@@ -22,10 +22,22 @@ fn find_spot(state: &GameState, kind: BuildingKind) -> (u8, u8) {
     panic!("no valid spot for {kind:?}");
 }
 
+/// Places `kind`, finishes it, and sends its auto-crew home again.
+///
+/// That last step matters here more than anywhere else: V0.20 crews a new
+/// site with NAMED survivors, and `finish_all_construction` keeps as many of
+/// them as the finished building employs. Every test in this file is about
+/// what an IDLE survivor does with their day — meals, bed, standing still —
+/// so a survivor still holding a job would be following their assignment
+/// instead, and the routine under test would never run.
 fn place_and_finish(state: &mut GameState, kind: BuildingKind, x: u8, y: u8) -> u32 {
     sim::apply_command(state, 1, &PlayerCommand::Place { kind, x, y, facing: 0 });
     let id = state.buildings.last().unwrap().id;
     sim::finish_all_construction(state);
+    let cur = state.find_building(id).unwrap().workers as i8;
+    if cur > 0 {
+        sim::apply_command(state, 1, &PlayerCommand::AdjustWorkers { building: id, delta: -cur });
+    }
     id
 }
 
