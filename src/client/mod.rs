@@ -486,7 +486,11 @@ pub fn profession_coat_color(p: Profession) -> Color {
         Profession::Hunter => Color::srgb(0.30, 0.42, 0.28),     // hunter green
         Profession::Farmer => Color::srgb(0.62, 0.46, 0.22),     // harvest mustard
         Profession::Medic => Color::srgb(0.88, 0.90, 0.94),      // clinical white
-        Profession::Cook => Color::srgb(0.87, 0.80, 0.66),       // apron cream
+        // Warm brown rather than the cream this used to be: the toque above
+        // it is near-white, and a cream coat under a cream hat over a light
+        // skin tone left the cook a single flat silhouette with no readable
+        // parts at gameplay distance.
+        Profession::Cook => Color::srgb(0.60, 0.42, 0.30),       // apron leather
         Profession::Tailor => Color::srgb(0.55, 0.30, 0.45),     // dyed-wool plum
     }
 }
@@ -501,10 +505,30 @@ pub fn profession_head_color(p: Profession) -> Color {
         Profession::Hunter => Color::srgb(0.55, 0.46, 0.32),     // tan fur hood
         Profession::Farmer => Color::srgb(0.70, 0.58, 0.30),     // straw hood
         Profession::Medic => Color::srgb(0.82, 0.84, 0.90),      // pale hood
-        Profession::Cook => Color::srgb(0.93, 0.90, 0.84),       // white toque
+        Profession::Cook => Color::srgb(0.96, 0.96, 0.94),       // white toque
         Profession::Tailor => Color::srgb(0.78, 0.62, 0.68),     // pale rose headscarf
     }
 }
+
+/// Aholi 3D modellari — erkak/ayol, har biri skelet + Idle/Walk/Work
+/// animatsiya klipiga ega (o'yin uchun maxsus tayyorlangan; materiallari
+/// `fc_coat`/`fc_hood`/`fc_skin`/`fc_leather`/`fc_scarf` nomlangan —
+/// `render::survivors::fixup_survivor_materials` ishga tushgach coat/hood'ni
+/// kasbga (yoki yetakchilikka) qarab qayta ranglaydi, `render::assets`dagi
+/// `profession_coat_color`/`profession_head_color`ni qayta ishlatib). Font
+/// kabi binary ichiga singdirilgan: native va wasm'da bir xil, tashqi
+/// fayl/HTTP talab qilmaydi. Gender tanlovi aholi `id`sining juft/toqligidan
+/// (`render::survivors::sync_survivors`) — sim'da alohida jins maydoni yo'q.
+pub(crate) const SURVIVOR_MODELS: [(&str, &[u8]); 2] = [
+    (
+        "models/survivor_male.glb",
+        include_bytes!("../../assets/models/survivor_male.glb"),
+    ),
+    (
+        "models/survivor_female.glb",
+        include_bytes!("../../assets/models/survivor_female.glb"),
+    ),
+];
 
 /// Linear-interpolates two sRGB colors — used below to blend the terrain
 /// palette by snow depth/road wear instead of adding new mesh geometry (see
@@ -596,6 +620,18 @@ pub struct ClientPlugin;
 
 impl Plugin for ClientPlugin {
     fn build(&self, app: &mut App) {
+        // Singdirilgan GLB'larni `embedded://` asset manbasiga ro'yxatlaydi —
+        // `render::setup_camera_and_assets` shu yo'llardan yuklaydi.
+        let registry = app
+            .world()
+            .resource::<bevy::asset::io::embedded::EmbeddedAssetRegistry>();
+        for (path, bytes) in SURVIVOR_MODELS {
+            registry.insert_asset(
+                std::path::PathBuf::from(path),
+                std::path::Path::new(path),
+                bytes,
+            );
+        }
         app.init_state::<Screen>()
             .init_resource::<input::CamRig>()
             .init_resource::<touch::TouchCtl>()
@@ -692,6 +728,35 @@ impl Plugin for ClientPlugin {
                     .chain()
                     .run_if(in_state(Screen::Game)),
             )
+            // Survivor bodies: the three systems that finish a glTF scene
+            // instance once it has actually populated (animation graph, coat
+            // tint, bone-hung hat/tool), plus the root motion driving them.
+            // Split out of "continuous effects" below purely for the tuple
+            // size limit — `add_systems` takes at most 20 at a time.
+            .add_systems(
+                Update,
+                (
+                    render::animate_survivors,
+                    render::setup_survivor_animations,
+                    render::drive_survivor_animations,
+                    render::fixup_survivor_materials,
+                    render::attach_survivor_props,
+                    render::hide_indoor_survivors,
+                    render::animate_survivor_selection,
+                )
+                    .run_if(in_state(Screen::Game)),
+            )
+            // The seated leg fold has to overwrite what the animation player
+            // just wrote, so it can't live in `Update` with the rest: it runs
+            // in the gap between Bevy animating the skeleton and the transform
+            // propagation that carries those rotations to the screen.
+            .add_systems(
+                PostUpdate,
+                render::pose_resting_survivors
+                    .after(bevy::app::AnimationSystems)
+                    .before(bevy::transform::TransformSystems::Propagate)
+                    .run_if(in_state(Screen::Game)),
+            )
             // Continuous effects & presence.
             .add_systems(
                 Update,
@@ -700,9 +765,6 @@ impl Plugin for ClientPlugin {
                     render::animate_effects,
                     render::animate_meal_fire,
                     render::animate_smoke,
-                    render::animate_survivors,
-                    render::animate_survivor_legs,
-                    render::animate_survivor_selection,
                     render::spawn_move_ping,
                     render::animate_move_pings,
                     render::animate_spawn,

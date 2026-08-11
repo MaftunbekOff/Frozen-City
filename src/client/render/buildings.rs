@@ -693,8 +693,15 @@ fn spawn_room(p: &mut ChildSpawnerCommands, assets: &GameAssets, b: &frozen_city
     let (bw, bh) = b.kind.size();
     let (w, h) = (bw as f32, bh as f32);
     let (hw, hh) = (w / 2.0, h / 2.0);
-    let body_h = 0.42;
-    let roof_h = 0.30;
+    // Height scales with the footprint. These were fixed at 0.42/0.30 back
+    // when a workplace was a 1x1 shed; V0.22 widened every room kind to
+    // `ROOM_SIZE` (3) tiles without touching them, which left a 2.9-wide
+    // building 0.72 tall — a 4:1 slab barely taller than the 0.62 survivor
+    // standing next to it, reading as "the walls didn't render". Tying both
+    // to the shortest side keeps any future footprint change proportional.
+    let span = w.min(h);
+    let body_h = 0.30 * span;
+    let roof_h = 0.19 * span;
 
     // --- closed exterior: solid walls + pitched roof + chimney + windows ---
     p.spawn((Transform::IDENTITY, Visibility::Inherited, BuildingRoof { building: b.id }))
@@ -738,7 +745,7 @@ fn spawn_room(p: &mut ChildSpawnerCommands, assets: &GameAssets, b: &frozen_city
                 Mesh3d(assets.cylinder.clone()),
                 MeshMaterial3d(assets.kitchen_stone_mat.clone()),
                 Transform::from_xyz(hw * 0.55, body_h + roof_h * 0.75, hh * 0.55)
-                    .with_scale(Vec3::new(0.13, 0.5, 0.13)),
+                    .with_scale(Vec3::new(0.13, roof_h * 1.7, 0.13)),
             ));
             let window = assets.window_mat.clone();
             for dx in [-hw * 0.4, hw * 0.4] {
@@ -759,7 +766,11 @@ fn spawn_room(p: &mut ChildSpawnerCommands, assets: &GameAssets, b: &frozen_city
                 Transform::from_xyz(0.0, 0.02, 0.0).with_scale(Vec3::new(w - 0.08, 0.04, h - 0.08)),
             ));
             let frame = assets.warehouse_plank_mat.clone();
-            let wall_h = 0.24;
+            // Deliberately far lower than the exterior's `body_h`: this is the
+            // opened-up "look inside" view, so the frame only has to read as
+            // walls without hiding the fittings. Scaled off the same `span`
+            // so it stays in proportion with them.
+            let wall_h = 0.14 * span;
             // North wall + both side walls: solid, full length. The doorway
             // gap is on the south edge only (below).
             r.spawn((
@@ -790,7 +801,7 @@ fn spawn_room(p: &mut ChildSpawnerCommands, assets: &GameAssets, b: &frozen_city
             }
             // Corner posts, taller than the frame — the detail that reads
             // as "timber room" at a glance even from an isometric angle.
-            let post_h = 0.5;
+            let post_h = 0.22 * span;
             for (dx, dz) in [(-1.0f32, -1.0f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
                 r.spawn((
                     Mesh3d(assets.cube.clone()),
