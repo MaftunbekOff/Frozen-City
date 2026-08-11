@@ -41,16 +41,22 @@ impl MeshBuf {
     }
 
     /// Axis-aligned box between `min` and `max` (top, sides — no bottom).
+    ///
+    /// Wound counter-clockwise as seen from outside, per [`Self::tri`]'s
+    /// convention. All four side walls used to be reversed, which back-face
+    /// culling turned into holes rather than into shading artifacts: a rock
+    /// or a tree trunk drew its lid and nothing else, reading as a flat slab
+    /// lying on the snow. Only the top was ever right.
     fn boxx(&mut self, min: Vec3, max: Vec3, color: [f32; 4]) {
         let (a, b) = (min, max);
         let p = |x: f32, y: f32, z: f32| Vec3::new(x, y, z);
         // Top.
         self.quad(p(a.x, b.y, a.z), p(a.x, b.y, b.z), p(b.x, b.y, b.z), p(b.x, b.y, a.z), color);
-        // Sides.
-        self.quad(p(a.x, a.y, a.z), p(b.x, a.y, a.z), p(b.x, b.y, a.z), p(a.x, b.y, a.z), color);
-        self.quad(p(b.x, a.y, b.z), p(a.x, a.y, b.z), p(a.x, b.y, b.z), p(b.x, b.y, b.z), color);
-        self.quad(p(a.x, a.y, b.z), p(a.x, a.y, a.z), p(a.x, b.y, a.z), p(a.x, b.y, b.z), color);
-        self.quad(p(b.x, a.y, a.z), p(b.x, a.y, b.z), p(b.x, b.y, b.z), p(b.x, b.y, a.z), color);
+        // Sides, facing -z, +z, -x, +x in turn.
+        self.quad(p(a.x, b.y, a.z), p(b.x, b.y, a.z), p(b.x, a.y, a.z), p(a.x, a.y, a.z), color);
+        self.quad(p(b.x, b.y, b.z), p(a.x, b.y, b.z), p(a.x, a.y, b.z), p(b.x, a.y, b.z), color);
+        self.quad(p(a.x, b.y, b.z), p(a.x, b.y, a.z), p(a.x, a.y, a.z), p(a.x, a.y, b.z), color);
+        self.quad(p(b.x, b.y, a.z), p(b.x, b.y, b.z), p(b.x, a.y, b.z), p(b.x, a.y, a.z), color);
     }
 
     /// Open cone (no base) with `seg` sides.
@@ -208,4 +214,56 @@ pub(crate) fn rocks_mesh(tiles: &[Tile], dense: bool) -> Mesh {
         }
     }
     buf.into_mesh()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every triangle of a closed-ish primitive must face away from the solid
+    /// it encloses. This is not a shading nicety: a reversed winding is
+    /// back-face culled, so the triangle vanishes completely. Two separate
+    /// bugs of exactly this shape shipped — the tent/roof prism, and `boxx`'s
+    /// four side walls (rocks and tree trunks drawing as flat lids) — hence a
+    /// test over every builder here rather than one over the shape that broke.
+    fn assert_outward(buf: MeshBuf, inside: Vec3, what: &str) {
+        assert_eq!(buf.pos.len() % 3, 0, "{what}: not a triangle list");
+        assert!(!buf.pos.is_empty(), "{what}: built nothing");
+        for (i, tri) in buf.pos.chunks_exact(3).enumerate() {
+            let a = Vec3::from_array(tri[0]);
+            let b = Vec3::from_array(tri[1]);
+            let c = Vec3::from_array(tri[2]);
+            let normal = (b - a).cross(c - a);
+            assert!(normal.length() > 1e-9, "{what}: triangle {i} is degenerate");
+            let outward = ((a + b + c) / 3.0 - inside).normalize();
+            assert!(
+                normal.normalize().dot(outward) > 0.0,
+                "{what}: triangle {i} is wound inside-out",
+            );
+        }
+    }
+
+    #[test]
+    fn box_faces_point_outward() {
+        let (min, max) = (Vec3::new(-0.3, 0.0, -0.2), Vec3::new(0.4, 0.9, 0.5));
+        let mut buf = MeshBuf::default();
+        buf.boxx(min, max, [1.0; 4]);
+        assert_outward(buf, (min + max) / 2.0, "boxx");
+    }
+
+    #[test]
+    fn cone_faces_point_outward() {
+        let mut buf = MeshBuf::default();
+        buf.cone(Vec3::new(0.2, 0.1, -0.4), 0.3, 0.8, 7, [1.0; 4]);
+        // Inside the cone: above the base, well under the apex.
+        assert_outward(buf, Vec3::new(0.2, 0.3, -0.4), "cone");
+    }
+
+    #[test]
+    fn ground_faces_point_up() {
+        let mut buf = MeshBuf::default();
+        let flat = |x: f32, z: f32| (Vec3::new(x, 0.0, z), [0.0, 1.0, 0.0]);
+        buf.quad_smooth([flat(0.0, 0.0), flat(0.0, 1.0), flat(1.0, 1.0), flat(1.0, 0.0)], [1.0; 4]);
+        assert_outward(buf, Vec3::new(0.5, -1.0, 0.5), "quad_smooth");
+    }
 }

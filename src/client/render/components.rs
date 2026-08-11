@@ -199,34 +199,103 @@ pub struct SurvivorDot {
     pub id: u32,
 }
 
-/// Sim facts the procedural body needs after spawn. Lives on the same root
+/// Sim facts the skinned body needs after spawn. Lives on the same root
 /// entity as [`SurvivorDot`]. There's no profession field — a survivor's
 /// trade never changes after spawn (assigned once from the sim RNG), so the
-/// coat/headwear/tool are picked once in `spawn_survivor_body` and never
-/// need to be looked up again.
+/// coat/hood tint and tool prop are picked once in `spawn_survivor_body`
+/// (see [`SurvivorSkin`] for the tint handles) and never need to be looked
+/// up again.
 #[derive(Component)]
 pub struct SurvivorRig {
+    /// Which glTF model this survivor spawned with — 0 = male, 1 = female
+    /// (`assets::SurvivorModels::male`/`female`). Picked once from the
+    /// survivor's id parity (`sync_survivors`) since the sim has no gender
+    /// field; read by `setup_survivor_animations`/`drive_survivor_animations`
+    /// to pick the right animation graph/clips for the `AnimationPlayer`
+    /// buried inside the spawned scene instance.
+    pub gender: usize,
     /// Assigned to a building — shows the carried-resource prop
     /// (`SurvivorCarry`) while walking instead of strolling empty-handed.
     pub carrying: bool,
     /// V0.16: arrived at the Kitchen's dining cluster during a meal window
-    /// (`fc_game::sim::survivor_is_at_meal`) — `animate_survivor_legs` folds
-    /// this into a seated pose instead of the idle/walk cycle. Render-only;
-    /// never affects sim state.
+    /// (`fc_game::sim::survivor_is_at_meal`) — `drive_survivor_animations`
+    /// plays the `Work` clip instead of `Idle` while this is set (the closest
+    /// available clip to a seated/occupied pose; the rig has no dedicated
+    /// sit animation). Render-only; never affects sim state.
     pub sitting: bool,
     /// V0.17: asleep in a Tent bunk right now (`fc_game::sim::
-    /// survivor_is_resting_with`) — `animate_survivor_legs` folds this into a
-    /// deeper reclined pose, same render-only convention as `sitting`.
+    /// survivor_is_resting_with`). The rig has no lying-down clip (only
+    /// `Idle`/`Walk`/`Work`), so unlike `sitting` this doesn't currently
+    /// pick a different animation — `drive_survivor_animations` plays
+    /// `Idle`, same as any other stationary, non-eating survivor. Kept as
+    /// its own flag (rather than folded into "not carrying/not sitting")
+    /// since it's real sim-derived info a future dedicated pose could use;
+    /// render-only either way, never affects sim state.
     pub sleeping: bool,
 }
 
-/// One of a survivor's two legs — a direct child of the [`SurvivorDot`]
-/// root, rotated by `animate_survivor_legs` into a walk-cycle swing while
-/// `Wander::moving` is true. `phase` offsets the two legs by half a cycle so
-/// they alternate instead of moving in lockstep.
+/// Everything `render::survivors::attach_survivor_props` needs to kit a
+/// survivor out once their skeleton exists: which trade's hat/tool to hang
+/// off the `head`/`hand_r` bones, which palette slot those share with the
+/// coat (`Profession::ALL` index, into `GameAssets::survivor_head_mats`),
+/// and which gender's rig the bones belong to (its rest pose decides the
+/// socket transform). Lives on the [`SurvivorDot`] root alongside
+/// [`SurvivorSkin`] — kept separate from [`SurvivorRig`] because that one is
+/// mutated every snapshot while this is fixed for the entity's whole life
+/// (a leadership change respawns the body outright).
+#[derive(Component, Clone, Copy)]
+pub struct SurvivorProps {
+    pub profession: frozen_city::game::types::Profession,
+    pub variant: usize,
+    pub gender: usize,
+    pub is_leader: bool,
+}
+
+/// A leg bone that `render::survivors::pose_resting_survivors` folds into a
+/// seated pose. The clips shipped with the models are only Idle/Walk/Work —
+/// there is no sit or lie animation — so resting is posed directly on the
+/// skeleton instead, which is why this runs after Bevy's animation systems
+/// have already written their own rotations for the frame.
+///
+/// `rest` is the bone's authored local rotation, captured when the scene
+/// instance first spawns (safe to snapshot then: the Idle clip leaves the
+/// legs completely static, 0° of travel over its whole loop). `root` points
+/// back at the [`SurvivorDot`] entity so the pose system can read
+/// [`SurvivorRig`] without walking the parent chain every frame.
 #[derive(Component)]
-pub struct SurvivorLeg {
-    pub phase: f32,
+pub struct RestBone {
+    pub root: Entity,
+    pub rest: Quat,
+    /// Which way this joint folds: the thigh swings forward at the hip, the
+    /// calf tucks back under it. Both rotate about their own local X — see
+    /// `pose_resting_survivors` for the measured signs.
+    pub joint: RestJoint,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum RestJoint {
+    Thigh,
+    Calf,
+}
+
+/// Coat/hood material handles this survivor should end up wearing, resolved
+/// once at spawn time from `GameAssets::survivor_coat_mats`/
+/// `survivor_head_mats` (or `leader_coat_mat` while leading) — same trade
+/// palette the old procedural rig used. Lives on the [`SurvivorDot`] root;
+/// `fixup_survivor_materials` applies these to the matching-named primitive
+/// (`fc_coat`/`fc_hood`) once the glTF scene instance actually spawns them,
+/// since a `WorldAssetRoot` populates its children asynchronously — they
+/// don't exist yet on the same frame the root is spawned.
+#[derive(Component)]
+pub struct SurvivorSkin {
+    pub coat: Handle<StandardMaterial>,
+    pub hood: Handle<StandardMaterial>,
+    /// This survivor's own skin tone and scarf color (see
+    /// `render::survivors::survivor_look`). The coat and hat above are
+    /// dictated by the trade, so these two are what keep two lumberjacks
+    /// from being pixel-identical.
+    pub skin: Handle<StandardMaterial>,
+    pub scarf: Handle<StandardMaterial>,
 }
 
 /// The small carried-resource prop shown while the owning survivor's
@@ -238,13 +307,17 @@ pub struct SurvivorCarry {
 }
 
 /// On a survivor's head mesh: `sync_survivors` swaps its material between
-/// `GameAssets::survivor_skin_mat` and the pale `survivor_skin_sick_mat`
-/// depending on `Survivor::is_sick()` — same id-keyed per-frame refresh
-/// trick as [`SurvivorCarry`], just swapping a material handle instead of
-/// toggling `Visibility`.
+/// this survivor's own `healthy` tone and the shared pale
+/// `GameAssets::survivor_skin_sick_mat` depending on `Survivor::is_sick()` —
+/// same id-keyed per-frame refresh trick as [`SurvivorCarry`], just swapping
+/// a material handle instead of toggling `Visibility`.
 #[derive(Component)]
 pub struct SurvivorHead {
     pub id: u32,
+    /// The tone to go back to on recovery. Carried here rather than looked
+    /// up again because skin tone varies per survivor now — there is no one
+    /// "the" healthy material to restore.
+    pub healthy: Handle<StandardMaterial>,
 }
 
 /// Drives a survivor entity toward the sim-authoritative position
@@ -258,13 +331,15 @@ pub struct SurvivorHead {
 pub struct Wander {
     /// Latest sim position (world space), refreshed every snapshot.
     pub sim_pos: Vec3,
-    /// Small cosmetic shuffle offset from `sim_pos`, active only once the
-    /// entity has visually caught up to `sim_pos`.
-    pub shuffle_target: Vec3,
-    pub speed: f32,
-    /// Actively walking toward `sim_pos` this frame (as opposed to the idle
-    /// shuffle) — read by `animate_survivor_legs` to gate the walk-cycle
-    /// swing so standing survivors don't shuffle their feet.
+    /// Measured ground speed in world units per second, low-pass filtered.
+    /// `drive_survivor_animations` divides it by the walk clip's own stride
+    /// rate to set playback speed, so the feet keep pace with the ground
+    /// instead of skating: the clip is authored for one fixed speed, but the
+    /// distance actually covered per frame depends on how far behind the
+    /// sim position the body currently is.
+    pub ground_speed: f32,
+    /// Actively walking toward `sim_pos` this frame — read by
+    /// `drive_survivor_animations` to choose Walk over Idle.
     pub moving: bool,
 }
 

@@ -9,10 +9,11 @@ edition = "2021"
 
 [dependencies]
 # `wav` adds the WAV decoder so the procedurally-synthesized SFX
-# (src/client/audio.rs) can be decoded; `jpeg` decodes the survivor model's
-# (assets/models/CesiumMan.glb) embedded JPEG texture; bevy's default
-# features (which include webgl2) are kept.
-bevy = { version = "0.19", features = ["wav", "jpeg"] }
+# (src/client/audio.rs) can be decoded; bevy's default features (which
+# include webgl2) are kept. The survivor models (assets/models/survivor_*.glb)
+# use flat vertex-color materials with no embedded textures, so no image
+# codec feature is needed for them.
+bevy = { version = "0.19", features = ["wav"] }
 fc-game = { path = "crates/fc-game" }
 fc-net = { path = "crates/fc-net" }
 

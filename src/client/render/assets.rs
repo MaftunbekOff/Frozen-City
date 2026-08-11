@@ -1,5 +1,6 @@
 use bevy::anti_alias::fxaa::Fxaa;
 use bevy::camera::Hdr;
+use bevy::gltf::GltfAssetLabel;
 use bevy::light::{CascadeShadowConfigBuilder, DirectionalLightShadowMap};
 use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::post_process::bloom::Bloom;
@@ -72,8 +73,12 @@ pub struct GameAssets {
     /// [`crate::client::profession_coat_color`]) — shared so survivors of the
     /// same trade batch into one draw call, same trick as `avatar_mats`.
     pub survivor_coat_mats: [Handle<StandardMaterial>; 7],
-    /// One headwear material per trade — hood/hardhat/toque, deliberately
-    /// distinct from the coat color so a trade reads from its silhouette.
+    /// One hood-tint material per trade, deliberately distinct from the coat
+    /// color so a trade still reads even though the skinned model's hood
+    /// shape itself no longer varies by profession (that used to be a
+    /// separate cone/cylinder/toque prop under the old procedural rig — see
+    /// `render::survivors::fixup_survivor_materials`, which applies this to
+    /// the model's `fc_hood` primitive).
     pub survivor_head_mats: [Handle<StandardMaterial>; 7],
     /// Coat override for whoever currently holds `GameState.leader` — a
     /// royal color no trade uses, so leading reads as visually distinct
@@ -86,7 +91,16 @@ pub struct GameAssets {
     pub leader_crown_mat: Handle<StandardMaterial>,
     /// Shared skin tone for every survivor's head — the headwear above it is
     /// what carries the per-trade distinction.
-    pub survivor_skin_mat: Handle<StandardMaterial>,
+    /// Four skin tones, picked per survivor from their id
+    /// (`render::survivors::survivor_look`). A fixed small set rather than a
+    /// per-entity material: a colony is up to 60 people and same-tone heads
+    /// still batch into one draw call, exactly like the coats do.
+    pub survivor_skin_mats: [Handle<StandardMaterial>; 4],
+    /// Scarf colors, chosen the same way. The models author one shared red
+    /// scarf; varying it is the cheapest way to stop a trade's workers
+    /// reading as identical copies, since the coat and hat are spoken for by
+    /// the profession and can't carry individual variation.
+    pub survivor_scarf_mats: [Handle<StandardMaterial>; 4],
     /// V0.17: pale/sickly override for `survivor_skin_mat`, swapped onto a
     /// survivor's head while `Survivor::is_sick()`
     /// (`render::survivors::sync_survivors`'s `SurvivorHead` loop) — shared,
@@ -148,6 +162,50 @@ pub struct GameAssets {
     pub heater_fire_mat: Handle<StandardMaterial>,
 }
 
+/// One gender's skinned survivor model: the glTF scene plus an animation
+/// graph wired with its three clips (`Idle`/`Walk`/`Work` — see
+/// `render::survivors::{setup_survivor_animations, drive_survivor_animations}`).
+pub struct SurvivorGenderModel {
+    pub scene: Handle<WorldAsset>,
+    pub graph: Handle<AnimationGraph>,
+    pub idle: AnimationNodeIndex,
+    pub walk: AnimationNodeIndex,
+    pub work: AnimationNodeIndex,
+}
+
+/// The two survivor body models (`client::SURVIVOR_MODELS`, embedded glTF —
+/// custom-made for this game: skinned mesh + `Idle`/`Walk`/`Work` clips,
+/// materials named `fc_coat`/`fc_hood`/`fc_skin`/`fc_leather`/`fc_scarf`).
+/// Each survivor spawns its own `WorldAssetRoot` instance of whichever
+/// gender `SurvivorRig::gender` picked; both share these two graphs.
+#[derive(Resource)]
+pub struct SurvivorModels {
+    pub male: SurvivorGenderModel,
+    pub female: SurvivorGenderModel,
+}
+
+/// Loads one gender's scene + builds its `Idle`/`Walk`/`Work` animation
+/// graph — the embedded glb's animations are in that fixed order (verified
+/// against both source files at authoring time), so plain clip indices 0..2
+/// are used rather than a name lookup.
+fn load_survivor_model(
+    asset_server: &AssetServer,
+    graphs: &mut Assets<AnimationGraph>,
+    path: &str,
+) -> SurvivorGenderModel {
+    let embedded = format!("embedded://{path}");
+    let clip =
+        |i: usize| asset_server.load(GltfAssetLabel::Animation(i).from_asset(embedded.clone()));
+    let (graph, nodes) = AnimationGraph::from_clips([clip(0), clip(1), clip(2)]);
+    SurvivorGenderModel {
+        scene: asset_server.load(GltfAssetLabel::Scene(0).from_asset(embedded)),
+        graph: graphs.add(graph),
+        idle: nodes[0],
+        walk: nodes[1],
+        work: nodes[2],
+    }
+}
+
 /// Shared body material handle for a building kind — keeps same-kind
 /// buildings batched into a single draw call instead of each getting its
 /// own `StandardMaterial`.
@@ -164,9 +222,15 @@ pub(crate) fn building_mat(assets: &GameAssets, kind: BuildingKind) -> Handle<St
 pub fn setup_camera_and_assets(
     mut commands: Commands,
     quality: Res<Quality>,
+    asset_server: Res<AssetServer>,
+    mut graphs: ResMut<Assets<AnimationGraph>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    commands.insert_resource(SurvivorModels {
+        male: load_survivor_model(&asset_server, &mut graphs, "models/survivor_male.glb"),
+        female: load_survivor_model(&asset_server, &mut graphs, "models/survivor_female.glb"),
+    });
     let camera = commands
         .spawn((
             Camera3d::default(),
@@ -302,10 +366,31 @@ pub fn setup_camera_and_assets(
                 ..default()
             })
         }),
-        survivor_skin_mat: materials.add(StandardMaterial {
-            base_color: Color::srgb(0.80, 0.62, 0.48),
-            perceptual_roughness: 0.8,
-            ..default()
+        survivor_skin_mats: [
+            Color::srgb(0.87, 0.70, 0.57),
+            Color::srgb(0.78, 0.60, 0.46),
+            Color::srgb(0.62, 0.45, 0.33),
+            Color::srgb(0.45, 0.31, 0.23),
+        ]
+        .map(|c| {
+            materials.add(StandardMaterial {
+                base_color: c,
+                perceptual_roughness: 0.8,
+                ..default()
+            })
+        }),
+        survivor_scarf_mats: [
+            Color::srgb(0.55, 0.22, 0.20), // the models' own authored red
+            Color::srgb(0.22, 0.40, 0.44), // weathered teal
+            Color::srgb(0.60, 0.46, 0.18), // mustard
+            Color::srgb(0.38, 0.28, 0.42), // dull plum
+        ]
+        .map(|c| {
+            materials.add(StandardMaterial {
+                base_color: c,
+                perceptual_roughness: 0.95,
+                ..default()
+            })
         }),
         survivor_skin_sick_mat: materials.add(StandardMaterial {
             base_color: Color::srgb(0.64, 0.70, 0.58),
@@ -318,10 +403,15 @@ pub fn setup_camera_and_assets(
             ..default()
         }),
         leader_crown_mat: materials.add(StandardMaterial {
+            // Barely emissive on purpose. The crown is head-sized geometry
+            // (~0.12 units) and Bloom::NATURAL smears anything brighter into
+            // a glowing ball twice the width of the skull — at this camera
+            // distance that read as "leader has no head" rather than as a
+            // crown. Metallic gold carries it instead.
             base_color: Color::srgb(1.0, 0.82, 0.20),
-            emissive: LinearRgba::rgb(0.35, 0.28, 0.03),
-            metallic: 0.4,
-            perceptual_roughness: 0.3,
+            emissive: LinearRgba::rgb(0.05, 0.04, 0.01),
+            metallic: 0.6,
+            perceptual_roughness: 0.25,
             ..default()
         }),
         building_mats: std::array::from_fn(|i| {
@@ -443,6 +533,15 @@ pub fn setup_camera_and_assets(
 }
 
 /// A 1x1x1 tent: triangular prism with closed ends, flat-shaded.
+///
+/// Every face is wound counter-clockwise as seen from OUTSIDE, which is what
+/// [`MeshBuf::tri`] assumes: it takes the outward normal to be
+/// `(b - a) × (c - a)`, so a reversed winding does not merely light a face
+/// wrongly — it points the normal into the tent and back-face culling drops
+/// the triangle entirely. All four faces were reversed here, which made the
+/// tent body invisible (only its shadow and the crates beside it showed) and,
+/// because `GameAssets::tent` is also every room's pitched roof, left every
+/// workshop looking like a flat walls-only slab.
 fn tent_mesh() -> Mesh {
     let mut buf = MeshBuf::default();
     let c = [1.0, 1.0, 1.0, 1.0];
@@ -453,11 +552,55 @@ fn tent_mesh() -> Mesh {
     let fr = Vec3::new(b, 0.0, a);
     let bl = Vec3::new(a, 0.0, b);
     let br = Vec3::new(b, 0.0, b);
-    // Sloped sides.
-    buf.quad(fl, ridge_f, ridge_b, bl, c);
-    buf.quad(fr, br, ridge_b, ridge_f, c);
-    // Gable ends.
-    buf.tri(fl, fr, ridge_f, c);
-    buf.tri(br, bl, ridge_b, c);
+    // Sloped sides: -x slope faces out to (-1, +1, 0), +x slope to (+1, +1, 0).
+    buf.quad(bl, ridge_b, ridge_f, fl, c);
+    buf.quad(ridge_f, ridge_b, br, fr, c);
+    // Gable ends, facing -z and +z respectively.
+    buf.tri(ridge_f, fr, fl, c);
+    buf.tri(ridge_b, bl, br, c);
     buf.into_mesh()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every tent face must point away from the inside of the prism. A
+    /// reversed winding is invisible rather than merely mis-lit (back-face
+    /// culling drops it), and because this one mesh is both the Tent body and
+    /// every room's pitched roof, getting it wrong silently deletes a large
+    /// share of the colony's geometry — worth pinning down in a test rather
+    /// than re-discovering it from a screenshot.
+    #[test]
+    fn tent_faces_point_outward() {
+        let mesh = tent_mesh();
+        let Some(bevy::mesh::VertexAttributeValues::Float32x3(pos)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("tent mesh has no float3 positions")
+        };
+        let Some(bevy::mesh::VertexAttributeValues::Float32x3(nor)) =
+            mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
+        else {
+            panic!("tent mesh has no float3 normals")
+        };
+        assert_eq!(pos.len(), nor.len());
+        assert_eq!(pos.len() % 3, 0, "non-indexed triangle list");
+        // Comfortably inside the prism (its base spans y = 0..1 at the ridge).
+        let inside = Vec3::new(0.0, 0.3, 0.0);
+        for (t, tri) in pos.chunks_exact(3).enumerate() {
+            let a = Vec3::from_array(tri[0]);
+            let b = Vec3::from_array(tri[1]);
+            let c = Vec3::from_array(tri[2]);
+            let centroid = (a + b + c) / 3.0;
+            // Recomputed from the winding, not read back, so this also catches
+            // a normal that disagrees with the vertex order.
+            let normal = (b - a).cross(c - a).normalize();
+            let outward = (centroid - inside).normalize();
+            assert!(
+                normal.dot(outward) > 0.0,
+                "triangle {t} is wound inside-out: normal {normal:?} vs outward {outward:?}",
+            );
+        }
+    }
 }
