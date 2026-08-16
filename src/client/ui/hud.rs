@@ -101,7 +101,7 @@ pub fn spawn_hud(
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(14.0),
-            top: Val::Px(54.0),
+            top: Val::Px(theme::TOPBAR_H + 6.0),
             ..default()
         },
         theme::text("", FS_SMALL, TEXT_MUTED),
@@ -116,7 +116,7 @@ pub fn spawn_hud(
     let mut events_node = Node {
         position_type: PositionType::Absolute,
         right: Val::Px(12.0),
-        top: Val::Px(54.0),
+        top: Val::Px(theme::TOPBAR_H + 6.0),
         padding: UiRect::all(Val::Px(SP_SM)),
         // Chap qirradagi muz-ko'k urg'u chizig'i — lenta "jurnal kartasi"
         // bo'lib o'qilsin (dizayn-tizim panellariga hamohang).
@@ -805,6 +805,27 @@ fn res_chip(p: &mut ChildSpawnerCommands, dot_color: Color, initial: impl Into<S
     });
 }
 
+/// One resource card in the redesigned top bar: a colored icon badge beside a
+/// label-over-value column. The label is static (spawned once, in the session
+/// language); only the value node carries the [`HudField`] marker, so
+/// `hud_update` writes a bare number into it rather than re-formatting a
+/// whole "name value" string every time the stockpile moves.
+fn res_card(p: &mut ChildSpawnerCommands, accent: Color, label: &str, field: HudField) {
+    p.spawn(theme::res_card()).with_children(|c| {
+        c.spawn(theme::icon_badge(accent));
+        c.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::FlexStart,
+            row_gap: Val::Px(1.0),
+            ..default()
+        })
+        .with_children(|col| {
+            col.spawn(theme::card_label(label));
+            col.spawn((theme::card_value("0", TEXT_PRIMARY), field));
+        });
+    });
+}
+
 /// Desktop/Tablet top bar — Frostpunk-style three-zone strip: resource chips
 /// on the left, status chips + actions on the right. On Desktop the middle is
 /// deliberately left empty for the circular temperature medallion
@@ -819,10 +840,10 @@ fn spawn_top_bar_desktop(commands: &mut Commands, ff: theme::FormFactor, lang: L
                 left: Val::Px(0.0),
                 right: Val::Px(0.0),
                 top: Val::Px(0.0),
-                height: Val::Px(46.0),
+                height: Val::Px(theme::TOPBAR_H),
                 padding: UiRect::horizontal(Val::Px(14.0)),
                 align_items: AlignItems::Center,
-                column_gap: Val::Px(SP_SM),
+                column_gap: Val::Px(6.0),
                 border: UiRect::bottom(Val::Px(1.0)),
                 ..default()
             },
@@ -834,12 +855,14 @@ fn spawn_top_bar_desktop(commands: &mut Commands, ff: theme::FormFactor, lang: L
             DespawnOnExit(Screen::Game),
         ))
         .with_children(|p| {
-            res_chip(p, RES_WOOD, i18n_hud::hud_wood(0, lang), HudField::Wood);
-            res_chip(p, RES_COAL, i18n_hud::hud_coal(0, lang), HudField::Coal);
-            res_chip(p, RES_FOOD, i18n_hud::hud_food(0, lang), HudField::Food);
-            res_chip(p, RES_WATER, i18n_hud::hud_water(0, lang), HudField::Water);
-            res_chip(p, RES_GOLD, i18n_hud::hud_gold(0, lang), HudField::Gold);
-            res_chip(p, theme::ACCENT_ICE, i18n_hud::hud_pop(0, 0, lang), HudField::Pop);
+            res_card(p, RES_WOOD, i18n_hud::res_name_wood(lang), HudField::Wood);
+            res_card(p, RES_COAL, i18n_hud::res_name_coal(lang), HudField::Coal);
+            res_card(p, RES_FOOD, i18n_hud::res_name_food(lang), HudField::Food);
+            res_card(p, RES_WATER, i18n_hud::res_name_water(lang), HudField::Water);
+            res_card(p, theme::RES_FUR, i18n_hud::res_name_fur(lang), HudField::Fur);
+            res_card(p, theme::RES_CLOTH, i18n_hud::res_name_cloth(lang), HudField::Cloth);
+            res_card(p, RES_GOLD, i18n_hud::res_name_gold(lang), HudField::Gold);
+            res_card(p, theme::ACCENT_ICE, i18n_hud::res_name_pop(lang), HudField::Pop);
             // V0.17: sick/exhausted alert — plain text (no chip/dot) so an
             // empty string, the common case, truly takes up no row space,
             // same convention the Clock/Temp entries below already use.
@@ -898,10 +921,14 @@ fn spawn_top_bar_desktop(commands: &mut Commands, ff: theme::FormFactor, lang: L
                 .with_children(|b| {
                     b.spawn(theme::text(i18n_hud::menu_button(lang), FS_SMALL, TEXT_PRIMARY));
                 });
-            if desktop {
-                spawn_center_gauge(p, lang);
-            }
         });
+    // The temperature medallion is NOT a child of the bar. It used to be, and
+    // once the bar grew to fit two-line resource cards the 84px circle sat
+    // straight on top of them. It now floats just below the bar over the
+    // world, which is also where the reference design puts it.
+    if desktop {
+        spawn_center_gauge(commands, lang);
+    }
 }
 
 /// Desktop markaziy harorat medalyoni — yuqori panelning ABSOLUTE bolasi
@@ -910,18 +937,22 @@ fn spawn_top_bar_desktop(commands: &mut Commands, ff: theme::FormFactor, lang: L
 /// doirasi). Ichida joriy harorat, ostida kun/soat chipi; matnlarni
 /// `hud_update` yangilaydi (`HudField::Temp`/`Clock`), sovuq to'lqin matn
 /// suffiksi o'rniga qizil rang bilan bildiriladi (doiraga suffiks sig'maydi).
-fn spawn_center_gauge(bar: &mut ChildSpawnerCommands, lang: Lang) {
-    bar.spawn(Node {
-        position_type: PositionType::Absolute,
-        left: Val::Px(0.0),
-        right: Val::Px(0.0),
-        top: Val::Px(4.0),
-        flex_direction: FlexDirection::Column,
-        align_items: AlignItems::Center,
-        row_gap: Val::Px(SP_XS),
-        ..default()
-    })
-    .with_children(|p| {
+fn spawn_center_gauge(commands: &mut Commands, lang: Lang) {
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(theme::TOPBAR_H + 10.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                row_gap: Val::Px(SP_XS),
+                ..default()
+            },
+            DespawnOnExit(Screen::Game),
+        ))
+        .with_children(|p| {
         p.spawn((
             Node {
                 width: Val::Px(84.0),
@@ -1260,6 +1291,10 @@ pub(crate) struct HudCache {
     coal: Option<(i64, Lang)>,
     food: Option<(i64, Lang)>,
     water: Option<(i64, Lang)>,
+    // Fur and cloth only ever render as a bare number (card layout only, no
+    // compact-row form), so their cache needs no language in the key.
+    fur: Option<i64>,
+    cloth: Option<i64>,
     gold: Option<(i64, Lang)>,
     pop: Option<(usize, u32, Lang)>,
     clock: Option<(u32, u32, u32, Lang)>,
@@ -1280,48 +1315,72 @@ pub fn hud_update(
 ) {
     let Some(state) = view.state.as_ref() else { return };
     let lang = *lang;
+    // The desktop/tablet bar draws each resource as a card whose label is a
+    // separate, static node, so its value node wants a bare number. The
+    // compact phone row still packs name and value into one string.
+    let compact = ff.compact();
     for (mut text, color, field) in &mut q {
         match field {
             HudField::Wood => {
                 let v = state.stock.wood as i64;
                 if cache.wood != Some((v, lang)) {
                     cache.wood = Some((v, lang));
-                    text.0 = i18n_hud::hud_wood(v, lang);
+                    text.0 = if compact { i18n_hud::hud_wood(v, lang) } else { v.to_string() };
                 }
             }
             HudField::Coal => {
                 let v = state.stock.coal as i64;
                 if cache.coal != Some((v, lang)) {
                     cache.coal = Some((v, lang));
-                    text.0 = i18n_hud::hud_coal(v, lang);
+                    text.0 = if compact { i18n_hud::hud_coal(v, lang) } else { v.to_string() };
                 }
             }
             HudField::Food => {
                 let v = state.stock.food as i64;
                 if cache.food != Some((v, lang)) {
                     cache.food = Some((v, lang));
-                    text.0 = i18n_hud::hud_food(v, lang);
+                    text.0 = if compact { i18n_hud::hud_food(v, lang) } else { v.to_string() };
                 }
             }
             HudField::Water => {
                 let v = state.stock.water as i64;
                 if cache.water != Some((v, lang)) {
                     cache.water = Some((v, lang));
-                    text.0 = i18n_hud::hud_water(v, lang);
+                    text.0 = if compact { i18n_hud::hud_water(v, lang) } else { v.to_string() };
+                }
+            }
+            HudField::Fur => {
+                let v = state.stock.fur as i64;
+                if cache.fur != Some(v) {
+                    cache.fur = Some(v);
+                    text.0 = v.to_string();
+                }
+            }
+            HudField::Cloth => {
+                let v = state.stock.cloth as i64;
+                if cache.cloth != Some(v) {
+                    cache.cloth = Some(v);
+                    text.0 = v.to_string();
                 }
             }
             HudField::Gold => {
                 let v = state.stock.gold as i64;
                 if cache.gold != Some((v, lang)) {
                     cache.gold = Some((v, lang));
-                    text.0 = i18n_hud::hud_gold(v, lang);
+                    text.0 = if compact { i18n_hud::hud_gold(v, lang) } else { v.to_string() };
                 }
             }
             HudField::Pop => {
                 let (pop, idle) = (state.survivors.len(), state.idle_workers());
                 if cache.pop != Some((pop, idle, lang)) {
                     cache.pop = Some((pop, idle, lang));
-                    text.0 = i18n_hud::hud_pop(pop, idle, lang);
+                    text.0 = if compact {
+                        i18n_hud::hud_pop(pop, idle, lang)
+                    } else {
+                        // Card form keeps the idle count, which the player
+                        // needs constantly when staffing, but drops the noun.
+                        format!("{pop}  /{idle}")
+                    };
                 }
             }
             HudField::Clock => {

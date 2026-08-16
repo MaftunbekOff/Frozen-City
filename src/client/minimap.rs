@@ -89,7 +89,7 @@ fn spawn_minimap(mut commands: Commands, tex: Res<MinimapTex>, ff: Res<super::th
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(12.0),
-                top: Val::Px(78.0),
+                top: Val::Px(crate::client::theme::TOPBAR_H + 28.0),
                 width: Val::Px(px),
                 height: Val::Px(px),
                 border: UiRect::all(Val::Px(2.0)),

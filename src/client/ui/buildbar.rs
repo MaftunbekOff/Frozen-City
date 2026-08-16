@@ -290,16 +290,21 @@ pub fn spawn_build_panel(commands: &mut Commands, ff: theme::FormFactor, lang: L
         DespawnOnExit(Screen::Game),
     ));
     if desktop {
-        // Scrim butun ekranni qoraytiraveradi, lekin kontentni o'ngga taqaydi.
+        // The scrim still dims the whole screen, but the menu is now docked
+        // along the BOTTOM rather than the right edge: a construction bar
+        // spanning the width of the window, which is where a city-builder
+        // player expects to build from and what the reference design uses.
+        // Right-edge docking put it on top of the missions panel and left the
+        // whole bottom of the screen empty.
         root.insert(Node {
             position_type: PositionType::Absolute,
             left: Val::Px(0.0),
             right: Val::Px(0.0),
             top: Val::Px(0.0),
             bottom: Val::Px(0.0),
-            justify_content: JustifyContent::FlexEnd,
-            align_items: AlignItems::Center,
-            padding: UiRect::right(Val::Px(SP_SM)),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::FlexEnd,
+            padding: UiRect::bottom(Val::Px(SP_SM)),
             ..default()
         });
     }
@@ -308,14 +313,16 @@ pub fn spawn_build_panel(commands: &mut Commands, ff: theme::FormFactor, lang: L
             scrim
                 .spawn((
                     Node {
-                        width: Val::Px(440.0),
-                        max_height: Val::Percent(86.0),
+                        // Leaves a margin either side rather than running edge
+                        // to edge, so the dock reads as a panel sitting over
+                        // the world instead of a letterbox bar.
+                        width: Val::Percent(97.0),
+                        max_height: Val::Percent(42.0),
                         flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(SP_SM),
-                        padding: UiRect::all(Val::Px(theme::SP_LG)),
+                        padding: UiRect::axes(Val::Px(theme::SP_MD), Val::Px(theme::SP_MD)),
                         border: UiRect::all(Val::Px(1.0)),
                         border_radius: BorderRadius::all(Val::Px(theme::RAD_PANEL)),
-                        overflow: Overflow::scroll_y(),
                         ..default()
                     },
                     // To'liq tiniqmas fon: drawer o'ngdagi Missiyalar paneli
@@ -325,12 +332,11 @@ pub fn spawn_build_panel(commands: &mut Commands, ff: theme::FormFactor, lang: L
                     BorderColor::all(theme::BORDER),
                     BoxShadow::new(
                         Color::srgba(0.0, 0.0, 0.0, 0.50),
-                        Val::Px(-6.0),
                         Val::Px(0.0),
+                        Val::Px(-4.0),
                         Val::Px(2.0),
                         Val::Px(24.0),
                     ),
-                    ScrollPosition::default(),
                 ))
                 .with_children(|p| build_menu_content(p, ff, lang));
         } else {
@@ -344,13 +350,43 @@ pub fn spawn_build_panel(commands: &mut Commands, ff: theme::FormFactor, lang: L
 /// Qurish menyusining ichi — drawer (Desktop) va modal (Mobile/Tablet)
 /// qobiqlari uchun umumiy: mis sarlavha + mis chiziq + uch kategoriya.
 fn build_menu_content(p: &mut ChildSpawnerCommands, ff: theme::FormFactor, lang: Lang) {
-    p.spawn((
-        theme::text(i18n_hud::tab_build(lang), theme::FS_SECTION, theme::BRASS),
-        Node {
-            align_self: AlignSelf::Center,
-            ..default()
-        },
-    ));
+    // Desktop docks the menu along the bottom of the screen, so its categories
+    // run left-to-right in one scrolling strip; the phone/tablet modal keeps
+    // the original stacked list.
+    let horizontal = ff == theme::FormFactor::Desktop;
+    // Header: the title centred, with a close button pinned to the right.
+    // Positioned absolutely inside the header row so the title stays optically
+    // centred on the panel rather than being pushed off-centre by the button.
+    p.spawn(Node {
+        width: Val::Percent(100.0),
+        justify_content: JustifyContent::Center,
+        align_items: AlignItems::Center,
+        ..default()
+    })
+    .with_children(|h| {
+        h.spawn(theme::text(i18n_hud::tab_build(lang), theme::FS_SECTION, theme::BRASS));
+        h.spawn((
+            Button,
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(0.0),
+                width: Val::Px(30.0),
+                height: Val::Px(30.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(theme::RAD_BTN)),
+                ..default()
+            },
+            BackgroundColor(BTN),
+            BaseColor(BTN),
+            BorderColor::all(theme::BORDER),
+            BuildPanelCloseBtn,
+        ))
+        .with_children(|b| {
+            b.spawn(theme::text("X", FS_SMALL, TEXT_PRIMARY));
+        });
+    });
     p.spawn(theme::brass_divider());
     // Rad-xabar qatori: resurs yetmay bosilganda `build_buttons` shu yerga
     // sababni yozadi (bo'sh bo'lsa ko'rinmas darajada kichik).
@@ -362,7 +398,23 @@ fn build_menu_content(p: &mut ChildSpawnerCommands, ff: theme::FormFactor, lang:
         },
         BuildDenyText,
     ));
-    build_category(p, i18n_hud::build_cat_housing(lang), &[BuildingKind::Tent], ff, lang);
+    // Wraps rather than scrolls. A scrolling strip needs a wheel handler the
+    // rest of this UI does not have, and at 1280px the categories overflow by
+    // more than one card — so an un-scrollable strip silently hides the last
+    // ones. Wrapping keeps every building reachable at any window width, and
+    // the dock's `max_height` gives the second row room.
+    p.spawn(Node {
+        width: Val::Percent(100.0),
+        flex_direction: if horizontal { FlexDirection::Row } else { FlexDirection::Column },
+        flex_wrap: if horizontal { FlexWrap::Wrap } else { FlexWrap::NoWrap },
+        column_gap: Val::Px(theme::SP_LG),
+        row_gap: Val::Px(theme::SP_MD),
+        align_items: if horizontal { AlignItems::FlexStart } else { AlignItems::Stretch },
+        justify_content: if horizontal { JustifyContent::Center } else { JustifyContent::FlexStart },
+        ..default()
+    })
+    .with_children(|p| {
+    build_category(p, i18n_hud::build_cat_housing(lang), &[BuildingKind::Tent], ff, lang, horizontal);
     build_category(
         p,
         i18n_hud::build_cat_production(lang),
@@ -377,6 +429,7 @@ fn build_menu_content(p: &mut ChildSpawnerCommands, ff: theme::FormFactor, lang:
         ],
         ff,
         lang,
+        horizontal,
     );
     build_category(
         p,
@@ -384,6 +437,7 @@ fn build_menu_content(p: &mut ChildSpawnerCommands, ff: theme::FormFactor, lang:
         &[BuildingKind::Hospital, BuildingKind::Kitchen, BuildingKind::Warehouse],
         ff,
         lang,
+        horizontal,
     );
     build_category(
         p,
@@ -391,9 +445,11 @@ fn build_menu_content(p: &mut ChildSpawnerCommands, ff: theme::FormFactor, lang:
         &[BuildingKind::Wall, BuildingKind::Gate],
         ff,
         lang,
+        horizontal,
     );
     // V0.19: roads + the Snow Crew that keeps them clear.
-    infra_category(p, ff, lang);
+    infra_category(p, ff, lang, horizontal);
+    });
 }
 
 /// Bolg'a glifi — burchak tugmasining ichidagi yassi piktogramma (ko'ndalang
@@ -438,22 +494,46 @@ fn build_category(
     kinds: &[BuildingKind],
     ff: theme::FormFactor,
     lang: Lang,
+    horizontal: bool,
 ) {
-    parent.spawn(theme::text(label, FS_SMALL, TEXT_MUTED));
+    // The category owns a column of its own (label над its tiles) rather than
+    // dropping both as loose siblings. In the tall drawer that reads exactly
+    // as before; in the wide bottom dock it is what lets categories sit side
+    // by side instead of the label and its tiles splitting apart.
     parent
-        .spawn(Node {
-            width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Row,
-            flex_wrap: FlexWrap::Wrap,
-            column_gap: Val::Px(SP_XS),
-            row_gap: Val::Px(SP_XS),
-            ..default()
-        })
-        .with_children(|row| {
-            for &kind in kinds {
-                build_kind_tile(row, kind, ff, lang);
-            }
+        .spawn(category_column(horizontal))
+        .with_children(|col| {
+            col.spawn(theme::text(label, FS_SMALL, TEXT_MUTED));
+            col.spawn(tile_row(horizontal)).with_children(|row| {
+                for &kind in kinds {
+                    build_kind_tile(row, kind, ff, lang);
+                }
+            });
         });
+}
+
+/// Wrapper for one category. Auto-width and un-shrinkable when laid out
+/// horizontally, so a long category keeps its tiles on one line and the dock
+/// scrolls instead of squashing them.
+fn category_column(horizontal: bool) -> Node {
+    Node {
+        width: if horizontal { Val::Auto } else { Val::Percent(100.0) },
+        flex_direction: FlexDirection::Column,
+        row_gap: Val::Px(SP_XS),
+        flex_shrink: 0.0,
+        ..default()
+    }
+}
+
+fn tile_row(horizontal: bool) -> Node {
+    Node {
+        width: if horizontal { Val::Auto } else { Val::Percent(100.0) },
+        flex_direction: FlexDirection::Row,
+        flex_wrap: if horizontal { FlexWrap::NoWrap } else { FlexWrap::Wrap },
+        column_gap: Val::Px(SP_XS),
+        row_gap: Val::Px(SP_XS),
+        ..default()
+    }
 }
 
 /// One `BuildBtn` tile — split out of `build_category` so `infra_category`
@@ -508,17 +588,18 @@ fn build_kind_tile(row: &mut ChildSpawnerCommands, kind: BuildingKind, ff: theme
 /// all: dragging a road paints a batch of tiles rather than dropping one
 /// building, so they arm `roads::RoadMode` instead of `BuildMode` (see
 /// `road_tool_buttons`).
-fn infra_category(parent: &mut ChildSpawnerCommands, ff: theme::FormFactor, lang: Lang) {
-    parent.spawn(theme::text(i18n_roads::build_cat_infra(lang), FS_SMALL, TEXT_MUTED));
-    parent
-        .spawn(Node {
-            width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Row,
-            flex_wrap: FlexWrap::Wrap,
-            column_gap: Val::Px(SP_XS),
-            row_gap: Val::Px(SP_XS),
-            ..default()
-        })
+fn infra_category(
+    parent: &mut ChildSpawnerCommands,
+    ff: theme::FormFactor,
+    lang: Lang,
+    horizontal: bool,
+) {
+    let col_node = category_column(horizontal);
+    let row_node = tile_row(horizontal);
+    parent.spawn(col_node).with_children(|col| {
+    col.spawn(theme::text(i18n_roads::build_cat_infra(lang), FS_SMALL, TEXT_MUTED));
+    col
+        .spawn(row_node)
         .with_children(|row| {
             let btn_h = if ff.compact() { 54.0_f32.max(ff.btn_h()) } else { 56.0 };
             for (mode, label, badge) in [
@@ -559,7 +640,8 @@ fn infra_category(parent: &mut ChildSpawnerCommands, ff: theme::FormFactor, lang
             // whole job is keeping this category's roads open.
             build_kind_tile(row, BuildingKind::SnowCrew, ff, lang);
         });
-    parent.spawn(theme::text(i18n_roads::road_tool_hint(lang), FS_SMALL - 2.0, TEXT_MUTED));
+    col.spawn(theme::text(i18n_roads::road_tool_hint(lang), FS_SMALL - 2.0, TEXT_MUTED));
+    });
 }
 
 /// Handles the two road-tool tiles: click arms/toggles `RoadMode` (mirroring
@@ -605,10 +687,16 @@ pub fn build_panel_toggle(
     keys: Res<ButtonInput<KeyCode>>,
     chat: Res<ChatState>,
     clicked: Query<&Interaction, (With<BuildPanelToggleBtn>, Changed<Interaction>)>,
+    closed: Query<&Interaction, (With<BuildPanelCloseBtn>, Changed<Interaction>)>,
     mut open: ResMut<BuildPanelOpen>,
 ) {
     if clicked.iter().any(|i| *i == Interaction::Pressed) {
         open.0 = !open.0;
+    }
+    // The dock's own X only ever closes — unlike the corner medallion, which
+    // toggles. It is inside the panel, so there is nothing for it to open.
+    if closed.iter().any(|i| *i == Interaction::Pressed) {
+        open.0 = false;
     }
     if !chat.active {
         if keys.just_pressed(KeyCode::KeyB) {

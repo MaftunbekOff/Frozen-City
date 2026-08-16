@@ -10,6 +10,12 @@ pub enum HudField {
     /// V0.11: colony water stockpile — mirrors `Food`'s chip exactly, since
     /// thirst is now as core a survival need as hunger.
     Water,
+    /// Raw hides from hunting, spent by a staffed Tailor Shop. Held in the
+    /// stockpile since V0.10 but never surfaced in the HUD until the card
+    /// redesign gave the top bar room for the full set.
+    Fur,
+    /// Tailored from `fur`; grants the colony a passive warmth bonus.
+    Cloth,
     /// V0.13: gold earned/spent trading through the Tunnel — see
     /// [`CaravanBtn`].
     Gold,
@@ -57,6 +63,13 @@ pub struct BuildPanelRoot;
 /// with a hammer glyph) — toggles the Build/Manage modal.
 #[derive(Component)]
 pub struct BuildPanelToggleBtn;
+
+/// Close button inside the Build dock's own header. The corner medallion above
+/// used to be the only way out, but once the menu was docked along the bottom
+/// of the screen it covers that corner — so the panel needs a dismiss control
+/// of its own, not just the `Esc`/`B` keys (which mobile has no access to).
+#[derive(Component)]
+pub struct BuildPanelCloseBtn;
 
 /// Whether the Build modal is open (`build_panel_toggle` writes,
 /// `build_panel_visibility` applies; picking a building closes it so the
