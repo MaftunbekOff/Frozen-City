@@ -11,6 +11,74 @@ use super::i18n::Lang;
 /// Resource readouts (`HudField::Wood/Coal/Food/Pop`). `n` is already
 /// formatted by the caller (integer stock, or the "N  (idle M)" population
 /// pair) so these only localize the label word.
+/// Bare resource nouns for the redesigned HUD cards, which show the label and
+/// the number as two separate lines (see `theme::res_card`). The `hud_*`
+/// formatters below still return "name value" on one line — the compact
+/// mobile row and tooltips keep using those.
+pub fn res_name_wood(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Yog'och",
+        Lang::En => "Wood",
+        Lang::Ru => "Дерево",
+    }
+}
+
+pub fn res_name_coal(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Ko'mir",
+        Lang::En => "Coal",
+        Lang::Ru => "Уголь",
+    }
+}
+
+pub fn res_name_food(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Oziq",
+        Lang::En => "Food",
+        Lang::Ru => "Еда",
+    }
+}
+
+pub fn res_name_water(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Suv",
+        Lang::En => "Water",
+        Lang::Ru => "Вода",
+    }
+}
+
+pub fn res_name_fur(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Mo'yna",
+        Lang::En => "Fur",
+        Lang::Ru => "Мех",
+    }
+}
+
+pub fn res_name_cloth(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Mato",
+        Lang::En => "Cloth",
+        Lang::Ru => "Ткань",
+    }
+}
+
+pub fn res_name_gold(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Oltin",
+        Lang::En => "Gold",
+        Lang::Ru => "Золото",
+    }
+}
+
+pub fn res_name_pop(l: Lang) -> &'static str {
+    match l {
+        Lang::Uz => "Aholi",
+        Lang::En => "Pop",
+        Lang::Ru => "Насел.",
+    }
+}
+
 pub fn hud_wood(n: i64, l: Lang) -> String {
     match l {
         Lang::Uz => format!("Yog'och {n}"),

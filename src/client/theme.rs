@@ -53,6 +53,9 @@ pub const RES_COAL: Color = Color::srgb(0.620, 0.660, 0.750);
 pub const RES_FOOD: Color = Color::srgb(0.550, 0.820, 0.480);
 pub const RES_WATER: Color = Color::srgb(0.400, 0.680, 0.900);
 pub const RES_GOLD: Color = Color::srgb(0.900, 0.760, 0.300);
+/// Hunting/tailoring chain, surfaced in the HUD from the card redesign on.
+pub const RES_FUR: Color = Color::srgb(0.780, 0.560, 0.400);
+pub const RES_CLOTH: Color = Color::srgb(0.720, 0.560, 0.760);
 
 // ---------- Tipografika va masofa shkalasi ----------
 
@@ -332,6 +335,136 @@ pub fn dot(size: f32, color: Color) -> impl Bundle {
         },
         BackgroundColor(color),
     )
+}
+
+// ---------- HUD kartalari (referens dizayn tili) ----------
+
+/// Yuqori HUD balandligi. Resurs kartalari ikki qatorli (nom + qiymat)
+/// bo'lgani uchun eski 46px satr past qoladi.
+pub const TOPBAR_H: f32 = 62.0;
+
+/// Karta ichidagi kichik yorliq: bosh harflar, siyrak harf oralig'i, xira.
+/// Referensdagi resurs kartalarining "WOOD / COAL / FOOD" qatori.
+pub fn card_label(t: impl Into<String>) -> impl Bundle {
+    (
+        Text::new(t.into().to_uppercase()),
+        TextFont::from_font_size(FS_MICRO - 1.0),
+        TextColor(TEXT_MUTED),
+        TextLayout::new(Justify::Left, LineBreak::NoWrap),
+    )
+}
+
+/// Karta ichidagi asosiy son — yorliqdan sezilarli katta va yorqin.
+/// Ierarxiya aynan shu ikki o'lcham farqidan tug'iladi.
+pub fn card_value(t: impl Into<String>, color: Color) -> impl Bundle {
+    (
+        Text::new(t.into()),
+        TextFont::from_font_size(FS_SECTION),
+        TextColor(color),
+        TextLayout::new(Justify::Left, LineBreak::NoWrap),
+    )
+}
+
+/// Yuqori paneldagi resurs kartasi: chegarali to'q quti, ichida rangli
+/// belgi va nom/qiymat ustuni. [`chip`]dan farqi — u bitta satrli kapsula
+/// edi, bu esa ikki qatorli karta, ya'ni son uzoqdan ham o'qiladi.
+pub fn res_card() -> impl Bundle {
+    (
+        Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(7.0),
+            padding: UiRect::axes(Val::Px(9.0), Val::Px(5.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(6.0)),
+            flex_shrink: 0.0,
+            ..default()
+        },
+        BackgroundColor(BG_SECTION),
+        BorderColor::all(BORDER),
+    )
+}
+
+/// Kartaning chap tomonidagi rangli belgi maydonchasi — yumaloq nuqta
+/// o'rniga kvadrat "ikonka o'rni", referensdagi ikonka bloklariga mos.
+/// Haqiqiy ikonka rasmlari qo'shilganda faqat shu funksiya o'zgaradi.
+/// Deliberately a solid color swatch with no glyph inside. The bundled font
+/// has no emoji coverage (🪵 draws as an empty box), and initials collide
+/// once localized — in Uzbek both Ko'mir and Mato start with M, both Oziq and
+/// Oltin with O. Each resource already owns a distinct hue, and the label sits
+/// right beside it, so the color alone identifies it without ambiguity.
+pub fn icon_badge(color: Color) -> impl Bundle {
+    (
+        Node {
+            width: Val::Px(18.0),
+            height: Val::Px(18.0),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(4.0)),
+            flex_shrink: 0.0,
+            ..default()
+        },
+        BackgroundColor(color.with_alpha(0.85)),
+        BorderColor::all(color),
+    )
+}
+
+/// Ikonka o'rnidagi bitta belgi (hozircha harf/emoji glif). Rangi belgining
+/// o'zi bilan bir xil oilada.
+pub fn icon_glyph(t: impl Into<String>, color: Color) -> impl Bundle {
+    (
+        Text::new(t.into()),
+        TextFont::from_font_size(FS_SMALL),
+        TextColor(color),
+        TextLayout::new(Justify::Center, LineBreak::NoWrap),
+    )
+}
+
+/// Yon paneldagi sarlavha qatori: bosh harflar, amber, siyrak oraliq.
+/// Referensdagi "MISSIYALAR" / "XABARLAR" sarlavhalari.
+pub fn panel_header(t: impl Into<String>) -> impl Bundle {
+    (
+        Text::new(t.into().to_uppercase()),
+        TextFont::from_font_size(FS_SMALL),
+        TextColor(ACCENT_WARM),
+        TextLayout::new(Justify::Left, LineBreak::NoWrap),
+    )
+}
+
+/// Yon panelning tashqi qobig'i (modal emas — ekran chekkasida turadigan
+/// doimiy panel): to'q fon, nozik chegara, yumshoq soya.
+pub fn side_panel() -> impl Bundle {
+    (
+        Node {
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::all(Val::Px(SP_MD)),
+            row_gap: Val::Px(SP_SM),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(RAD_BTN)),
+            ..default()
+        },
+        BackgroundColor(BG_PANEL),
+        BorderColor::all(BORDER),
+        BoxShadow::new(
+            Color::srgba(0.0, 0.0, 0.0, 0.40),
+            Val::Px(0.0),
+            Val::Px(6.0),
+            Val::Px(1.0),
+            Val::Px(18.0),
+        ),
+    )
+}
+
+/// Panel ichidagi "yorliq — qiymat" qatori (chapda xira nom, o'ngda son).
+/// Referensdagi pech panelining "Issiqlik doirasi / 15 tayl" satrlari.
+pub fn stat_row() -> impl Bundle {
+    Node {
+        width: Val::Percent(100.0),
+        flex_direction: FlexDirection::Row,
+        justify_content: JustifyContent::SpaceBetween,
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(SP_SM),
+        ..default()
+    }
 }
 
 /// Gorizontal ko'rsatkich-bar asosi (to'q fon + chegara). To'ldiruvchisi
